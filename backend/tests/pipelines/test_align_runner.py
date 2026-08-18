@@ -518,6 +518,8 @@ class TestBowtie2Command:
                 "maxins": 20000,
                 "orientation": "RF",
                 "dovetail": True,
+                "no_contain": True,
+                "no_overlap": True,
             }
         )
         script = align_cmd(
