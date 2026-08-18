@@ -433,6 +433,15 @@ async def render_report(bundle: ExportBundle, *, owner: str) -> str:
     if root.description:
         lines += [root.description, ""]
 
+    lines += [
+        "## Report artifacts",
+        "",
+        "Discovered report artifacts are listed in `data-manifest.tsv`.",
+        "Included files live under `reports/<category>/<object_id>/`.",
+        "Oversized files may be excluded, and the manifest says which.",
+        "",
+    ]
+
     sub_projects = [p for p in bundle.projects if p.id != root.id]
     if sub_projects:
         lines += ["## Sub-projects", ""]

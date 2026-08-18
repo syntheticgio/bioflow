@@ -701,13 +701,19 @@ class TestExportProject:
 
         with tarfile.open(result.path) as tar:
             readme = tar.extractfile("README.md").read().decode()
+            report_md = tar.extractfile("report.md").read().decode()
             report = tar.extractfile(f"reports/qc/{object_id}/fastp.html").read()
 
         assert "reports/<category>/<object_id>/" in readme
         assert "small enough to include" in readme
         assert "per-file threshold" in readme
+        assert "Discovered report artifacts are listed in `data-manifest.tsv`." in report_md
+        assert "Included files live under `reports/<category>/<object_id>/`." in report_md
+        assert "Oversized files may be excluded, and the manifest says which." in report_md
         assert "not included" not in readme.lower()
         assert "known, deliberate gap" not in readme.lower()
+        assert "not included" not in report_md.lower()
+        assert "known, deliberate gap" not in report_md.lower()
         assert report == b"<html>benign-report</html>"
 
     async def test_manifest_marks_a_disappeared_report_file_unavailable(
