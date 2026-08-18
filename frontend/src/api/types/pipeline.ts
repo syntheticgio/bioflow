@@ -66,6 +66,15 @@ export interface PipelineTool {
   recommendations: Record<string, string>;
 
   /**
+   * Buckets for which this tool is *the* default among several recommended
+   * ones. Auto-select prefers a tool listing the reads' bucket here over one
+   * that is merely recommended, so a family with two recommended tools (QC
+   * short reads: fastp and fastqc) opens on a fixed choice rather than on
+   * whichever the backend's registry happened to list first (#588).
+   */
+  default_for: string[];
+
+  /**
    * How this tool reaches the running stack. "bundled" ships in the backend
    * image; "on_demand" is a pinned OCI image pulled on first use and run as
    * a sibling container (the DeepVariant shape). See

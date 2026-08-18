@@ -1000,6 +1000,22 @@ class ToolMeta:
     # INCOMPATIBLE, and nothing for COMPATIBLE (which is the "works but not
     # first choice" tier).
     recommendations: dict[str, str] = field(default_factory=dict, repr=False)
+    # Buckets for which this tool is *the* default, breaking a tie between
+    # two RECOMMENDED tools in the same picker family.
+    #
+    # Auto-select in PipelineToolSelector.tsx used to take the first
+    # RECOMMENDED tool it found, which made the QC dialog's default depend on
+    # this dict's key order: fastp and fastqc are both genuinely recommended
+    # for short reads (#588). Demoting one to COMPATIBLE would have been a
+    # lie -- run_qc runs both as a pair -- so the tie is broken explicitly
+    # here instead, and the frontend prefers a default_for match over
+    # registry order.
+    #
+    # Only meaningful where a bucket has more than one RECOMMENDED tool;
+    # `test_every_bucket_with_a_tie_names_exactly_one_default` is what
+    # requires it there, so a future second RECOMMENDED entry cannot
+    # reintroduce the order dependence silently.
+    default_for: frozenset[str] = frozenset()
 
 
 TOOL_META: dict[str, ToolMeta] = {
@@ -1036,6 +1052,10 @@ TOOL_META: dict[str, ToolMeta] = {
             "short": RecommendationLevel.RECOMMENDED.value,
             "long": RecommendationLevel.COMPATIBLE.value,
         },
+        # Breaks the short-read tie with fastqc in the QC picker. fastp is
+        # the half of that pair run_qc cannot finish without -- FastQC needs
+        # a JRE and its failure is tolerated -- so it is the honest default.
+        default_for=frozenset({"short"}),
     ),
     "cutadapt": ToolMeta(
         pipelines=(PipelineType.TRIM,),
@@ -2327,6 +2347,7 @@ def tool_with_meta(tool: Tool) -> dict:
             "license": "",
             "usage": "",
             "recommendations": {},
+            "default_for": frozenset(),
             # Same reasoning as `runnable` above: a tool with no entry here
             # has no delivery story either, so it defaults to the same
             # BUNDLED/absent shape `ToolMeta`'s own fields default to.
@@ -2341,6 +2362,9 @@ def tool_with_meta(tool: Tool) -> dict:
         "pipelines": [p.value for p in meta_dict["pipelines"]],
         "strengths": list(meta_dict["strengths"]),
         "delivery": meta_dict["delivery"].value,
+        # Sorted list, not the frozenset: sets are not JSON-serializable, and
+        # a stable order keeps the response byte-identical between calls.
+        "default_for": sorted(meta_dict["default_for"]),
     }
 
 
