@@ -5,6 +5,8 @@ from `spec.fields`, so a knob added to a registry becomes saveable with no
 second edit.
 """
 
+import math
+
 import pytest
 
 from app.models.parameter_set import ParamSpecFamily
@@ -202,6 +204,24 @@ class TestResolveRejectionReasons:
         assert wrong_kind.rejected[0].reason is svc.RejectionReason.WRONG_KIND
         assert out_of_range.applied == {}
         assert out_of_range.rejected[0].reason is svc.RejectionReason.OUT_OF_RANGE
+
+    @pytest.mark.parametrize("value", [math.nan, math.inf, -math.inf])
+    def test_rejects_non_finite_saved_float_values(self, monkeypatch, value):
+        field = ParamField(
+            key="secondary_ratio",
+            label="Secondary ratio",
+            kind="float",
+            default=0.8,
+            help="",
+            min=0.0,
+            max=1.0,
+        )
+        monkeypatch.setattr(svc, "spec_fields", lambda f, t: (field,))
+        resolved = svc.resolve_params(
+            ParamSpecFamily.ALIGNER, "minimap2", {"secondary_ratio": value}
+        )
+        assert resolved.applied == {}
+        assert resolved.rejected[0].reason is svc.RejectionReason.OUT_OF_RANGE
 
 
 class TestResolveDoesNotSanitize:
