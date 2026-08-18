@@ -101,10 +101,12 @@ artifact_type  artifact_id  object_id  category  source_path  archive_path  size
 ```
 
 Blob rows retain their existing identity, state, and digest information. Report
-rows use the report file's digest as their artifact identity and include the
-object/category fields needed to map them back to the source object. All rows
-use `included`, `excluded`, or an explicit `unavailable`/`error` status rather
-than silently disappearing.
+rows use a stable path-based identity of
+`<category>:<object_id>:<relative_path>` and include the report file's digest
+in `sha256`. This keeps identities readable and collision-resistant across
+report roots while retaining content verification. All rows use `included`,
+`excluded`, or an explicit `unavailable`/`error` status rather than silently
+disappearing.
 
 ## Data flow
 
