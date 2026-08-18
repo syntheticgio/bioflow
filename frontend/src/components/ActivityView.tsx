@@ -246,7 +246,7 @@ function GovernorNote({
   load: SystemLoad;
   waiting: number;
 }) {
-  const text = `${load.used_cpu_percent.toFixed(1)}% CPU · ${formatBytes(load.used_memory_bytes)} RAM`;
+  const text = `${load.cpu.percent.toFixed(1)}% CPU · ${formatBytes(load.memory.available_bytes)} RAM`;
   return (
     <span className="governor-note" title={waiting > 0 ? `${waiting} waiting` : undefined}>
       {text}
@@ -292,7 +292,7 @@ function JobRow({
         {onToggleLog && (
           <button className="btn-text" onClick={onToggleLog}>
             {logOpen ? "Hide log" : "Log"}
-         Monochromatic</button>
+          </button>
         )}
       </div>
       {logOpen && <JobLogView jobId={job.id} />}
