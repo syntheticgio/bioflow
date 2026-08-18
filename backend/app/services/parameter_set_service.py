@@ -16,6 +16,7 @@ the spec's decision 6.
 """
 
 from enum import StrEnum
+import math
 from typing import Any
 
 from pydantic import BaseModel
@@ -135,6 +136,11 @@ def _check(field: ParamField, value: Any) -> Rejected | None:
             return Rejected(
                 key=field.key, reason=RejectionReason.WRONG_KIND, value=value,
                 detail=f"{field.label} expects a number",
+            )
+        if not math.isfinite(value):
+            return Rejected(
+                key=field.key, reason=RejectionReason.OUT_OF_RANGE, value=value,
+                detail=f"{field.label} must be a finite number",
             )
         if field.min is not None and value < field.min:
             return Rejected(

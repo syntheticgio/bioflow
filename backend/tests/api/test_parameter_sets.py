@@ -1,5 +1,7 @@
 """The parameter-set API (#414)."""
 
+import math
+
 import pytest
 from beanie import PydanticObjectId
 
@@ -173,6 +175,22 @@ class TestResolve:
         ).json()
         assert body["applied"] == {"secondary_ratio": 0.35}
         assert body["rejected"] == []
+
+    @pytest.mark.parametrize("value", [math.nan, math.inf, -math.inf])
+    async def test_rejects_non_finite_saved_float_values(self, client, two_profiles, value):
+        a_headers = two_profiles["a_headers"]
+        created = (await _create(client, a_headers)).json()
+        await ParameterSet.find_one(
+            ParameterSet.id == PydanticObjectId(created["id"])
+        ).update({"$set": {"params": {"secondary_ratio": value}}})
+        body = (
+            await client.post(
+                f"/api/v1/parameter-sets/{created['id']}/resolve", headers=a_headers
+            )
+        ).json()
+        assert body["applied"] == {}
+        assert body["rejected"][0]["key"] == "secondary_ratio"
+        assert body["rejected"][0]["reason"] == "out_of_range"
 
     async def test_flags_a_drifted_key(self, client, two_profiles):
         a_headers = two_profiles["a_headers"]
