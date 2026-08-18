@@ -1385,6 +1385,8 @@ CONTINUITY_QC_MEM_MB = 16384
 
 VARIANT_CALLING_MEM_MB = 8192
 
+COMPLETENESS_MEM_MB = 8192
+
 
 def refuse_if_over_budget(
     *, declared_mb: int, budget_mb: int, resource_override: bool
@@ -4710,6 +4712,7 @@ async def launch_completeness(
     owner: str,
     lineage: str | None = None,
     odb: str | None = None,
+    resource_override: bool = False,
 ) -> Job:
     """Queue compleasm against one assembly.
 
@@ -4723,6 +4726,15 @@ async def launch_completeness(
     """
     from app.queue import queue
     from app.services import object_service
+
+    # Hoisted above the enqueue for the same reason as launch_assembly: a
+    # declaration the budget can never satisfy is unclaimable, and claim.lua
+    # has no starvation escape (#478, #527).
+    refuse_if_over_budget(
+        declared_mb=COMPLETENESS_MEM_MB,
+        budget_mb=await current_admission_budget_mb(),
+        resource_override=resource_override,
+    )
 
     tool = tools.require(tools.compleasm())
 
@@ -4773,11 +4785,12 @@ async def launch_completeness(
         owner=owner,
         payload=payload,
         job_class=JobClass.COMPUTE,
-        resources=JobResources(cpu=8, mem_mb=8192, io=IoClass.HEAVY),
+        resources=JobResources(cpu=8, mem_mb=COMPLETENESS_MEM_MB, io=IoClass.HEAVY),
         max_attempts=1,
         dedup_key=f"assess_completeness:{obj.id}:{lineage}:{odb}",
         project_id=obj.project_id,
         object_id=obj.id,
+        resource_override=resource_override,
     )
     if job is None:
         raise ConflictError(
