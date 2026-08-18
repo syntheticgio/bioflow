@@ -107,7 +107,18 @@ class SuggestionCard:
     # server: the client cannot reconstruct it after a page reload.
     running: bool = False
 
-    def as_dict(self) -> dict:
+    def as_dict(self, configure_dialog: str | None = None) -> dict:
+        """Render for the API.
+
+        `configure_dialog` comes from `_CONFIGURE_DIALOGS` at assembly time
+        rather than from a field on the card: which dialogs the frontend has
+        is not a fact about this file, and threading it through nineteen
+        builders would make each one remember it. The card stays frozen.
+
+        Emitted as None unless the card can actually launch -- an unavailable
+        card has no body to seed a dialog with, so offering to adjust it would
+        open onto a dead end.
+        """
         return {
             "kind": self.kind,
             "category": self.category,
@@ -118,6 +129,11 @@ class SuggestionCard:
             "reason": self.reason,
             "launch": self.launch,
             "requires_install": self.requires_install,
+            "configure": (
+                {"dialog": configure_dialog}
+                if configure_dialog is not None and self.launch is not None
+                else None
+            ),
             "prior_runs": self.prior_runs,
             "running": self.running,
         }
@@ -1998,6 +2014,35 @@ class _Prefetched:
 # `test_every_builder_is_registered` enforces -- a builder that exists but is
 # not registered is dead code that reads as a working feature, the failure a
 # hand-maintained registry keyed by convention invites.
+# Which settings dialog can configure each kind's run.
+#
+# A card in here renders an "Adjust..." button beside Launch, which opens the
+# named dialog seeded from `launch["body"]` -- the body already holds the
+# reference, tool, and params the dialog would otherwise ask for, so there is
+# no second server-built representation of the same decision to drift from it.
+#
+# Deliberately partial. Only the seven kinds the frontend has a dialog for
+# appear; the other twelve are absent rather than mapped to a placeholder,
+# because a generic parameter form for a pipeline nobody has decided the
+# settings of would ship a surface that can build a body the endpoint refuses.
+# `test_configure_dialogs_cover_only_real_kinds` holds the keys to
+# `CARD_BUILDERS`, so a renamed kind fails loudly instead of silently losing
+# its button.
+#
+# Keyed by kind, valued by dialog name, because the two are not 1:1:
+# "preprocess" opens TrimDialog, and a client-side kind-to-dialog map is the
+# request-shape knowledge `PipelineSuggestions` is deliberately kept without.
+_CONFIGURE_DIALOGS: dict[str, str] = {
+    "preprocess": "trim",
+    "align": "align",
+    "variants": "variant",
+    "quantify": "quantify",
+    "assemble": "assemble",
+    "scaffold": "scaffold",
+    "completeness": "completeness",
+}
+
+
 CARD_BUILDERS: tuple[tuple[str, object], ...] = (
     ("preprocess", lambda obj, ctx: build_preprocess_card(obj)),
     ("align", lambda obj, ctx: build_align_card(obj, ctx.references)),
@@ -2255,7 +2300,7 @@ async def suggestions_for(obj) -> list[dict]:
             )
             continue
         if card is not None:
-            cards.append(card.as_dict())
+            cards.append(card.as_dict(_CONFIGURE_DIALOGS.get(kind)))
 
     # After the builders, not inside them: this is the one part of a card that
     # is a database question rather than a rule about the file.
