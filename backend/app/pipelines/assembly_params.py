@@ -183,7 +183,48 @@ class AbyssParams(BaseAssemblyParams):
         return cls(assembler=Assembler.ABYSS, k=k, **cls._shared(data))
 
 
-_BY_ASSEMBLER = {Assembler.FLYE: FlyeParams, Assembler.ABYSS: AbyssParams}
+# SPAdes' running modes, as BioFlow offers them. `standard` is not a SPAdes
+# flag: it is this dialog's name for passing neither `--isolate` nor
+# `--careful`, which upstream documents as mutually incompatible. Modelled as
+# one select rather than two checkboxes so the UI cannot express the invalid
+# combination.
+SPADES_MODES = frozenset({"isolate", "careful", "standard"})
+
+
+@dataclass
+class SpadesParams(BaseAssemblyParams):
+    """SPAdes parameters.
+
+    No `k` field, deliberately: SPAdes selects k from read length
+    automatically, unlike ABySS. Exposing it invites a hand-set value that is
+    worse than the automatic one.
+
+    No `--frugal` either -- its own documentation says it "affects the
+    assembly results in an unpredictable way".
+    """
+
+    assembler: Assembler = Assembler.SPADES
+    mode: str = "isolate"
+
+    def as_dict(self) -> dict:
+        return {**super().as_dict(), "mode": self.mode}
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "SpadesParams":
+        mode = data.get("mode") or "isolate"
+        if mode not in SPADES_MODES:
+            raise ValidationError(
+                f"Unknown SPAdes mode {mode!r}",
+                details={"valid": sorted(SPADES_MODES)},
+            )
+        return cls(assembler=Assembler.SPADES, mode=mode, **cls._shared(data))
+
+
+_BY_ASSEMBLER = {
+    Assembler.FLYE: FlyeParams,
+    Assembler.ABYSS: AbyssParams,
+    Assembler.SPADES: SpadesParams,
+}
 
 
 def from_dict(data: dict | None) -> BaseAssemblyParams:
