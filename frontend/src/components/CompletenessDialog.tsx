@@ -25,9 +25,18 @@ import { NodeSelector } from "./NodeSelector";
 export function CompletenessDialog({
   object,
   onClose,
+  prefill,
 }: {
   object: DataObject;
   onClose: () => void;
+  /**
+   * A suggestion card's launch body, when the dialog was opened by "Adjust…".
+   *
+   * Seeds the fields the card had already decided, so the dialog opens on
+   * that card's run rather than on the generic defaults. Null when opened
+   * from the Computations row, which is the unchanged path.
+   */
+  prefill?: Record<string, unknown> | null;
 }) {
   const qc = useQueryClient();
   const navigate = useNavigate();
@@ -38,7 +47,12 @@ export function CompletenessDialog({
     retry: false,
   });
 
-  const [lineageOverride, setLineageOverride] = useState<string | null>(null);
+  // Seeding this counts as the user having chosen: `inferred` below is
+  // "untouched and server-inferred", and the card's lineage is a decision
+  // already made, so the dialog should not label it as its own guess.
+  const [lineageOverride, setLineageOverride] = useState<string | null>(
+    () => (prefill?.lineage as string) ?? null,
+  );
   const [targetNode, setTargetNode] = useState("");
   const lineage = lineageOverride ?? defaults?.lineage ?? null;
   const odb = defaults?.odb ?? "odb12";

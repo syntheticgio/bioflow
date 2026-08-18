@@ -35,9 +35,18 @@ const DIVERGENCE_OPTIONS = [
 export function ScaffoldDialog({
   object,
   onClose,
+  prefill,
 }: {
   object: DataObject;
   onClose: () => void;
+  /**
+   * A suggestion card's launch body, when the dialog was opened by "Adjust…".
+   *
+   * Seeds the fields the card had already decided, so the dialog opens on
+   * that card's run rather than on the generic defaults. Null when opened
+   * from the Computations row, which is the unchanged path.
+   */
+  prefill?: Record<string, unknown> | null;
 }) {
   const qc = useQueryClient();
   const navigate = useNavigate();
@@ -47,7 +56,12 @@ export function ScaffoldDialog({
     queryFn: () => api.references(object.project_id),
   });
 
-  const [referenceId, setReferenceId] = useState<string | null>(null);
+  // `reference_object_id`, not `reference_id`: the scaffold endpoint names
+  // both of its objects (`draft_object_id` / `reference_object_id`), unlike
+  // align and variants which key the subject as `object_id` / `bam_id`.
+  const [referenceId, setReferenceId] = useState<string | null>(
+    () => (prefill?.reference_object_id as string) ?? null,
+  );
   const [divergence, setDivergence] = useState<string>("same_species");
   const [targetNode, setTargetNode] = useState("");
 

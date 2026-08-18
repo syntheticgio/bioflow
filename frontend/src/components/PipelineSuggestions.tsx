@@ -76,9 +76,24 @@ function PriorRuns({
 export function PipelineSuggestions({
   objectId,
   projectId,
+  onConfigure,
 }: {
   objectId: string;
   projectId: string;
+  /**
+   * Open a settings dialog seeded with this card's own launch body.
+   *
+   * Both arguments are passed through uninterpreted: the dialog name is the
+   * server's, and the body is the same one Launch would have posted. That is
+   * what keeps this component free of the three launch request shapes -- it
+   * hands the payload on rather than unpacking it. `DetailPanel` owns every
+   * dialog and does the switching.
+   *
+   * Optional so the grid stays renderable by a caller that owns no dialogs;
+   * omitting it drops the Adjust buttons and leaves Launch untouched.
+   * `DetailPanel` is the only caller today and does pass it.
+   */
+  onConfigure?: (dialog: string, body: Record<string, unknown>) => void;
 }) {
   const qc = useQueryClient();
   const [targetNode, setTargetNode] = useState("");
@@ -210,23 +225,48 @@ export function PipelineSuggestions({
             {card.prior_runs.length > 0 && (
               <PriorRuns runs={card.prior_runs} projectId={projectId} />
             )}
-            <button
-              type="button"
-              className={card === firstAvailable ? "btn primary" : "btn"}
-              onClick={() => launch.mutate(card)}
-              // `launch.isPending` covers only the POST, and only for whichever
-              // card is mid-request; `busy` is what keeps this one card greyed
-              // for the life of the job it started.
-              disabled={!runnable || launch.isPending || busy}
-            >
-              {busy
-                ? "Running…"
-                : card.status === "needs_install"
-                  ? "Install and launch"
-                  : card.prior_runs.length > 0
-                    ? "Launch again"
-                    : "Launch"}
-            </button>
+            <div className="suggestion-card-actions">
+              <button
+                type="button"
+                className={card === firstAvailable ? "btn primary" : "btn"}
+                onClick={() => launch.mutate(card)}
+                // `launch.isPending` covers only the POST, and only for whichever
+                // card is mid-request; `busy` is what keeps this one card greyed
+                // for the life of the job it started.
+                disabled={!runnable || launch.isPending || busy}
+              >
+                {busy
+                  ? "Running…"
+                  : card.status === "needs_install"
+                    ? "Install and launch"
+                    : card.prior_runs.length > 0
+                      ? "Launch again"
+                      : "Launch"}
+              </button>
+              {/* Only where the server named a dialog, so a card with nothing
+                  to adjust shows Launch alone rather than a second button that
+                  opens a form with one field. The asymmetry is the honest
+                  rendering: twelve of the nineteen kinds have no dialog.
+
+                  Not disabled by `busy`. A running job is a reason not to
+                  launch a second one, but adjusting settings is how a user
+                  sets up the *next* run -- and the dialog has its own guard
+                  on submit. It is gated on `runnable` for the same reason
+                  Launch is: an unavailable card has no body to seed with. */}
+              {card.configure && onConfigure && (
+                <button
+                  type="button"
+                  className="btn"
+                  onClick={() =>
+                    onConfigure(card.configure!.dialog, card.launch!.body)
+                  }
+                  disabled={!runnable}
+                  title="Open this run's settings before starting it"
+                >
+                  Adjust…
+                </button>
+              )}
+            </div>
           </div>
         );
       })} 

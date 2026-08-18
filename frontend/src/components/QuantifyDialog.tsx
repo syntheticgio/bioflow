@@ -26,9 +26,18 @@ const STRAND_LABELS: Record<Strandedness, string> = {
 export function QuantifyDialog({
   object,
   onClose,
+  prefill,
 }: {
   object: DataObject;
   onClose: () => void;
+  /**
+   * A suggestion card's launch body, when the dialog was opened by "Adjust…".
+   *
+   * Seeds the fields the card had already decided, so the dialog opens on
+   * that card's run rather than on the generic defaults. Null when opened
+   * from the Computations row, which is the unchanged path.
+   */
+  prefill?: Record<string, unknown> | null;
 }) {
   const qc = useQueryClient();
   const navigate = useNavigate();
@@ -38,8 +47,24 @@ export function QuantifyDialog({
     queryFn: () => api.quantifyDefaults(object.id),
   });
 
-  const [annotationId, setAnnotationId] = useState<string | null>(null);
-  const [overrides, setOverrides] = useState<Partial<CountsParams>>({});
+  // The quantify card sends only `bam_id` -- it omits `annotation_id` so the
+  // server can prefer the GTF over the GFF3 of the same assembly. So this is
+  // normally null even with a prefill, and the dialog resolves the annotation
+  // exactly as it does from the Computations row. Read anyway rather than
+  // hardcoded to null, so the card gaining an explicit choice later does not
+  // need a matching edit here to take effect.
+  const [annotationId, setAnnotationId] = useState<string | null>(
+    () => (prefill?.annotation_id as string) ?? null,
+  );
+  // Seeded from the card, not merged after the fact: `params` below layers
+  // overrides onto the server's defaults, so putting the card's values in
+  // as the initial overrides makes the card's run the one the dialog opens
+  // on, with every field still editable. A lazy initializer rather than an
+  // effect -- an effect would repaint the dialog a frame after it mounted,
+  // and several derived values here read `params` synchronously.
+  const [overrides, setOverrides] = useState<Partial<CountsParams>>(
+    () => (prefill?.params as Partial<CountsParams>) ?? {},
+  );
   const [advanced, setAdvanced] = useState(false);
   const [targetNode, setTargetNode] = useState("");
 

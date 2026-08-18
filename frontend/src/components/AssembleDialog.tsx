@@ -48,10 +48,19 @@ export function AssembleDialog({
   object,
   onBack,
   onClose,
+  prefill,
 }: {
   object: DataObject;
   onBack?: () => void;
   onClose: () => void;
+  /**
+   * A suggestion card's launch body, when the dialog was opened by "Adjust…".
+   *
+   * Seeds the fields the card had already decided, so the dialog opens on
+   * that card's run rather than on the generic defaults. Null when opened
+   * from the Computations row, which is the unchanged path.
+   */
+  prefill?: Record<string, unknown> | null;
 }) {
   const qc = useQueryClient();
   const navigate = useNavigate();
@@ -69,7 +78,20 @@ export function AssembleDialog({
     enabled: defaults != null,
   });
 
-  const [overrides, setOverrides] = useState<Partial<AssemblyParams>>({});
+  // The assemble card deliberately sends only `object_id`: genome-size
+  // inference is an async database read and its builders are synchronous, so
+  // `/pipelines/assemble` fills the params in itself. That means a prefill
+  // here is usually empty and the dialog opens on its own defaults -- the
+  // same ones the card would have launched with, by design.
+  // Seeded from the card, not merged after the fact: `params` below layers
+  // overrides onto the server's defaults, so putting the card's values in
+  // as the initial overrides makes the card's run the one the dialog opens
+  // on, with every field still editable. A lazy initializer rather than an
+  // effect -- an effect would repaint the dialog a frame after it mounted,
+  // and several derived values here read `params` synchronously.
+  const [overrides, setOverrides] = useState<Partial<AssemblyParams>>(
+    () => (prefill?.params as Partial<AssemblyParams>) ?? {},
+  );
   const [advanced, setAdvanced] = useState(false);
   // Populated from a 422's `details`. This path is reactive rather than
   // pre-flight: assembly has no envelope endpoint and no client-side mirror

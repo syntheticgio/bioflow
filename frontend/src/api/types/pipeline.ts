@@ -277,6 +277,16 @@ export interface PipelineSuggestion {
   launch: { endpoint: string; body: Record<string, unknown> } | null;
   /** Set only when status is "needs_install": what pressing Launch costs. */
   requires_install: { tool: string; download_bytes: number | null } | null;
+  /**
+   * Which settings dialog can adjust this card's run, when one exists.
+   *
+   * Null for the twelve kinds with no dialog, and for any card that cannot
+   * launch -- there is no body to seed a dialog with. `dialog` is a name
+   * `DetailPanel` switches on, not a component: keeping the kind-to-dialog
+   * mapping server-side is what lets this component stay ignorant of the
+   * launch request shapes, the same reason it posts `launch.body` verbatim.
+   */
+  configure: { dialog: string } | null;
   prior_runs: PriorRun[];
   /**
    * Work this card offers is queued or running right now.
