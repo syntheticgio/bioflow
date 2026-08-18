@@ -12,7 +12,7 @@ from unittest.mock import AsyncMock, patch
 import pytest
 from beanie import PydanticObjectId
 
-from app.errors import ValidationError
+from app.errors import ConflictError, ValidationError
 from app.models import FormatKind, ObjectRole, ObjectStatus
 from app.pipelines import resource_estimator
 from app.services import pipeline_service, resource_limit_service
@@ -186,7 +186,7 @@ async def test_annotate_genome_override_enqueues_with_the_flag(monkeypatch):
             AsyncMock(return_value=("a" * 64, None)),
         ),
     ):
-        with pytest.raises(Exception):
+        with pytest.raises(ConflictError):
             await pipeline_service.launch_annotate_genome(
                 object_id=obj.id, owner="t", resource_override=True
             )
@@ -272,10 +272,14 @@ async def test_polish_override_enqueues_with_the_flag(monkeypatch):
         ),
         patch(
             "app.services.run_service.create_run",
-            AsyncMock(return_value=SimpleNamespace(id="run1", owner="t")),
+            AsyncMock(return_value=SimpleNamespace(id=PydanticObjectId(), owner="t")),
+        ),
+        patch(
+            "app.services.run_service.discard_run",
+            AsyncMock(return_value=None),
         ),
     ):
-        with pytest.raises(Exception):
+        with pytest.raises(ConflictError):
             await pipeline_service.launch_polish(
                 draft_object_id=draft.id,
                 owner="t",
@@ -329,7 +333,7 @@ async def test_qv_qc_override_enqueues_with_the_flag(monkeypatch):
             AsyncMock(return_value=("e" * 64, None)),
         ),
     ):
-        with pytest.raises(Exception):
+        with pytest.raises(ConflictError):
             await pipeline_service.launch_qv_qc(
                 assembly.id,
                 owner="t",
@@ -403,7 +407,7 @@ async def test_continuity_qc_override_enqueues_with_the_flag(monkeypatch):
             AsyncMock(return_value=None),
         ),
     ):
-        with pytest.raises(Exception):
+        with pytest.raises(ConflictError):
             await pipeline_service.launch_continuity_qc(
                 object_id=assembly.id,
                 owner="t",
@@ -482,10 +486,14 @@ async def test_variant_calling_override_enqueues_with_the_flag(monkeypatch):
         ),
         patch(
             "app.services.run_service.create_run",
-            AsyncMock(return_value=SimpleNamespace(id="run1", owner="t")),
+            AsyncMock(return_value=SimpleNamespace(id=PydanticObjectId(), owner="t")),
+        ),
+        patch(
+            "app.services.run_service.discard_run",
+            AsyncMock(return_value=None),
         ),
     ):
-        with pytest.raises(Exception):
+        with pytest.raises(ConflictError):
             await pipeline_service.launch_variant_calling(
                 bam_id=bam.id, owner="t", resource_override=True
             )
@@ -535,7 +543,7 @@ async def test_completeness_override_enqueues_with_the_flag(monkeypatch):
             AsyncMock(return_value=("i" * 64, None)),
         ),
     ):
-        with pytest.raises(Exception):
+        with pytest.raises(ConflictError):
             await pipeline_service.launch_completeness(
                 object_id=obj.id, owner="t", resource_override=True
             )
@@ -586,7 +594,7 @@ async def test_meryl_analysis_override_enqueues_with_the_flag(monkeypatch):
             AsyncMock(return_value=("j" * 64, None)),
         ),
     ):
-        with pytest.raises(Exception):
+        with pytest.raises(ConflictError):
             await pipeline_service.launch_meryl_analysis(
                 object_id=assembly.id,
                 owner="t",
@@ -660,10 +668,14 @@ async def test_consensus_override_enqueues_with_the_flag(monkeypatch):
         ),
         patch(
             "app.services.run_service.create_run",
-            AsyncMock(return_value=SimpleNamespace(id="run1", owner="t")),
+            AsyncMock(return_value=SimpleNamespace(id=PydanticObjectId(), owner="t")),
+        ),
+        patch(
+            "app.services.run_service.discard_run",
+            AsyncMock(return_value=None),
         ),
     ):
-        with pytest.raises(Exception):
+        with pytest.raises(ConflictError):
             await pipeline_service.launch_consensus(
                 bam_object_id=bam.id, owner="t", resource_override=True
             )
@@ -730,10 +742,14 @@ async def test_scaffold_override_enqueues_with_the_flag(monkeypatch):
         ),
         patch(
             "app.services.run_service.create_run",
-            AsyncMock(return_value=SimpleNamespace(id="run1", owner="t")),
+            AsyncMock(return_value=SimpleNamespace(id=PydanticObjectId(), owner="t")),
+        ),
+        patch(
+            "app.services.run_service.discard_run",
+            AsyncMock(return_value=None),
         ),
     ):
-        with pytest.raises(Exception):
+        with pytest.raises(ConflictError):
             await pipeline_service.launch_scaffold(
                 draft_object_id=draft.id,
                 owner="t",
@@ -788,7 +804,7 @@ async def test_misassembly_qc_override_enqueues_with_the_flag(monkeypatch):
             AsyncMock(return_value=("p" * 64, None)),
         ),
     ):
-        with pytest.raises(Exception):
+        with pytest.raises(ConflictError):
             await pipeline_service.launch_misassembly_qc(
                 draft_object_id=draft.id,
                 owner="t",
@@ -843,7 +859,7 @@ async def test_synteny_override_enqueues_with_the_flag(monkeypatch):
             AsyncMock(return_value=("q" * 64, None)),
         ),
     ):
-        with pytest.raises(Exception):
+        with pytest.raises(ConflictError):
             await pipeline_service.launch_synteny(
                 draft_object_id=draft.id,
                 owner="t",
@@ -909,7 +925,7 @@ async def test_assembly_error_qc_override_enqueues_with_the_flag(monkeypatch):
             AsyncMock(return_value=None),
         ),
     ):
-        with pytest.raises(Exception):
+        with pytest.raises(ConflictError):
             await pipeline_service.launch_assembly_error_qc(
                 object_id=assembly.id,
                 owner="t",
@@ -991,10 +1007,14 @@ async def test_quantify_override_enqueues_with_the_flag(monkeypatch):
         ),
         patch(
             "app.services.run_service.create_run",
-            AsyncMock(return_value=SimpleNamespace(id="run1", owner="t")),
+            AsyncMock(return_value=SimpleNamespace(id=PydanticObjectId(), owner="t")),
+        ),
+        patch(
+            "app.services.run_service.discard_run",
+            AsyncMock(return_value=None),
         ),
     ):
-        with pytest.raises(Exception):
+        with pytest.raises(ConflictError):
             await pipeline_service.launch_quantify(
                 bam_id=bam.id, owner="t", resource_override=True
             )
@@ -1059,10 +1079,14 @@ async def test_differential_expression_override_enqueues_with_the_flag(monkeypat
         ),
         patch(
             "app.services.run_service.create_run",
-            AsyncMock(return_value=SimpleNamespace(id="run1", owner="t")),
+            AsyncMock(return_value=SimpleNamespace(id=PydanticObjectId(), owner="t")),
+        ),
+        patch(
+            "app.services.run_service.discard_run",
+            AsyncMock(return_value=None),
         ),
     ):
-        with pytest.raises(Exception):
+        with pytest.raises(ConflictError):
             await pipeline_service.launch_differential_expression(
                 project_id=project_id,
                 owner="t",
