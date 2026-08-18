@@ -540,3 +540,57 @@ async def test_completeness_override_enqueues_with_the_flag(monkeypatch):
                 object_id=obj.id, owner="t", resource_override=True
             )
     assert captured["resource_override"] is True
+
+@pytest.mark.asyncio
+async def test_meryl_analysis_refuses_over_budget(monkeypatch):
+    monkeypatch.setattr(
+        pipeline_service, "current_admission_budget_mb", _budget_of(5600)
+    )
+    with pytest.raises(ValidationError) as excinfo:
+        await pipeline_service.launch_meryl_analysis(
+            object_id=PydanticObjectId(), owner="t", resource_override=False
+        )
+    assert excinfo.value.details["refusal"] == "declared"
+
+
+@pytest.mark.asyncio
+async def test_meryl_analysis_override_enqueues_with_the_flag(monkeypatch):
+    monkeypatch.setattr(
+        pipeline_service, "current_admission_budget_mb", _budget_of(5600)
+    )
+    assembly = _draft_assembly_fixture()
+    reads = _short_read_fixture(assembly.project_id)
+    captured = {}
+
+    async def _fake_enqueue(job_type, **kwargs):
+        captured.update(kwargs)
+        return None
+
+    with (
+        patch("app.queue.queue.enqueue", _fake_enqueue),
+        _no_tool_check(),
+        patch(
+            "app.services.object_service.get_object",
+            AsyncMock(side_effect=[assembly, reads]),
+        ),
+        patch(
+            "app.services.reference_assembly.check_draft_assembly",
+            lambda obj: obj,
+        ),
+        patch(
+            "app.services.pipeline_service._materialize_meryl_cache",
+            AsyncMock(return_value=None),
+        ),
+        patch(
+            "app.services.pipeline_service._resolve_readable",
+            AsyncMock(return_value=("j" * 64, None)),
+        ),
+    ):
+        with pytest.raises(Exception):
+            await pipeline_service.launch_meryl_analysis(
+                object_id=assembly.id,
+                owner="t",
+                read_object_id=reads.id,
+                resource_override=True,
+            )
+    assert captured["resource_override"] is True

@@ -1753,6 +1753,9 @@ class MerylAnalysisRequest(BaseModel):
     # the assembly alone and lets the service auto-pick.
     read_object_id: PydanticObjectId | None = None
     k: int | None = None
+    # "Launch anyway" from the refusal card. Skips the declared-budget refusal
+    # and persists on the job, where claim.lua admits it as sole occupant.
+    resource_override: bool = False
 
 
 @router.post(
@@ -1771,6 +1774,7 @@ async def launch_meryl_analysis_route(
         owner=owner,
         read_object_id=body.read_object_id,
         k=body.k,
+        resource_override=body.resource_override,
     )
     return JobOut.of(job)
 
