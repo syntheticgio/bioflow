@@ -33,7 +33,37 @@ def test_abyss_params_roundtrip_carries_k():
     assert params.as_dict()["assembler"] == "abyss"
 
 
-def test_spades_still_refused_as_not_installed():
-    """SPAdes stays declared-but-unavailable so #519 has somewhere to land."""
-    with pytest.raises(ValidationError, match="not installed in this build"):
-        assembly_params.from_dict({"assembler": "spades"})
+def test_spades_params_now_available():
+    """SPAdes params class now exists, replacing the "not installed" state."""
+    params = assembly_params.from_dict({"assembler": "spades"})
+    assert params.assembler is Assembler.SPADES
+
+
+class TestSpadesParams:
+    def test_defaults_to_isolate(self):
+        params = assembly_params.from_dict({"assembler": "spades"})
+        assert isinstance(params, assembly_params.SpadesParams)
+        assert params.mode == "isolate"
+
+    def test_accepts_the_three_declared_modes(self):
+        for mode in ("isolate", "careful", "standard"):
+            params = assembly_params.from_dict(
+                {"assembler": "spades", "mode": mode}
+            )
+            assert params.mode == mode
+
+    def test_rejects_an_unknown_mode(self):
+        with pytest.raises(ValidationError):
+            assembly_params.from_dict({"assembler": "spades", "mode": "meta"})
+
+    def test_rejects_frugal_which_is_deliberately_not_offered(self):
+        """--frugal's own manual says it changes results unpredictably."""
+        with pytest.raises(ValidationError):
+            assembly_params.from_dict({"assembler": "spades", "mode": "frugal"})
+
+    def test_round_trips_through_as_dict(self):
+        params = assembly_params.from_dict(
+            {"assembler": "spades", "mode": "careful", "threads": 12}
+        )
+        restored = assembly_params.from_dict(params.as_dict())
+        assert restored == params
