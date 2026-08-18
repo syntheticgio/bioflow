@@ -319,6 +319,27 @@ _MANIFEST_HEADER = (
 )
 
 
+def _render_manifest_rows(rows: list[ExportArtifact]) -> str:
+    lines = ["\t".join(_MANIFEST_HEADER)]
+    for artifact in rows:
+        lines.append(
+            "\t".join(
+                (
+                    artifact.artifact_type,
+                    artifact.artifact_id,
+                    artifact.object_id or "",
+                    artifact.category,
+                    artifact.source_path,
+                    artifact.archive_path,
+                    str(artifact.size),
+                    artifact.sha256,
+                    artifact.status,
+                )
+            )
+        )
+    return "\n".join(lines) + "\n"
+
+
 def artifact_rows(bundle: ExportBundle) -> list[ExportArtifact]:
     rows = [
         ExportArtifact(
@@ -347,6 +368,23 @@ def artifact_rows(bundle: ExportBundle) -> list[ExportArtifact]:
     )
 
 
+def _plan_artifacts(
+    bundle: ExportBundle, *, threshold_bytes: int
+) -> tuple[list[ExportArtifact], list[ExportArtifact]]:
+    rows = artifact_rows(bundle)
+    included: list[ExportArtifact] = []
+
+    for artifact in rows:
+        pack = artifact.size <= threshold_bytes and bool(artifact.archive_path)
+        if artifact.artifact_type == "blob":
+            pack = pack and bool(artifact.source_path)
+        artifact.status = "included" if pack else "excluded"
+        if pack:
+            included.append(artifact)
+
+    return rows, included
+
+
 def build_manifest(
     bundle: ExportBundle, *, threshold_bytes: int
 ) -> tuple[str, list[ExportArtifact]]:
@@ -361,32 +399,8 @@ def build_manifest(
     no Docker, and no BioFlow. The recipient is the one person guaranteed
     not to have the app. Same shape as ops/backup.sh's manifest.
     """
-    lines = ["\t".join(_MANIFEST_HEADER)]
-    included: list[ExportArtifact] = []
-
-    for artifact in artifact_rows(bundle):
-        pack = artifact.size <= threshold_bytes and bool(artifact.archive_path)
-        if artifact.artifact_type == "blob":
-            pack = pack and bool(artifact.source_path)
-        if pack:
-            included.append(artifact)
-        lines.append(
-            "\t".join(
-                (
-                    artifact.artifact_type,
-                    artifact.artifact_id,
-                    artifact.object_id or "",
-                    artifact.category,
-                    artifact.source_path,
-                    artifact.archive_path,
-                    str(artifact.size),
-                    artifact.sha256,
-                    "included" if pack else "excluded",
-                )
-            )
-        )
-
-    return "\n".join(lines) + "\n", included
+    rows, included = _plan_artifacts(bundle, threshold_bytes=threshold_bytes)
+    return _render_manifest_rows(rows), included
 
 
 async def render_report(bundle: ExportBundle, *, owner: str) -> str:
@@ -454,6 +468,7 @@ versions and parameters, producing which results.
   are in this archive. Readable with `cut` and `grep`.
 - `metadata/` — the underlying records as JSON.
 - `blobs/` — the bytes of files small enough to include.
+- `reports/` — QC and other sidecar files small enough to include.
 
 ## What it is not
 
@@ -461,13 +476,10 @@ versions and parameters, producing which results.
 check, and cite, not a project you can load. It carries a format version
 and preserves record identity so that an importer remains possible later.
 
-**Report and analysis-artifact directories are not included.** QC reports,
-BAM/VCF stats, and annotation stats directories (`qc_reports_dir`,
-`bam_stats_dir`, `vcf_stats_dir`, `annotation_stats_dir`) live outside the
-blob store, keyed by object id, and this archive does not currently pack
-them -- even though the objects they describe are exported. A recipient may
-see an object without the report that made it easy to read. This is a
-known, deliberate gap for a follow-up, not an oversight.
+**Large files may still be excluded.** `data-manifest.tsv` is the source of
+truth: each blob or report file is marked `included`, `excluded`,
+`unavailable`, or `error`, so the recipient can tell "too large", "gone
+before packing", and "failed while packing" apart from one another.
 
 ## What was removed
 
@@ -491,12 +503,14 @@ def _write_archive(
     *,
     docs: dict[str, list[dict]],
     manifest_json: dict,
-    manifest_tsv: str,
     report: str,
-    included: list[Blob],
+    artifacts: list[ExportArtifact],
+    included: list[ExportArtifact],
 ) -> None:
     """Pack the tarball. Sync, called via asyncio.to_thread."""
     from app.storage.paths import blob_path
+
+    report_roots = {category: getattr(settings, attr) for category, attr in REPORT_ARTIFACT_ROOTS}
 
     def _add_bytes(tar: tarfile.TarFile, name: str, payload: bytes) -> None:
         info = tarfile.TarInfo(name)
@@ -505,26 +519,55 @@ def _write_archive(
 
     dest.parent.mkdir(parents=True, exist_ok=True)
     with tarfile.open(dest, "w:gz") as tar:
-        _add_bytes(tar, "manifest.json",
-                   json.dumps(manifest_json, indent=2).encode())
-        _add_bytes(tar, "data-manifest.tsv", manifest_tsv.encode())
-        _add_bytes(tar, "report.md", report.encode())
-        _add_bytes(tar, "README.md", _README.encode())
         for name, rows in docs.items():
             _add_bytes(tar, f"metadata/{name}.json",
                        json.dumps(rows, indent=2).encode())
-        for blob in included:
-            # blob.id is the sha256 of the STORED bytes and is always set (it
-            # is the primary key); blob.content_sha256 is only set when it
-            # differs from id (the compressed-blob case), so it is None for
-            # the common uncompressed blob. blob_path() resolves by the
-            # digest of the bytes actually on disk, which is always blob.id
-            # -- using content_sha256 here would silently skip packing bytes
-            # for every uncompressed blob even though the manifest lists it
-            # as included.
-            src = blob_path(blob.id)
-            if src.exists():
-                tar.add(src, arcname=f"blobs/{blob.id}")
+        for artifact in included:
+            if artifact.artifact_type == "blob":
+                # blob.id is the sha256 of the STORED bytes and is always set
+                # (it is the primary key); blob_path() resolves by that stored
+                # digest, which is what the archive packs.
+                src = blob_path(artifact.artifact_id)
+            else:
+                root = report_roots.get(artifact.category)
+                if root is None or artifact.object_id is None:
+                    artifact.status = "error"
+                    continue
+                src = root / artifact.object_id / artifact.source_path
+
+            if not src.is_file():
+                artifact.status = "unavailable"
+                continue
+
+            try:
+                tar.add(src, arcname=artifact.archive_path)
+            except OSError:
+                artifact.status = "error"
+
+        included_blob_count = sum(
+            1
+            for artifact in artifacts
+            if artifact.artifact_type == "blob" and artifact.status == "included"
+        )
+        included_report_artifact_count = sum(
+            1
+            for artifact in artifacts
+            if artifact.artifact_type == "report" and artifact.status == "included"
+        )
+        manifest_json = {
+            **manifest_json,
+            "artifact_count": len(artifacts),
+            "report_artifact_count": sum(
+                1 for artifact in artifacts if artifact.artifact_type == "report"
+            ),
+            "included_artifact_count": included_blob_count + included_report_artifact_count,
+            "included_blob_count": included_blob_count,
+            "included_report_artifact_count": included_report_artifact_count,
+        }
+        _add_bytes(tar, "manifest.json", json.dumps(manifest_json, indent=2).encode())
+        _add_bytes(tar, "data-manifest.tsv", _render_manifest_rows(artifacts).encode())
+        _add_bytes(tar, "report.md", report.encode())
+        _add_bytes(tar, "README.md", _README.encode())
 
 
 async def export_project(
@@ -536,17 +579,8 @@ async def export_project(
     """Produce one archive for a project and its descendants."""
     bundle = await collect(project_id, owner=owner)
     docs, redaction = redact(bundle)
-    artifacts = artifact_rows(bundle)
-    manifest_tsv, included = build_manifest(bundle, threshold_bytes=threshold_bytes)
+    artifacts, included = _plan_artifacts(bundle, threshold_bytes=threshold_bytes)
     report = await render_report(bundle, owner=owner)
-    included_blobs = [
-        blob
-        for blob in bundle.blobs
-        if any(
-            artifact.artifact_type == "blob" and artifact.artifact_id == str(blob.id)
-            for artifact in included
-        )
-    ]
 
     stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
     dest = settings.exports_dir / f"{owner}__{bundle.root.slug}-{stamp}.tar.gz"
@@ -559,13 +593,6 @@ async def export_project(
         "project_count": len(bundle.projects),
         "counts": {name: len(rows) for name, rows in docs.items()},
         "blob_count": len(bundle.blobs),
-        "included_blob_count": len(included_blobs),
-        "artifact_count": len(artifacts),
-        "report_artifact_count": len(bundle.report_artifacts),
-        "included_artifact_count": len(included),
-        "included_report_artifact_count": sum(
-            1 for artifact in included if artifact.artifact_type == "report"
-        ),
         "blob_threshold_bytes": threshold_bytes,
         "redaction_profile": redaction.profile,
     }
@@ -575,15 +602,21 @@ async def export_project(
         dest,
         docs=docs,
         manifest_json=manifest_json,
-        manifest_tsv=manifest_tsv,
         report=report,
-        included=included_blobs,
+        artifacts=artifacts,
+        included=included,
+    )
+
+    included_blob_count = sum(
+        1
+        for artifact in artifacts
+        if artifact.artifact_type == "blob" and artifact.status == "included"
     )
 
     return ExportResult(
         path=dest,
         size_bytes=dest.stat().st_size,
         blob_count=len(bundle.blobs),
-        included_blob_count=len(included_blobs),
+        included_blob_count=included_blob_count,
         redaction=redaction,
     )

@@ -9,8 +9,16 @@ from beanie import PydanticObjectId
 from app.config import settings
 from app.models import Blob, BlobState, JobRunTiming, RunKind, SourceInfo, SourceMode
 from app.models.timing import RunMachine
+from app.storage.paths import blob_path
 from app.services import export_service, run_service
 from tests.services.helpers import TEST_OWNER, make_blob, make_object, make_project
+
+
+def _manifest_rows_from_tar(path: Path) -> dict[str, list[str]]:
+    with tarfile.open(path) as tar:
+        manifest_tsv = tar.extractfile("data-manifest.tsv").read().decode()
+    rows = [line.split("\t") for line in manifest_tsv.strip().splitlines()]
+    return {row[1]: row for row in rows[1:]}
 
 
 def test_exports_dir_is_under_bioinfo_home():
@@ -589,15 +597,19 @@ class TestExportProject:
 
     async def test_manifest_json_counts_typed_artifacts(self, report_roots):
         project = await make_project("export-archive-artifact-counts")
-        small_digest = "f" * 64
+        small_payload = b"@small\nACGT\n+\n!!!!\n"
+        small_digest = hashlib.sha256(small_payload).hexdigest()
         large_digest = "0" * 64
         await make_blob(small_digest)
         await make_blob(large_digest)
         small_blob = await Blob.get(small_digest)
         large_blob = await Blob.get(large_digest)
-        small_blob.size = 100
+        small_blob.size = len(small_payload)
         small_blob.rel_path = "reads/small.fastq.gz"
         await small_blob.save()
+        small_blob_src = blob_path(small_digest)
+        small_blob_src.parent.mkdir(parents=True, exist_ok=True)
+        small_blob_src.write_bytes(small_payload)
         large_blob.size = 2_000
         large_blob.rel_path = "reads/large.fastq.gz"
         await large_blob.save()
@@ -627,6 +639,111 @@ class TestExportProject:
         assert manifest["included_artifact_count"] == 2
         assert manifest["included_report_artifact_count"] == 1
         assert manifest["blob_threshold_bytes"] == 1_000
+
+    async def test_archive_packs_small_report_files_and_leaves_large_ones_manifest_only(
+        self, report_roots
+    ):
+        project = await make_project("export-archive-report-members")
+        blob_payload = b"@read\nACGT\n+\n!!!!\n"
+        blob_digest = hashlib.sha256(blob_payload).hexdigest()
+        await make_blob(blob_digest)
+        blob = await Blob.get(blob_digest)
+        blob.size = len(blob_payload)
+        blob.rel_path = "reads/sample.fastq.gz"
+        await blob.save()
+        blob_src = blob_path(blob_digest)
+        blob_src.parent.mkdir(parents=True, exist_ok=True)
+        blob_src.write_bytes(blob_payload)
+        obj = await make_object(project, "sample.fastq.gz", digest=blob_digest)
+        object_id = str(obj.id)
+
+        small_report = report_roots["qc_reports_dir"] / object_id / "fastp.html"
+        large_report = report_roots["qc_reports_dir"] / object_id / "multiqc.html"
+        small_report.parent.mkdir(parents=True, exist_ok=True)
+        small_report.write_bytes(b"<html>small-report</html>")
+        large_report.write_bytes(b"x" * 2_000)
+
+        result = await export_service.export_project(
+            project.id, owner=TEST_OWNER, threshold_bytes=1_000
+        )
+
+        with tarfile.open(result.path) as tar:
+            names = set(tar.getnames())
+            manifest_json = json.loads(tar.extractfile("manifest.json").read())
+
+        assert f"blobs/{blob_digest}" in names
+        assert f"reports/qc/{object_id}/fastp.html" in names
+        assert f"reports/qc/{object_id}/multiqc.html" not in names
+        assert manifest_json["bioflow_export_version"] == 2
+        assert manifest_json["artifact_count"] == 3
+        assert manifest_json["report_artifact_count"] == 2
+        assert manifest_json["included_artifact_count"] == 2
+        assert manifest_json["included_report_artifact_count"] == 1
+
+        rows = _manifest_rows_from_tar(result.path)
+        assert rows[blob_digest][-1] == "included"
+        assert rows[f"qc:{object_id}:fastp.html"][-1] == "included"
+        assert rows[f"qc:{object_id}:multiqc.html"][-1] == "excluded"
+
+    async def test_manifest_marks_a_disappeared_report_file_unavailable(
+        self, monkeypatch, report_roots
+    ):
+        project = await make_project("export-archive-report-unavailable")
+        obj = await make_object(project, "sample.fastq.gz")
+        object_id = str(obj.id)
+        report_path = report_roots["qc_reports_dir"] / object_id / "fastp.html"
+        report_path.parent.mkdir(parents=True, exist_ok=True)
+        report_path.write_bytes(b"<html>gone-before-pack</html>")
+
+        real_collect = export_service.collect_report_artifacts
+
+        def collect_then_remove(objects):
+            artifacts = real_collect(objects)
+            report_path.unlink()
+            return artifacts
+
+        monkeypatch.setattr(export_service, "collect_report_artifacts", collect_then_remove)
+
+        result = await export_service.export_project(
+            project.id, owner=TEST_OWNER, threshold_bytes=1_000
+        )
+
+        with tarfile.open(result.path) as tar:
+            names = set(tar.getnames())
+
+        assert f"reports/qc/{object_id}/fastp.html" not in names
+        rows = _manifest_rows_from_tar(result.path)
+        assert rows[f"qc:{object_id}:fastp.html"][-1] == "unavailable"
+
+    async def test_manifest_marks_report_pack_failures_as_error(
+        self, monkeypatch, report_roots
+    ):
+        project = await make_project("export-archive-report-error")
+        obj = await make_object(project, "sample.fastq.gz")
+        object_id = str(obj.id)
+        report_path = report_roots["qc_reports_dir"] / object_id / "fastp.html"
+        report_path.parent.mkdir(parents=True, exist_ok=True)
+        report_path.write_bytes(b"<html>error-while-packing</html>")
+
+        real_add = tarfile.TarFile.add
+
+        def fail_one_add(self, name, arcname=None, recursive=True, *, filter=None):
+            if arcname == f"reports/qc/{object_id}/fastp.html":
+                raise OSError("simulated pack failure")
+            return real_add(self, name, arcname=arcname, recursive=recursive, filter=filter)
+
+        monkeypatch.setattr(tarfile.TarFile, "add", fail_one_add)
+
+        result = await export_service.export_project(
+            project.id, owner=TEST_OWNER, threshold_bytes=1_000
+        )
+
+        with tarfile.open(result.path) as tar:
+            names = set(tar.getnames())
+
+        assert f"reports/qc/{object_id}/fastp.html" not in names
+        rows = _manifest_rows_from_tar(result.path)
+        assert rows[f"qc:{object_id}:fastp.html"][-1] == "error"
 
     async def test_objectids_are_preserved_for_a_future_importer(self):
         project = await make_project("export-archive-objectids")
