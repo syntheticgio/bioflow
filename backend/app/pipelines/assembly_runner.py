@@ -19,7 +19,12 @@ from pathlib import Path
 from app.logging import get_logger
 from app.pipelines import assembler_registry
 from app.pipelines.assemblers import Assembler, OutputKind
-from app.pipelines.assembly_params import AbyssParams, BaseAssemblyParams, FlyeParams
+from app.pipelines.assembly_params import (
+    AbyssParams,
+    BaseAssemblyParams,
+    FlyeParams,
+    SpadesParams,
+)
 
 log = get_logger(__name__)
 
@@ -27,6 +32,12 @@ log = get_logger(__name__)
 # estimate still needs a number. 200M is small enough to be safe anywhere and
 # large enough to assemble a bacterial genome.
 MIN_BLOOM_MB = 200
+
+# SPAdes' `-m` is a hard ceiling in gigabytes: it terminates on reaching it,
+# and its own default is 250GB. A run with no estimate must still get a real
+# number, or it inherits that default and dies deep into a run on a
+# workstation rather than never starting.
+MIN_SPADES_MEMORY_GB = 4
 
 
 def build_assembly_command(
@@ -53,6 +64,16 @@ def build_assembly_command(
     if assembler is Assembler.ABYSS:
         assert isinstance(params, AbyssParams)
         return _abyss_command(
+            tool_path=tool_path,
+            reads=reads,
+            out_dir=out_dir,
+            params=params,
+            mate=mate,
+            memory_bytes=memory_bytes,
+        )
+    if assembler is Assembler.SPADES:
+        assert isinstance(params, SpadesParams)
+        return _spades_command(
             tool_path=tool_path,
             reads=reads,
             out_dir=out_dir,
@@ -115,6 +136,39 @@ def _abyss_command(
         cmd.append(f"in={reads} {mate}")
     else:
         cmd.append(f"se={reads}")
+    return cmd
+
+
+def _spades_command(
+    *,
+    tool_path: str,
+    reads: Path,
+    out_dir: Path,
+    params: SpadesParams,
+    mate: Path | None,
+    memory_bytes: int | None,
+) -> list[str]:
+    """`spades.py` takes conventional flags, unlike abyss-pe's Make variables.
+
+    `-m` is the one that matters: it is a ceiling SPAdes enforces by
+    terminating, not a hint, so it is always passed and always floored.
+    """
+    memory_gb = MIN_SPADES_MEMORY_GB
+    if memory_bytes:
+        memory_gb = max(MIN_SPADES_MEMORY_GB, int(memory_bytes / (1024**3)))
+
+    cmd = [tool_path, "-o", str(out_dir), "-t", str(params.threads), "-m", str(memory_gb)]
+
+    # `standard` is BioFlow's name for neither flag; SPAdes has no such option.
+    if params.mode == "isolate":
+        cmd.append("--isolate")
+    elif params.mode == "careful":
+        cmd.append("--careful")
+
+    if mate is not None:
+        cmd += ["-1", str(reads), "-2", str(mate)]
+    else:
+        cmd += ["-s", str(reads)]
     return cmd
 
 
