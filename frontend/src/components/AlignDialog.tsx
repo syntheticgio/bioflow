@@ -8,6 +8,7 @@ import { NodeSelector } from "./NodeSelector";
 import { ParameterSetPicker } from "./ParameterSetPicker";
 import { ResourceRefusalCard } from "./ResourceRefusalCard";
 import { isReads } from "./PairEditor";
+import { supersededBySelection } from "../lib/pairing";
 import { classify, estimateMb, explain } from "../lib/estimate";
 import { formatBytes } from "../lib/format";
 import { notify } from "../stores/messageStore";
@@ -129,6 +130,10 @@ export function AlignDialog({
     [],
   );
   const [addingSet, setAddingSet] = useState(false);
+  // Reveals the raw reads held back because a trimmed file derived from them
+  // is already in this launch. Off by default: the common case is that the
+  // trimmed version is the one wanted, and listing both reads as duplicates.
+  const [showSuperseded, setShowSuperseded] = useState(false);
   const [setError, setSetError] = useState<string | null>(null);
 
   // `selectedTool` wins over both the server default and the advanced
@@ -182,13 +187,23 @@ export function AlignDialog({
   ]
     .filter((o) => o.locality === "remote")
     .map((o) => ({ name: o.name, size: o.size }));
-  const eligible = allObjects.filter(
+  // The raw parents of files already added here. Offering these reads as the
+  // dialog listing files you have already selected, because a trimmed file and
+  // the raw it came from carry the same sample name (#564) -- so they are held
+  // back behind `showSuperseded` rather than listed by default.
+  const supersededIds = supersededBySelection(usedIds, allObjects);
+  const selectable = allObjects.filter(
     (o) =>
       o.format.kind === "fastq" &&
       o.status === "ready" &&
       isReads(o) &&
       !usedIds.has(o.id),
   );
+  const eligible = selectable.filter((o) => !supersededIds.has(o.id));
+  // Valid choices in every respect except that something derived from them is
+  // already in this launch. Revealed by the checkbox below, for the case where
+  // the raw reads are wanted in place of the trimmed ones.
+  const supersededEligible = selectable.filter((o) => supersededIds.has(o.id));
   // A paired run needs every set to have a mate; the backend refuses a
   // mateless set at launch. Surfaced here so the Launch button is not what
   // reveals it.
@@ -538,18 +553,36 @@ export function AlignDialog({
             {objectsLoading ? (
               <div className="trim-mate-note">Looking for other read files…</div>
             ) : (
-              <select
-                value=""
-                disabled={addingSet}
-                onChange={(e) => void addSet(e.target.value)}
-              >
-                <option value="">Add another read file…</option>
-                {eligible.map((o) => (
-                  <option key={o.id} value={o.id}>
-                    {o.name}
-                  </option>
-                ))}
-              </select>
+              <>
+                <select
+                  value=""
+                  disabled={addingSet}
+                  onChange={(e) => void addSet(e.target.value)}
+                >
+                  <option value="">Add another read file…</option>
+                  {eligible.map((o) => (
+                    <option key={o.id} value={o.id}>
+                      {o.name}
+                    </option>
+                  ))}
+                  {showSuperseded &&
+                    supersededEligible.map((o) => (
+                      <option key={o.id} value={o.id}>
+                        {o.name} (raw)
+                      </option>
+                    ))}
+                </select>
+                {supersededEligible.length > 0 && (
+                  <label className="trim-check">
+                    <input
+                      type="checkbox"
+                      checked={showSuperseded}
+                      onChange={(e) => setShowSuperseded(e.target.checked)}
+                    />
+                    <span>Show raw versions of reads already added</span>
+                  </label>
+                )}
+              </>
             )}
             {setError && (
               <div className="error-box" style={{ marginTop: 8 }}>
