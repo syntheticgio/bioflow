@@ -1,11 +1,12 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { Link } from "react-router-dom";
-import { api } from "../api/client";
+import { api, ApiRequestError } from "../api/client";
 import { formatBytes } from "../lib/format";
 import { notify } from "../stores/messageStore";
-import type { PipelineSuggestion, PriorRun } from "../api/types";
+import type { PipelineSuggestion, PriorRun, ResourceRefusalDetails } from "../api/types";
 import { NodeSelector } from "./NodeSelector";
+import { ResourceRefusalCard } from "./ResourceRefusalCard";
 
 /** When this grid last launched a given card. See `launched`. */
 interface LaunchedJob {
@@ -128,6 +129,11 @@ export function PipelineSuggestions({
   // Keyed by `kind`, which is what the grid keys its cards by.
   const [launched, setLaunched] = useState<Record<string, LaunchedJob>>({});
 
+  // Keyed by `kind` for the same reason `launched` is: the grid keys its
+  // cards by it, so a refusal renders under the card that caused it rather
+  // than at the top of the grid.
+  const [refusals, setRefusals] = useState<Record<string, ResourceRefusalDetails>>({});
+
   const launch = useMutation({
     // The card carries the complete body for its own endpoint. Posting it
     // verbatim is what keeps this component ignorant of the three launch
@@ -141,6 +147,38 @@ export function PipelineSuggestions({
       // themselves are stale the moment one runs.
       qc.invalidateQueries({ queryKey: ["suggestions", objectId] });
       notify.success("Queued");
+    },
+    onError: (e: Error, card) => {
+      if (e instanceof ApiRequestError && "refusal" in e.details) {
+        setRefusals((m) => ({
+          ...m,
+          [card.kind]: e.details as unknown as ResourceRefusalDetails,
+        }));
+        return;
+      }
+      notify.error(e.message);
+    },
+  });
+
+  // Re-posts the card's own body, so this component stays ignorant of the
+  // fourteen request shapes -- the same reason `launch` does.
+  const launchAnyway = useMutation({
+    mutationFn: (card: PipelineSuggestion) =>
+      api.launchSuggestion(
+        card.launch!.endpoint,
+        { ...card.launch!.body, resource_override: true },
+        targetNode || undefined,
+      ),
+    onSuccess: (_job, card) => {
+      setRefusals((m) => {
+        const next = { ...m };
+        delete next[card.kind];
+        return next;
+      });
+      setLaunched((m) => ({ ...m, [card.kind]: { at: Date.now() } }));
+      qc.invalidateQueries({ queryKey: ["jobs"] });
+      qc.invalidateQueries({ queryKey: ["suggestions", objectId] });
+      notify.success("Queued without the memory check");
     },
     onError: (e: Error) => notify.error(e.message),
   });
@@ -267,9 +305,45 @@ export function PipelineSuggestions({
                 </button>
               )}
             </div>
+            {refusals[card.kind] && (
+              <ResourceRefusalCard
+                estimateMb={refusals[card.kind].estimate_mb}
+                budgetMb={refusals[card.kind].budget_mb}
+                detail={refusals[card.kind].detail}
+                explanation={
+                  `This reserves ${(refusals[card.kind].declared_mb ?? 0).toLocaleString()} MB, ` +
+                  `more than the ${refusals[card.kind].budget_mb.toLocaleString()} MB budget. ` +
+                  `Raise it in Settings, or launch it anyway to run it alone.`
+                }
+                replan={refusals[card.kind].replan ?? null}
+                onCancel={() =>
+                  setRefusals((m) => {
+                    const next = { ...m };
+                    delete next[card.kind];
+                    return next;
+                  })
+                }
+                // A card with no dialog has no parameters to edit, so this
+                // exit is the same as dismissing. Where the server named a
+                // dialog, send the user there instead -- the same handler
+                // the Adjust button uses.
+                onEdit={() =>
+                  card.configure && onConfigure
+                    ? onConfigure(card.configure.dialog, card.launch!.body)
+                    : setRefusals((m) => {
+                        const next = { ...m };
+                        delete next[card.kind];
+                        return next;
+                      })
+                }
+                onLaunchAnyway={() => launchAnyway.mutate(card)}
+                launchAnywayPending={launchAnyway.isPending}
+                onAcceptReplan={() => undefined}
+              />
+            )}
           </div>
         );
-      })} 
+      })}
     </div>
     </>
   );
