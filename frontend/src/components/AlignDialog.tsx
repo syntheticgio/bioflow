@@ -483,6 +483,12 @@ export function AlignDialog({
         key: String(key),
       });
       if (clearPreset) setPresetOverride(BOWTIE2_CUSTOM_PRESET_VALUE);
+      if (value === undefined) {
+        const next = { ...o };
+        delete next[key];
+        if (clearPreset) next.preset = "";
+        return next;
+      }
       return {
         ...o,
         [key]: value,
@@ -833,6 +839,15 @@ export function AlignDialog({
 
         {schema && (
           <div className="trim-fields">
+            {aligner === "minimap2" && (
+              <small className="trim-wide">
+                Leave Minimap2 advanced fields blank, or keep selects at Tool
+                default/None, to use the selected read type&apos;s defaults.
+              </small>
+            )}
+            {/* When a preset is active (not advanced), hide individual biology
+                fields -- the preset sets them. Only show them in advanced mode
+                or when the schema has no presets at all. */}
             <AlignerParamFields
               fields={biologyFields ?? []}
               params={params}

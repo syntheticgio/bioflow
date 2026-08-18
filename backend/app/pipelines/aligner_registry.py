@@ -41,7 +41,7 @@ class ParamField:
 
     key: str
     label: str
-    kind: Literal["int", "bool", "select", "text"]
+    kind: Literal["int", "float", "bool", "select", "text"]
     default: Any
     help: str
     # "filters" is the annotation-export node's group -- fields that select
@@ -375,6 +375,159 @@ REGISTRY: dict[Aligner, AlignerSpec] = {
                     Choice("map-pb", "PacBio (CLR)"),
                     Choice("map-hifi", "PacBio (HiFi/CCS)"),
                     Choice("lr:hq", "Oxford Nanopore (duplex / Q20+)"),
+                ),
+            ),
+            ParamField(
+                key="kmer_size",
+                label="K-mer size (-k)",
+                kind="int",
+                default=None,
+                min=1,
+                max=28,
+                group="biology",
+                help=(
+                    "Leave blank to keep the selected preset's seed size. "
+                    "Smaller k-mers increase sensitivity; larger ones reduce "
+                    "spurious seeds."
+                ),
+            ),
+            ParamField(
+                key="window_size",
+                label="Window size (-w)",
+                kind="int",
+                default=None,
+                min=1,
+                max=255,
+                group="biology",
+                help=(
+                    "Leave blank to keep the selected preset's minimizer "
+                    "density. Smaller windows sample more seeds; larger "
+                    "windows are faster but less sensitive."
+                ),
+            ),
+            ParamField(
+                key="min_chain_score",
+                label="Minimum chain score (-m)",
+                kind="int",
+                default=None,
+                min=1,
+                group="biology",
+                help=(
+                    "Leave blank to keep the selected preset's weak-chain "
+                    "filter. Raise it to drop marginal hits; lower it to "
+                    "keep weaker alignments."
+                ),
+            ),
+            ParamField(
+                key="max_gap",
+                label="Maximum minimizer gap (-g)",
+                kind="int",
+                default=None,
+                min=1,
+                group="biology",
+                help=(
+                    "Leave blank to keep the selected preset's chaining gap "
+                    "limit. Larger values bridge bigger gaps; smaller values "
+                    "make chaining stricter."
+                ),
+            ),
+            ParamField(
+                key="secondary_ratio",
+                label="Secondary alignment ratio (-p)",
+                kind="float",
+                default=None,
+                min=0,
+                max=1,
+                group="biology",
+                help=(
+                    "Leave blank to keep the selected preset's threshold for "
+                    "reporting secondary hits. Lower values report more "
+                    "secondary alignments when they are enabled."
+                ),
+            ),
+            ParamField(
+                key="max_secondary",
+                label="Maximum secondary alignments (-N)",
+                kind="int",
+                default=None,
+                min=1,
+                group="biology",
+                help=(
+                    "Leave blank to keep the selected preset's cap on "
+                    "secondary hits. This matters only when secondary "
+                    "alignments are enabled."
+                ),
+            ),
+            ParamField(
+                key="secondary_mode",
+                label="Secondary alignment mode (--secondary)",
+                kind="select",
+                default=align_params.MINIMAP2_SECONDARY_MODE_DEFAULT,
+                group="performance",
+                help=(
+                    "Tool default leaves Minimap2's preset behavior "
+                    "unchanged. Enable or disable secondary alignments "
+                    "explicitly when downstream tools need it."
+                ),
+                choices=(
+                    Choice(
+                        align_params.MINIMAP2_SECONDARY_MODE_DEFAULT,
+                        "Tool default",
+                    ),
+                    Choice("enabled", "Enabled"),
+                    Choice("disabled", "Disabled"),
+                ),
+            ),
+            ParamField(
+                key="batch_size",
+                label="Batch size (-K)",
+                kind="int",
+                default=None,
+                min=1,
+                group="performance",
+                help=(
+                    "Leave blank to keep the selected preset's reads-per-"
+                    "batch setting. Larger batches can improve throughput at "
+                    "the cost of more memory."
+                ),
+            ),
+            ParamField(
+                key="soft_clip_supplementary",
+                label="Soft-clip supplementary alignments (-Y)",
+                kind="bool",
+                default=None,
+                group="performance",
+                help=(
+                    "Unchecked leaves the selected preset unchanged. Check to "
+                    "emit soft-clipped supplementary alignments instead of "
+                    "hard-clipped ones."
+                ),
+            ),
+            ParamField(
+                key="cs_mode",
+                label="cs tag output (--cs)",
+                kind="select",
+                default=align_params.MINIMAP2_CS_MODE_DEFAULT,
+                group="performance",
+                help=(
+                    "None leaves cs tags off. Short and long emit the Minimap2 "
+                    "difference tag in its compact or expanded form."
+                ),
+                choices=(
+                    Choice(align_params.MINIMAP2_CS_MODE_DEFAULT, "None"),
+                    Choice("short", "Short"),
+                    Choice("long", "Long"),
+                ),
+            ),
+            ParamField(
+                key="emit_md",
+                label="MD tag output (--MD)",
+                kind="bool",
+                default=None,
+                group="performance",
+                help=(
+                    "Unchecked leaves the selected preset unchanged. Check to "
+                    "emit MD tags for downstream tools that expect them."
                 ),
             ),
             *_SHARED_FIELDS,
