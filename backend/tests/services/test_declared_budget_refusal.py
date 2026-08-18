@@ -6,11 +6,44 @@ timeout -- so it waits forever. These tests pin the refusal that replaces
 that wait.
 """
 
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, patch
+
 import pytest
+from beanie import PydanticObjectId
 
 from app.errors import ValidationError
+from app.models import FormatKind, ObjectStatus
 from app.pipelines import resource_estimator
 from app.services import pipeline_service, resource_limit_service
+
+
+def _budget_of(mb: int):
+    """A stand-in for current_admission_budget_mb, which reads the database."""
+
+    async def _budget() -> int:
+        return mb
+
+    return _budget
+
+
+def _annotate_genome_fixture():
+    """A ready, bacterial-FASTA assembly, shaped like launch_annotate_genome
+    expects to get past its own validation (organism, format, readability)
+    before the enqueue call.
+    """
+    return SimpleNamespace(
+        id=PydanticObjectId(),
+        name="assembly.fasta",
+        format=SimpleNamespace(kind=FormatKind.FASTA),
+        status=ObjectStatus.READY,
+        role=None,
+        metadata={"organism": "Escherichia coli"},
+        facts={},
+        blob_sha256="a" * 64,
+        project_id=PydanticObjectId(),
+        owner="t",
+    )
 
 
 def test_over_budget_declaration_raises():
@@ -101,3 +134,51 @@ def test_declared_refusal_is_tagged_for_the_frontend():
     assert excinfo.value.details["refusal"] == "declared"
     assert excinfo.value.details["declared_mb"] == 16384
     assert excinfo.value.details["budget_mb"] == 5600
+
+
+@pytest.mark.asyncio
+async def test_annotate_genome_refuses_over_budget(monkeypatch):
+    """R1: the issue's headline case -- 16384 MB against a smaller budget."""
+    monkeypatch.setattr(
+        pipeline_service, "current_admission_budget_mb", _budget_of(5600)
+    )
+    with pytest.raises(ValidationError) as excinfo:
+        await pipeline_service.launch_annotate_genome(
+            object_id=PydanticObjectId(), owner="t", resource_override=False
+        )
+    assert excinfo.value.details["refusal"] == "declared"
+
+
+@pytest.mark.asyncio
+async def test_annotate_genome_override_enqueues_with_the_flag(monkeypatch):
+    """R2: 'Launch anyway' reaches the job, where claim.lua reads it."""
+    monkeypatch.setattr(
+        pipeline_service, "current_admission_budget_mb", _budget_of(5600)
+    )
+    obj = _annotate_genome_fixture()
+    captured = {}
+
+    async def _fake_enqueue(job_type, **kwargs):
+        captured.update(kwargs)
+        return None  # the launcher raises ConflictError; we only need the call
+
+    # bakta isn't installed in the test image, and the real object lookup
+    # hits an empty DB -- both are unrelated to the budget check, so they're
+    # stubbed out to let the launcher actually reach the (patched) enqueue.
+    with (
+        patch("app.queue.queue.enqueue", _fake_enqueue),
+        patch.object(pipeline_service.tools, "require", lambda tool: tool),
+        patch(
+            "app.services.object_service.get_object",
+            AsyncMock(return_value=obj),
+        ),
+        patch(
+            "app.services.pipeline_service._resolve_readable",
+            AsyncMock(return_value=("a" * 64, None)),
+        ),
+    ):
+        with pytest.raises(Exception):
+            await pipeline_service.launch_annotate_genome(
+                object_id=obj.id, owner="t", resource_override=True
+            )
+    assert captured["resource_override"] is True

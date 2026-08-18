@@ -1793,6 +1793,9 @@ async def launch_assembly_continuity_route(
 
 class AnnotateGenomeRequest(BaseModel):
     object_id: PydanticObjectId
+    # "Launch anyway" from the refusal card. Skips the declared-budget refusal
+    # and persists on the job, where claim.lua admits it as sole occupant.
+    resource_override: bool = False
 
 
 @router.post("/annotate-genome", response_model=JobOut, status_code=status.HTTP_201_CREATED)
@@ -1807,6 +1810,7 @@ async def launch_annotate_genome_route(
     job = await pipeline_service.launch_annotate_genome(
         object_id=body.object_id,
         owner=owner,
+        resource_override=body.resource_override,
     )
     return JobOut.of(job)
 
