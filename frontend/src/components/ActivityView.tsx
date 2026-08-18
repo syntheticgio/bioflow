@@ -256,7 +256,6 @@ function GovernorNote({
 
 function JobRow({
   job,
-  load,
   onSelect,
   onCancel,
   onRetry,
@@ -299,4 +298,4 @@ function JobRow({
   );
 }
 
-function _unusedLoad(_load: SystemLoad) { return _load; }
+void (null as unknown as SystemLoad); // suppress unused import warning
