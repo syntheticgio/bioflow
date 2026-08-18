@@ -1387,6 +1387,8 @@ VARIANT_CALLING_MEM_MB = 8192
 
 COMPLETENESS_MEM_MB = 8192
 
+MERYL_ANALYSIS_MEM_MB = 8192
+
 
 def refuse_if_over_budget(
     *, declared_mb: int, budget_mb: int, resource_override: bool
@@ -4875,6 +4877,7 @@ async def launch_meryl_analysis(
     owner: str,
     read_object_id: PydanticObjectId | None = None,
     k: int | None = None,
+    resource_override: bool = False,
 ) -> Job:
     """Queue meryl k-mer spectra and repeat-density analysis.
 
@@ -4889,6 +4892,15 @@ async def launch_meryl_analysis(
     """
     from app.queue import queue
     from app.services import object_service, reference_assembly
+
+    # Hoisted above the enqueue for the same reason as launch_assembly: a
+    # declaration the budget can never satisfy is unclaimable, and claim.lua
+    # has no starvation escape (#478, #527).
+    refuse_if_over_budget(
+        declared_mb=MERYL_ANALYSIS_MEM_MB,
+        budget_mb=await current_admission_budget_mb(),
+        resource_override=resource_override,
+    )
 
     tools.require(tools.meryl())
 
@@ -4997,11 +5009,12 @@ async def launch_meryl_analysis(
         owner=owner,
         payload=payload,
         job_class=JobClass.COMPUTE,
-        resources=JobResources(cpu=4, mem_mb=8192, io=IoClass.HEAVY),
+        resources=JobResources(cpu=4, mem_mb=MERYL_ANALYSIS_MEM_MB, io=IoClass.HEAVY),
         max_attempts=1,
         dedup_key=f"analyze_meryl_tracks:{assembly.id}",
         project_id=assembly.project_id,
         object_id=assembly.id,
+        resource_override=resource_override,
     )
     if job is None:
         raise ConflictError(
