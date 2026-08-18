@@ -1,10 +1,17 @@
 """`ops/backup.sh`: the backup, restore, and verify subcommands.
 
-Split by what each test needs. Everything here except the round-trip test is
-pure shell logic -- sourced functions, tmp_path fixtures, no Docker -- so it
-runs in the `backend-smoke` CI job alongside the other ops tests. The
-round-trip test needs a real Mongo and carries the `docker` marker; see the
-note above it.
+Split by what each test needs, in three layers:
+
+1. Pure shell logic -- sourced functions, tmp_path fixtures, no Docker.
+2. Locale-pinned execution of `verify`, which runs the real subcommand
+   without a Mongo. This layer exists because #492 found that layer 1 sources
+   only the preamble above the dispatch `case`, so nothing *inside* a
+   subcommand was executed by any test that runs in CI.
+3. The round trip, which needs a real Mongo and is skipped without Docker.
+
+Layers 1 and 2 run wherever pytest does. Layer 3 skips when no Docker daemon
+is reachable; whether that includes CI depends on the runner, not on
+anything in this repo -- see the note above `docker_required`.
 """
 
 import json
@@ -184,14 +191,23 @@ def test_verify_is_silent_when_everything_is_present(tmp_path):
     assert result.stdout.strip() == ""
 
 
-def test_no_bare_expansion_is_glued_to_an_ellipsis():
+def test_no_bare_expansion_is_glued_to_a_non_ascii_character():
     """`log "$dir…"` is a crash, not a cosmetic issue.
 
-    Under a UTF-8 LC_CTYPE -- which is what pytest's own subprocess env has --
-    bash reads the "…" bytes as identifier characters, so "$dir…" expands
-    ${dir…} and `set -u` kills the script. It cost a broken `restore` and a
-    broken `verify` that no pure-logic test could see, because sourcing the
-    preamble never reaches those lines. Brace the expansion: "${dir}…".
+    Under a UTF-8 LC_CTYPE, bash reads the bytes of a multibyte character as
+    identifier continuation characters, so "$dir…" expands ${dir…} and
+    `set -u` kills the script. It cost a broken `restore` and a broken
+    `verify` that no pure-logic test could see, because sourcing the preamble
+    never reaches those lines. Brace the expansion: "${dir}…".
+
+    The rule is any non-ASCII character, not the ellipsis specifically. An
+    em-dash, an arrow, or a curly quote pasted into a log line fails the same
+    way, and the original form of this test matched "…" alone -- which would
+    have passed every one of them.
+
+    Note this cannot be delegated to shellcheck: shellcheck reports the buggy
+    line clean (verified against 0.11.0), because the expansion is valid
+    syntax whose meaning depends on the runtime locale.
     """
     offenders = [
         (n, line)
@@ -199,9 +215,120 @@ def test_no_bare_expansion_is_glued_to_an_ellipsis():
         # Comments are prose; the note explaining this rule spells the bad
         # form out on purpose.
         if not line.lstrip().startswith("#")
-        and re.search(r"\$[A-Za-z_][A-Za-z_0-9]*…", line)
+        and re.search(r"\$[A-Za-z_][A-Za-z_0-9]*[^\x00-\x7f]", line)
     ]
-    assert not offenders, f"unbraced expansion before an ellipsis: {offenders}"
+    assert not offenders, f"unbraced expansion before a non-ASCII character: {offenders}"
+
+
+# --- locale-pinned execution ----------------------------------------------
+#
+# The gap the ellipsis bug lived in: every test above sources the preamble and
+# never *executes* cmd_restore or cmd_verify, and the round-trip tests below
+# need Docker. So the lines where the bug actually was ran in no CI test.
+#
+# Reaching them without a Mongo takes some care, because both sit late in
+# their subcommand:
+#
+#   cmd_restore  preflight -> version check -> confirmation -> MONGO probe
+#                -> line 346 -> mongorestore
+#   cmd_verify   preflight -> data-root check -> line 389
+#
+# So a test that passes a bogus directory dies at the preflight and proves
+# nothing -- which is exactly what the first version of these tests did, and
+# it passed against a deliberately re-broken script. Each test below builds a
+# backup directory complete enough to get past every guard, and asserts on
+# the message the script emits *at* the line under test.
+
+UTF8_ENV = {
+    "PATH": os.environ.get("PATH", "/usr/bin:/bin:/usr/local/bin"),
+    "LC_ALL": "en_US.UTF-8",
+    "LANG": "en_US.UTF-8",
+}
+
+
+def make_backup_dir(tmp_path: Path, version: str = "unknown") -> Path:
+    """A directory complete enough to satisfy preflight_backup_dir."""
+    d = tmp_path / "backup"
+    (d / "dump").mkdir(parents=True)
+    (d / "dump" / "biopipe.archive").write_bytes(b"")
+    (d / "manifest.json").write_text(
+        json.dumps(
+            {
+                "version": version,
+                "database": "biopipe",
+                "blob_count": 0,
+                "collection_counts": {},
+            },
+            indent=2,
+        )
+    )
+    (d / "data-manifest.tsv").write_text(
+        "blob_id\tsize\tpath\tcontent_sha256\tstate\n"
+    )
+    (d / "providers.txt").write_text("(none)\n")
+    (d / "RESTORE.md").write_text("# Restoring this backup\n")
+    return d
+
+
+def run_utf8(args: list[str], tmp_path: Path, **extra_env) -> subprocess.CompletedProcess:
+    """Runs a subcommand under the locale that breaks an unbraced expansion.
+
+    MONGO_CONTAINER is pinned at a name that cannot exist, so this can never
+    reach the running stack however the guards are later reordered. That is
+    also what stops cmd_restore before it runs mongorestore -- but only after
+    it has crossed the line under test.
+    """
+    env = {
+        **UTF8_ENV,
+        "MONGO_CONTAINER": f"bioflow-nonexistent-{uuid.uuid4().hex[:8]}",
+        "BACKUP_DIR": str(tmp_path / "backups"),
+        **extra_env,
+    }
+    # errors="replace", not text=True: the bug under test makes bash write a
+    # mangled variable name that is not valid UTF-8, and a strict decode turns
+    # this test's finding into a UnicodeDecodeError traceback instead.
+    return subprocess.run(
+        [str(SCRIPT), *args],
+        capture_output=True,
+        env=env,
+        cwd=tmp_path,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+    )
+
+
+def test_verify_reaches_its_log_line_under_a_utf8_locale(tmp_path):
+    """cmd_verify's `${data_root}…` line, executed rather than pattern-matched.
+
+    An unbound-variable crash says so on stderr and never prints "Checking",
+    so the two outcomes are distinguishable.
+    """
+    backup = make_backup_dir(tmp_path)
+    data_root = tmp_path / "data"
+    data_root.mkdir()
+
+    result = run_utf8(["verify", str(backup)], tmp_path, BIOINFO_HOME=str(data_root))
+
+    assert "unbound variable" not in result.stderr, result.stderr
+    assert "Checking" in result.stderr, result.stderr
+    assert result.returncode == 0, result.stderr
+
+
+# cmd_restore has no equivalent execution test, deliberately. Its
+# `${dir}…` line sits *after* an unconditional `docker exec ... || die` Mongo
+# probe, so no fixture reaches it without a real container -- which is why the
+# original bug survived in the first place. The round-trip tests below cover
+# it when Docker is present; the static test above is what covers it in CI.
+
+
+@pytest.mark.parametrize("subcommand", ["restore", "verify"])
+def test_subcommand_requires_a_directory_argument(subcommand, tmp_path):
+    """The zero-argument path through the while-loop, under the same locale."""
+    result = run_utf8([subcommand], tmp_path)
+
+    assert "unbound variable" not in result.stderr, result.stderr
+    assert "usage:" in result.stderr, result.stderr
 
 
 # --- the round trip -------------------------------------------------------
@@ -211,10 +338,14 @@ def test_no_bare_expansion_is_glued_to_an_ellipsis():
 # so every invocation goes through run_script(), which pins MONGO_CONTAINER
 # to the scratch_mongo fixture's own throwaway container.
 
-# The round-trip needs a real Mongo. The backend-smoke CI job that runs
-# ops/tests has no Docker service and its Mongo `services:` block is still
-# commented out (build-check.yml:184-190), so this skips there and runs
-# locally. The skip names its reason rather than passing quietly.
+# The round-trip needs a real Mongo, which this fixture starts itself with
+# `docker run mongo:7` -- so the gate is a reachable Docker daemon, nothing
+# more. It is NOT the commented-out `services:` block in build-check.yml:
+# that belongs to the `backend-full-test` job, which ops/tests has never run
+# in, and enabling it would not affect these tests. #492 originally read the
+# skip the other way round; correcting that is why this note is long.
+#
+# The skip names its reason rather than passing quietly.
 docker_required = pytest.mark.skipif(
     shutil.which("docker") is None
     or subprocess.run(["docker", "info"], capture_output=True).returncode != 0,
