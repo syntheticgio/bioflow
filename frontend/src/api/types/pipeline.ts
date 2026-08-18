@@ -121,7 +121,7 @@ export interface DataSources {
 export interface ParamFieldMeta {
   key: string;
   label: string;
-  kind: "int" | "bool" | "select" | "text";
+  kind: "int" | "float" | "bool" | "select" | "text";
   default: unknown;
   help: string;
   group: "biology" | "performance" | "filters";

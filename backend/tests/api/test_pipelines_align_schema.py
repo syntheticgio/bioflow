@@ -48,6 +48,83 @@ class TestSchemaEndpoint:
         for f in resp.json()["fields"]:
             assert f["help"].strip()
 
+    def test_minimap2_schema_includes_curated_fields(self, client):
+        resp = client.get("/pipelines/aligners/minimap2/schema")
+        fields = {f["key"]: f for f in resp.json()["fields"]}
+        assert set(fields) >= {
+            "preset",
+            "kmer_size",
+            "window_size",
+            "min_chain_score",
+            "max_gap",
+            "secondary_ratio",
+            "max_secondary",
+            "secondary_mode",
+            "batch_size",
+            "soft_clip_supplementary",
+            "cs_mode",
+            "emit_md",
+        }
+        assert fields["preset"]["kind"] == "select"
+        assert fields["preset"]["group"] == "biology"
+        assert fields["kmer_size"]["kind"] == "int"
+        assert fields["kmer_size"]["group"] == "biology"
+        assert fields["kmer_size"]["min"] == 1
+        assert fields["kmer_size"]["max"] == 28
+        assert fields["window_size"]["kind"] == "int"
+        assert fields["window_size"]["group"] == "biology"
+        assert fields["window_size"]["min"] == 1
+        assert fields["window_size"]["max"] == 255
+        assert fields["min_chain_score"]["kind"] == "int"
+        assert fields["min_chain_score"]["group"] == "biology"
+        assert fields["min_chain_score"]["min"] == 1
+        assert fields["max_gap"]["kind"] == "int"
+        assert fields["max_gap"]["group"] == "biology"
+        assert fields["max_gap"]["min"] == 1
+        assert fields["secondary_ratio"]["kind"] == "float"
+        assert fields["secondary_ratio"]["group"] == "biology"
+        assert fields["secondary_ratio"]["min"] == 0
+        assert fields["secondary_ratio"]["max"] == 1
+        assert fields["max_secondary"]["kind"] == "int"
+        assert fields["max_secondary"]["group"] == "biology"
+        assert fields["max_secondary"]["min"] == 1
+        assert fields["secondary_mode"]["kind"] == "select"
+        assert fields["secondary_mode"]["group"] == "performance"
+        assert [c["value"] for c in fields["secondary_mode"]["choices"]] == [
+            "default",
+            "enabled",
+            "disabled",
+        ]
+        assert fields["batch_size"]["kind"] == "int"
+        assert fields["batch_size"]["group"] == "performance"
+        assert fields["batch_size"]["min"] == 1
+        assert fields["soft_clip_supplementary"]["kind"] == "bool"
+        assert fields["soft_clip_supplementary"]["group"] == "performance"
+        assert fields["cs_mode"]["kind"] == "select"
+        assert fields["cs_mode"]["group"] == "performance"
+        assert [c["value"] for c in fields["cs_mode"]["choices"]] == [
+            "none",
+            "short",
+            "long",
+        ]
+        assert fields["emit_md"]["kind"] == "bool"
+        assert fields["emit_md"]["group"] == "performance"
+        for key in (
+            "preset",
+            "kmer_size",
+            "window_size",
+            "min_chain_score",
+            "max_gap",
+            "secondary_ratio",
+            "max_secondary",
+            "secondary_mode",
+            "batch_size",
+            "soft_clip_supplementary",
+            "cs_mode",
+            "emit_md",
+        ):
+            assert fields[key]["help"].strip()
+
     def test_an_unknown_aligner_is_a_client_error(self, client):
         resp = client.get("/pipelines/aligners/not-real/schema")
         assert resp.status_code == 404

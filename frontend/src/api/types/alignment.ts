@@ -32,6 +32,16 @@ export interface AlignParams {
   // what the backend actually accepts, at the cost of losing autocomplete
   // for the minimap2/winnowmap literals.
   preset?: AlignPreset | string;
+  kmer_size?: number;
+  window_size?: number;
+  min_chain_score?: number;
+  max_gap?: number;
+  secondary_ratio?: number;
+  max_secondary?: number;
+  secondary_mode?: "enabled" | "disabled";
+  soft_clip_supplementary?: boolean;
+  cs_mode?: "short" | "long";
+  emit_md?: boolean;
   sensitivity?: string;
   local?: boolean;
   minins?: number;

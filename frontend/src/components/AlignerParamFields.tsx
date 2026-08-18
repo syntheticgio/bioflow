@@ -21,7 +21,19 @@ export function AlignerParamFields({
   return (
     <>
       {fields.map((f) => {
-        const value = (params as Record<string, unknown>)[f.key] ?? f.default;
+        const hasValue = Object.prototype.hasOwnProperty.call(params, f.key);
+        const value = hasValue
+          ? (params as Record<string, unknown>)[f.key]
+          : f.default;
+        const isOptionalToggle = f.kind === "bool" && f.default == null;
+        const isOptionalNumeric =
+          (f.kind === "int" || f.kind === "float") && f.default == null;
+        const optionalSentinel =
+          f.kind === "select" &&
+          typeof f.default === "string" &&
+          f.choices.some((c) => c.value === f.default)
+            ? f.default
+            : null;
 
         if (f.kind === "bool") {
           return (
@@ -29,7 +41,14 @@ export function AlignerParamFields({
               <input
                 type="checkbox"
                 checked={Boolean(value)}
-                onChange={(e) => onChange(f.key, e.target.checked)}
+                onChange={(e) =>
+                  onChange(
+                    f.key,
+                    isOptionalToggle
+                      ? (e.target.checked ? true : undefined)
+                      : e.target.checked,
+                  )
+                }
               />
               <span>
                 {f.label}
@@ -45,7 +64,15 @@ export function AlignerParamFields({
               <span>{f.label}</span>
               <select
                 value={String(value ?? "")}
-                onChange={(e) => onChange(f.key, e.target.value)}
+                onChange={(e) =>
+                  onChange(
+                    f.key,
+                    optionalSentinel !== null &&
+                      e.target.value === optionalSentinel
+                      ? undefined
+                      : e.target.value,
+                  )
+                }
               >
                 {f.choices.map((c) => (
                   <option key={c.value} value={c.value}>
@@ -62,16 +89,23 @@ export function AlignerParamFields({
           <label key={f.key}>
             <span>{f.label}</span>
             <input
-              type={f.kind === "int" ? "number" : "text"}
+              type={f.kind === "int" || f.kind === "float" ? "number" : "text"}
+              {...(f.kind === "float" ? { step: "any" } : {})}
               {...(f.min != null ? { min: f.min } : {})}
               {...(f.max != null ? { max: f.max } : {})}
               value={String(value ?? "")}
-              onChange={(e) =>
-                onChange(
-                  f.key,
-                  f.kind === "int" ? Number(e.target.value) : e.target.value,
-                )
-              }
+              onChange={(e) => {
+                if (f.kind === "int" || f.kind === "float") {
+                  const next = e.target.value;
+                  if (isOptionalNumeric && next === "") {
+                    onChange(f.key, undefined);
+                    return;
+                  }
+                  onChange(f.key, Number(next));
+                  return;
+                }
+                onChange(f.key, e.target.value);
+              }}
             />
             <small>{f.help}</small>
           </label>
