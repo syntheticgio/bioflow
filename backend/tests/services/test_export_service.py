@@ -18,7 +18,7 @@ def test_exports_dir_is_under_bioinfo_home():
 
 
 def test_export_format_constants():
-    assert export_service.BIOFLOW_EXPORT_VERSION == 1
+    assert export_service.BIOFLOW_EXPORT_VERSION == 2
     assert export_service.DEFAULT_BLOB_THRESHOLD_BYTES == 100 * 1024 * 1024
 
 
@@ -345,22 +345,139 @@ def test_manifest_lists_excluded_blobs_as_excluded():
     tsv, included = export_service.build_manifest(bundle, threshold_bytes=1_000)
 
     rows = [line.split("\t") for line in tsv.strip().splitlines()[1:]]
-    by_size = {r[1]: r for r in rows}
+    by_size = {r[6]: r for r in rows}
     assert by_size["100"][-1] == "included"
     assert by_size["10000"][-1] == "excluded"
-    assert [b.id for b in included] == [small.id]
+    assert [artifact.artifact_id for artifact in included] == [small.id]
+
+
+def test_manifest_normalizes_mixed_artifacts_and_sorts_them_deterministically():
+    small_blob = Blob(
+        id="a" * 64,
+        size=100,
+        state=BlobState.PRESENT,
+        rel_path="reads/small.fastq.gz",
+        content_sha256="1" * 64,
+    )
+    threshold_blob = Blob(
+        id="b" * 64,
+        size=1_000,
+        state=BlobState.PRESENT,
+        rel_path="reads/boundary.fastq.gz",
+        content_sha256="2" * 64,
+    )
+    excluded_blob = Blob(
+        id="c" * 64,
+        size=1_001,
+        state=BlobState.PRESENT,
+        rel_path="reads/large.fastq.gz",
+        content_sha256="3" * 64,
+    )
+    report_small = export_service.ExportArtifact(
+        artifact_type="report",
+        artifact_id="qc:obj-2:fastp.html",
+        object_id="obj-2",
+        category="qc",
+        source_path="fastp.html",
+        archive_path="reports/qc/obj-2/fastp.html",
+        size=200,
+        sha256="4" * 64,
+    )
+    report_large = export_service.ExportArtifact(
+        artifact_type="report",
+        artifact_id="annotation_stats:obj-1:features.db",
+        object_id="obj-1",
+        category="annotation_stats",
+        source_path="features.db",
+        archive_path="reports/annotation_stats/obj-1/features.db",
+        size=1_001,
+        sha256="5" * 64,
+    )
+    bundle = export_service.ExportBundle(
+        blobs=[excluded_blob, threshold_blob, small_blob],
+        report_artifacts=[report_small, report_large],
+    )
+
+    tsv, included = export_service.build_manifest(bundle, threshold_bytes=1_000)
+
+    rows = [line.split("\t") for line in tsv.strip().splitlines()[1:]]
+    assert rows == [
+        [
+            "blob",
+            "a" * 64,
+            "",
+            "",
+            "reads/small.fastq.gz",
+            "blobs/" + ("a" * 64),
+            "100",
+            "1" * 64,
+            "included",
+        ],
+        [
+            "blob",
+            "b" * 64,
+            "",
+            "",
+            "reads/boundary.fastq.gz",
+            "blobs/" + ("b" * 64),
+            "1000",
+            "2" * 64,
+            "included",
+        ],
+        [
+            "blob",
+            "c" * 64,
+            "",
+            "",
+            "reads/large.fastq.gz",
+            "blobs/" + ("c" * 64),
+            "1001",
+            "3" * 64,
+            "excluded",
+        ],
+        [
+            "report",
+            "annotation_stats:obj-1:features.db",
+            "obj-1",
+            "annotation_stats",
+            "features.db",
+            "reports/annotation_stats/obj-1/features.db",
+            "1001",
+            "5" * 64,
+            "excluded",
+        ],
+        [
+            "report",
+            "qc:obj-2:fastp.html",
+            "obj-2",
+            "qc",
+            "fastp.html",
+            "reports/qc/obj-2/fastp.html",
+            "200",
+            "4" * 64,
+            "included",
+        ],
+    ]
+    assert [(artifact.artifact_type, artifact.artifact_id) for artifact in included] == [
+        ("blob", "a" * 64),
+        ("blob", "b" * 64),
+        ("report", "qc:obj-2:fastp.html"),
+    ]
 
 
 def test_manifest_has_a_header_row():
     bundle = export_service.ExportBundle(blobs=[])
     tsv, included = export_service.build_manifest(bundle, threshold_bytes=1_000)
     assert tsv.splitlines()[0].split("\t") == [
-        "blob_id",
+        "artifact_type",
+        "artifact_id",
+        "object_id",
+        "category",
+        "source_path",
+        "archive_path",
         "size",
-        "content_sha256",
-        "state",
-        "rel_path",
-        "bytes",
+        "sha256",
+        "status",
     ]
     assert included == []
 
@@ -377,7 +494,7 @@ def test_manifest_falls_back_to_id_when_content_sha256_is_unset():
     tsv, _ = export_service.build_manifest(bundle, threshold_bytes=1_000)
 
     row = tsv.strip().splitlines()[1].split("\t")
-    assert row[2] == "c" * 64
+    assert row[7] == "c" * 64
 
 
 @pytest.mark.usefixtures("beanie_models")
@@ -469,6 +586,47 @@ class TestExportProject:
             manifest = json.loads(tar.extractfile("manifest.json").read())
         assert manifest["bioflow_export_version"] == export_service.BIOFLOW_EXPORT_VERSION
         assert manifest["redaction_profile"] == "secrets+paths+machine"
+
+    async def test_manifest_json_counts_typed_artifacts(self, report_roots):
+        project = await make_project("export-archive-artifact-counts")
+        small_digest = "f" * 64
+        large_digest = "0" * 64
+        await make_blob(small_digest)
+        await make_blob(large_digest)
+        small_blob = await Blob.get(small_digest)
+        large_blob = await Blob.get(large_digest)
+        small_blob.size = 100
+        small_blob.rel_path = "reads/small.fastq.gz"
+        await small_blob.save()
+        large_blob.size = 2_000
+        large_blob.rel_path = "reads/large.fastq.gz"
+        await large_blob.save()
+        await make_object(project, "small.fastq.gz", digest=small_digest)
+        await make_object(project, "large.fastq.gz", digest=large_digest)
+
+        object_id = str((await export_service.collect(project.id, owner=TEST_OWNER)).objects[0].id)
+        (report_roots["qc_reports_dir"] / object_id / "fastp.html").parent.mkdir(
+            parents=True, exist_ok=True
+        )
+        (report_roots["qc_reports_dir"] / object_id / "fastp.html").write_bytes(b"small-report")
+        (report_roots["qc_reports_dir"] / object_id / "multiqc.html").write_bytes(
+            b"x" * 2_000
+        )
+
+        result = await export_service.export_project(
+            project.id, owner=TEST_OWNER, threshold_bytes=1_000
+        )
+
+        with tarfile.open(result.path) as tar:
+            manifest = json.loads(tar.extractfile("manifest.json").read())
+
+        assert manifest["blob_count"] == 2
+        assert manifest["included_blob_count"] == 1
+        assert manifest["artifact_count"] == 4
+        assert manifest["report_artifact_count"] == 2
+        assert manifest["included_artifact_count"] == 2
+        assert manifest["included_report_artifact_count"] == 1
+        assert manifest["blob_threshold_bytes"] == 1_000
 
     async def test_objectids_are_preserved_for_a_future_importer(self):
         project = await make_project("export-archive-objectids")
