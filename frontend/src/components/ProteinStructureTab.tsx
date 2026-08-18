@@ -25,7 +25,7 @@ function PlddtLegend() {
       <span style={{ color: "#0055ff" }}>██ Very high (90+)</span>{" "}
       <span style={{ color: "#66ccff" }}>██ Confident (70-90)</span>{" "}
       <span style={{ color: "#ffff00" }}>██ Low (50-70)</span>{" "}
-      <span style={{ color: "#ff6600" }}>██ Very low (<50)</span>
+      <span style={{ color: "#ff6600" }}>██ Very low ({'<'}50)</span>
     </div>
   );
 }

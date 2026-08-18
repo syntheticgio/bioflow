@@ -64,11 +64,10 @@ from app.services import (
     provenance_walker,
     timing_service,
 )
+from app.queue import queue
 from app.services.ai import Completion
 from app.storage.paths import blob_path, validate_sha256
 from app.storage.sequence_reader import read_protein_sequence
-
-from app.queue import queue
 
 router = APIRouter(prefix="/objects", tags=["objects"])
 log = get_logger(__name__)
