@@ -187,7 +187,7 @@ def _optional_int(
     maximum: int | None = None,
 ) -> int | None:
     value = data.get(key)
-    if value in (None, "", "default", "none"):
+    if value in (None, ""):
         return None
     value = int(value)
     if value < minimum:
@@ -205,7 +205,7 @@ def _optional_float(
     maximum: float,
 ) -> float | None:
     value = data.get(key)
-    if value in (None, "", "default", "none"):
+    if value in (None, ""):
         return None
     value = float(value)
     if value < minimum or value > maximum:
