@@ -273,6 +273,7 @@ class TestSerialization:
             "deepvariant",
             "flye",
             "abyss",
+            "spades",
             "miniprot",
             "compleasm",
             "fasterq-dump",
