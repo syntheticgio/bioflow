@@ -402,9 +402,25 @@ class TestMerylCacheMaterialization:
         async def _list_sidecars(object_id, *, owner):
             return members
 
-        with patch(
-            "app.services.object_service.list_sidecars",
-            AsyncMock(side_effect=_list_sidecars),
+        async def _resolve(obj):
+            return obj.blob_sha256, None
+
+        # _resolve_readable is patched so the expected-count refusal is the
+        # only reason this can return None. Without the patch, the real
+        # _resolve_readable fails on these stub members and the function
+        # returns None for that unrelated reason -- verified by mutation:
+        # with the expected-count check deleted outright, this test still
+        # passed until the patch made the guard the thing actually under
+        # test.
+        with (
+            patch(
+                "app.services.object_service.list_sidecars",
+                AsyncMock(side_effect=_list_sidecars),
+            ),
+            patch(
+                "app.services.pipeline_service._resolve_readable",
+                AsyncMock(side_effect=_resolve),
+            ),
         ):
             result = await pipeline_service._materialize_meryl_cache(
                 reads, 21, owner="local"
