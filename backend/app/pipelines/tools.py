@@ -847,6 +847,7 @@ def all_tools() -> list[Tool]:
         deepvariant(),
         flye(),
         abyss(),
+        spades(),
         miniprot(),
         compleasm(),
         ivar(),
@@ -2363,6 +2364,7 @@ def reset_cache() -> None:
     deepvariant.cache_clear()
     flye.cache_clear()
     abyss.cache_clear()
+    spades.cache_clear()
     miniprot.cache_clear()
     compleasm.cache_clear()
     ivar.cache_clear()
