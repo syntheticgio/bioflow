@@ -293,7 +293,11 @@ class TestMinimap2:
         with pytest.raises(ValidationError):
             align_params.from_dict({"aligner": "minimap2", "kmer_size": 0})
         with pytest.raises(ValidationError):
+            align_params.from_dict({"aligner": "minimap2", "kmer_size": 29})
+        with pytest.raises(ValidationError):
             align_params.from_dict({"aligner": "minimap2", "window_size": 0})
+        with pytest.raises(ValidationError):
+            align_params.from_dict({"aligner": "minimap2", "window_size": 256})
         with pytest.raises(ValidationError):
             align_params.from_dict({"aligner": "minimap2", "min_chain_score": 0})
         with pytest.raises(ValidationError):
