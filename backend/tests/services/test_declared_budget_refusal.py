@@ -490,3 +490,53 @@ async def test_variant_calling_override_enqueues_with_the_flag(monkeypatch):
                 bam_id=bam.id, owner="t", resource_override=True
             )
     assert captured["resource_override"] is True
+
+@pytest.mark.asyncio
+async def test_completeness_refuses_over_budget(monkeypatch):
+    monkeypatch.setattr(
+        pipeline_service, "current_admission_budget_mb", _budget_of(5600)
+    )
+    with pytest.raises(ValidationError) as excinfo:
+        await pipeline_service.launch_completeness(
+            object_id=PydanticObjectId(), owner="t", resource_override=False
+        )
+    assert excinfo.value.details["refusal"] == "declared"
+
+
+@pytest.mark.asyncio
+async def test_completeness_override_enqueues_with_the_flag(monkeypatch):
+    monkeypatch.setattr(
+        pipeline_service, "current_admission_budget_mb", _budget_of(5600)
+    )
+    obj = _annotate_genome_fixture()
+    captured = {}
+
+    async def _fake_enqueue(job_type, **kwargs):
+        captured.update(kwargs)
+        return None
+
+    with (
+        patch("app.queue.queue.enqueue", _fake_enqueue),
+        _no_tool_check(),
+        patch(
+            "app.services.object_service.get_object",
+            AsyncMock(return_value=obj),
+        ),
+        patch(
+            "app.pipelines.lineage_inference.infer_lineage",
+            lambda organism: "bacteria",
+        ),
+        patch(
+            "app.queue.lineage_handlers.lineage_present",
+            lambda *a, **k: True,
+        ),
+        patch(
+            "app.services.pipeline_service._resolve_readable",
+            AsyncMock(return_value=("i" * 64, None)),
+        ),
+    ):
+        with pytest.raises(Exception):
+            await pipeline_service.launch_completeness(
+                object_id=obj.id, owner="t", resource_override=True
+            )
+    assert captured["resource_override"] is True
