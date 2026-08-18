@@ -384,3 +384,16 @@ async def test_fetch_remote_has_an_applier():
     from app.queue.results import _APPLIERS
 
     assert "fetch_remote" in _APPLIERS
+
+
+async def test_ensure_local_tolerates_an_object_without_the_field():
+    """Launch paths are exercised with lightweight stand-ins.
+
+    An object with no `locality` attribute predates offloading and is
+    therefore local. Defaulting rather than raising keeps `ensure_local`
+    chainable from every launch path, which is how it is called.
+    """
+    from types import SimpleNamespace
+
+    stub = SimpleNamespace(id=PydanticObjectId(), name="reads.fastq")
+    assert await pipeline_service.ensure_local(stub, owner=OWNER) is None
