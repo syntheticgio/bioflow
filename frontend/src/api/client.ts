@@ -396,6 +396,11 @@ export const api = {
 
   deleteObject: (id: string) => request<void>(`/objects/${id}`, { method: "DELETE" }),
 
+  /** Release a file's bytes, keeping it listed and re-fetchable. Distinct
+   *  from deleteObject: the object, its facts and its provenance all stay. */
+  offloadObject: (id: string) =>
+    request<DataObject>(`/objects/${id}/offload`, { method: "POST" }),
+
   reingestObject: (id: string) =>
     request<{ object_id: string; job_id: string }>(`/objects/${id}/reingest`, {
       method: "POST",

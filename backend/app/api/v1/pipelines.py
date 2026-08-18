@@ -1854,6 +1854,10 @@ async def list_references(project_id: PydanticObjectId, owner: OwnerDep) -> dict
                 "name": o.name,
                 "size": o.size,
                 "role": o.role.value if o.role else None,
+                # So the dialog can warn that picking this reference means a
+                # download first, rather than surprising the user with a job
+                # that sits waiting on gigabytes of transfer.
+                "locality": o.locality.value,
                 "indexes": await pipeline_service.reference_index_status(o),
             }
             for o in references

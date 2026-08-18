@@ -6,6 +6,20 @@ export type ObjectStatus =
   | "error"
   | "missing";
 
+/** Where a file's bytes are right now. */
+export type Locality = "local" | "remote";
+
+/** The address an offloaded file is fetched back from. */
+export interface RemoteSource {
+  /** An SRA run accession (ERR/SRR/DRR). */
+  accession: string;
+  /** Set only for sources addressed by more than an accession. */
+  component: string | null;
+  /** What the source reported when the bytes were last held, so the UI can
+   *  warn about the size of a re-download before starting one. */
+  size: number;
+}
+
 export interface FormatInfo {
   kind: string;
   compression: string;
@@ -85,6 +99,12 @@ export interface DataObject {
   sidecar_role: SidecarRole | null;
   source: Record<string, unknown>;
   error: { code: string; message: string; at: string } | null;
+  /** Whether the bytes are on this machine. Deliberately separate from
+   *  `status`: an offloaded file stays "ready", so it keeps appearing in the
+   *  reference picker and in Actions suggestions. Only its content is gone. */
+  locality: Locality;
+  /** Where an offloaded file can be fetched back from. Null while local. */
+  remote_source: RemoteSource | null;
   created_at: string;
   updated_at: string;
 }

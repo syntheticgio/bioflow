@@ -654,6 +654,22 @@ function FileRow({
             <span>{formatKindLabel(object.format.kind)}</span>
           )}
           {object.status !== "ready" && <span>{object.status}</span>}
+          {/* Computed, not stored: a file that came from NCBI and still has
+              its bytes is Local + NCBI, and shows only NCBI once offloaded.
+              Keyed off locality rather than status, which stays "ready" for
+              an offloaded file by design. */}
+          {object.locality === "remote" && (
+            <span
+              className="remote-badge"
+              title={
+                object.remote_source
+                  ? `Stored remotely -- fetched from ${object.remote_source.accession} when needed`
+                  : "Stored remotely"
+              }
+            >
+              NCBI
+            </span>
+          )}
         </div>
       </div>
       {/* An <a> rather than a button so the browser streams the file to disk

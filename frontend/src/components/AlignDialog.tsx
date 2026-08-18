@@ -9,6 +9,7 @@ import { ParameterSetPicker } from "./ParameterSetPicker";
 import { ResourceRefusalCard } from "./ResourceRefusalCard";
 import { isReads } from "./PairEditor";
 import { classify, estimateMb, explain } from "../lib/estimate";
+import { formatBytes } from "../lib/format";
 import { notify } from "../stores/messageStore";
 import type {
   AlignParams,
@@ -169,6 +170,18 @@ export function AlignDialog({
     ]),
   ]);
   const namesById = new Map(allObjects.map((o) => [o.id, o.name]));
+
+  // Every input this launch would have to download first. The mate is looked
+  // up in `allObjects` rather than read off `mate`, which is a pairing
+  // suggestion carrying only ids and names -- not the locality this needs.
+  const mateObject = usePair && mate ? allObjects.find((o) => o.id === mate.object_id) : null;
+  const remoteInputs: { name: string; size: number }[] = [
+    object,
+    ...(mateObject ? [mateObject] : []),
+    ...(chosen ? [{ ...chosen, id: chosen.object_id }] : []),
+  ]
+    .filter((o) => o.locality === "remote")
+    .map((o) => ({ name: o.name, size: o.size }));
   const eligible = allObjects.filter(
     (o) =>
       o.format.kind === "fastq" &&
@@ -573,6 +586,18 @@ export function AlignDialog({
                 This reference has no {aligner} index yet — one will be built
                 first, which can take longer than the alignment itself.
               </small>
+            )}
+            {/* Named separately from the index note above: both delay the
+                alignment, but a download is time on someone else's network
+                and is worth stating in bytes. */}
+            {remoteInputs.length > 0 && (
+              <div className="warn-box" style={{ fontSize: 12 }}>
+                {remoteInputs.length === 1
+                  ? `${remoteInputs[0].name} is stored remotely — about ${formatBytes(remoteInputs[0].size)} will be downloaded before the alignment starts.`
+                  : `${remoteInputs.length} inputs are stored remotely — about ${formatBytes(
+                      remoteInputs.reduce((n, r) => n + r.size, 0),
+                    )} will be downloaded before the alignment starts.`}
+              </div>
             )}
           </label>
         </div>

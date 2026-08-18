@@ -485,6 +485,19 @@ textarea:focus {
   font-variant-numeric: tabular-nums;
 }
 
+/* Sits beside the read badge in the metadata line, and reads as an origin
+   rather than a warning: an offloaded file is working as intended, not
+   broken. Deliberately quieter than .row-action's hover affordance -- it is
+   a label, not something to click. */
+.remote-badge {
+  padding: 0 4px;
+  border-radius: 3px;
+  border: 1px solid var(--border);
+  color: var(--text-dim);
+  font-size: 0.9em;
+  letter-spacing: 0.02em;
+}
+
 .row-action {
   opacity: 0;
   color: var(--text-faint);

@@ -137,3 +137,36 @@ async def test_the_offload_endpoint_refuses_an_unfetchable_object():
     await obj.insert()
     with pytest.raises(ValidationError):
         await offload_object_endpoint(obj.id, OWNER)
+
+
+async def test_the_reference_picker_reports_locality():
+    """The align dialog warns about a download before starting one.
+
+    Without this field the picker still lists an offloaded reference (that is
+    stage 3's guarantee) but the dialog cannot say that choosing it means
+    waiting on gigabytes of transfer.
+    """
+    from app.api.v1.pipelines import list_references
+    from app.models import FormatInfo, FormatKind, Project
+
+    project = Project(name="picker-locality", slug="picker-locality", owner=OWNER)
+    await project.insert()
+
+    remote_ref = DataObject(
+        project_id=project.id,
+        owner=OWNER,
+        name="GCF_000146045.2_genomic.fna",
+        size=12_000_000,
+        status=ObjectStatus.READY,
+        blob_sha256=None,
+        locality=Locality.REMOTE,
+        remote_source=RemoteSource(accession="GCF_000146045.2", size=12_000_000),
+        metadata={"sra_run": "GCF_000146045.2"},
+        format=FormatInfo(kind=FormatKind.FASTA),
+    )
+    await remote_ref.insert()
+
+    out = await list_references(project.id, OWNER)
+    entry = next(r for r in out["references"] if r["object_id"] == str(remote_ref.id))
+    assert entry["locality"] == "remote"
+    assert entry["size"] == 12_000_000

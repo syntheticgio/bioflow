@@ -39,6 +39,15 @@ export function ManageFile({
   const contentMissing = obj.blob?.state === "missing";
   const downloadable = hasContent && !contentMissing;
 
+  // Offloading needs somewhere to fetch the file back from. `sra_run` is what
+  // the download path records; the backend also accepts an accession parsed
+  // from the filename, but the button is only offered when the recorded value
+  // exists -- inviting a click that the API then refuses is worse than not
+  // offering it, and a filename can be renamed out from under the guess.
+  const isRemote = obj.locality === "remote";
+  const sraRun = typeof obj.metadata?.sra_run === "string" ? obj.metadata.sra_run : null;
+  const canOffload = !isRemote && downloadable && Boolean(sraRun);
+
   // RoleConverter and PairEditor each self-suppress on files they do not
   // apply to. In a stack that is invisible; in a static grid it would strand
   // the label, so the pairing row asks the component's own question first.
@@ -49,6 +58,28 @@ export function ManageFile({
   // non-READY object), so the button is absent rather than present-and-failing.
   const shareable = obj.status === "ready" && Boolean(obj.blob_sha256);
   const [sharing, setSharing] = useState(false);
+  const [confirmingOffload, setConfirmingOffload] = useState(false);
+  const [offloading, setOffloading] = useState(false);
+  const [offloadError, setOffloadError] = useState<string | null>(null);
+
+  async function runOffload() {
+    setOffloading(true);
+    setOffloadError(null);
+    try {
+      await api.offloadObject(obj.id);
+      setConfirmingOffload(false);
+      // Reuses the tag-edit refresh rather than adding a second one: both
+      // mean "this object changed on the server, refetch it", and the panel
+      // has to redraw here anyway to lose its download button.
+      onTagsChanged();
+    } catch (e) {
+      // The API refuses an object with no recorded way back, and that reason
+      // is the useful half of the message -- surfaced rather than swallowed.
+      setOffloadError(e instanceof Error ? e.message : "Could not free the space");
+    } finally {
+      setOffloading(false);
+    }
+  }
 
   return (
     <div className="section">
@@ -85,9 +116,16 @@ export function ManageFile({
             </>
           ) : (
             <div style={{ color: "var(--text-faint)", fontSize: 12 }}>
-              {contentMissing
-                ? "The stored file is not currently available. If it lives on an external drive, check that the drive is mounted."
-                : "No stored content to download yet."}
+              {/* Offloaded is checked before both: an offloaded file has no
+                  blob, so without this it reads as "no stored content yet" --
+                  the message for an upload still in flight, on a file the
+                  user deliberately freed. The same ordering _resolve_readable
+                  needs on the backend, for the same reason. */}
+              {isRemote
+                ? `Stored remotely. Fetch it${obj.remote_source ? ` from ${obj.remote_source.accession}` : ""} to download it -- running any pipeline on this file does that automatically.`
+                : contentMissing
+                  ? "The stored file is not currently available. If it lives on an external drive, check that the drive is mounted."
+                  : "No stored content to download yet."}
             </div>
           )}
         </div>
@@ -116,6 +154,66 @@ export function ManageFile({
               <button type="button" className="btn" onClick={() => setSharing(true)}>
                 Share with another profile
               </button>
+            </div>
+          </>
+        )}
+
+        {(canOffload || isRemote) && (
+          <>
+            <div className="manage-label">Storage</div>
+            <div>
+              {isRemote ? (
+                <div className="manage-note">
+                  Stored remotely. The file stays in this project and is
+                  downloaded again automatically the next time a pipeline needs
+                  it{obj.remote_source ? ` (from ${obj.remote_source.accession})` : ""}.
+                </div>
+              ) : !confirmingOffload ? (
+                <>
+                  <button
+                    type="button"
+                    className="btn"
+                    onClick={() => setConfirmingOffload(true)}
+                  >
+                    Free up space
+                  </button>
+                  <div className="manage-note">
+                    Releases {formatBytes(obj.size)} of disk. The file stays
+                    listed and is downloaded again from {sraRun} whenever a
+                    pipeline needs it.
+                  </div>
+                </>
+              ) : (
+                <div className="error-box" style={{ marginBottom: 0 }}>
+                  <div style={{ marginBottom: 8 }}>
+                    Release the stored copy of <strong>{obj.name}</strong>?
+                    Files already made from it keep working; re-downloading{" "}
+                    {formatBytes(obj.size)} takes as long as the original
+                    download did.
+                  </div>
+                  {offloadError && (
+                    <div style={{ marginBottom: 8 }}>{offloadError}</div>
+                  )}
+                  <div style={{ display: "flex", gap: 8 }}>
+                    <button
+                      type="button"
+                      className="btn"
+                      onClick={runOffload}
+                      disabled={offloading}
+                    >
+                      {offloading ? "Releasing…" : "Yes, free the space"}
+                    </button>
+                    <button
+                      type="button"
+                      className="btn"
+                      onClick={() => setConfirmingOffload(false)}
+                      disabled={offloading}
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
           </>
         )}
