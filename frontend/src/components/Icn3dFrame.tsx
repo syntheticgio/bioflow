@@ -37,21 +37,45 @@ function icn3dUrl(pdbId: string): string {
 }
 
 /**
+ * Build an iCn3D URL that loads a structure from a URL rather than a PDB ID.
+ * Uses the `load` parameter with the full URL of the PDB file.
+ */
+function icn3dUrlFromPdb(pdbUrl: string): string {
+  const params = new URLSearchParams({
+    load: pdbUrl,
+    closepopup: "1",
+    showcommand: "0",
+    shownote: "0",
+    showtitle: "0",
+    mobilemenu: "1",
+  });
+  return `${ICN3D_BASE}?${params.toString()}`;
+}
+
+/**
  * Embeds an iCn3D iframe for viewing a PDB structure.
  *
  * Owns its own load-state management and renders both the loading/failure
  * UI and the iframe itself. Provides an escape-hatch link when offline.
+ *
+ * Accepts either a `pdbId` (for PDB database entries) or a `pdbUrl` (for
+ * locally-predicted structures loaded from a URL).
  */
 export function Icn3dFrame({
   pdbId,
+  pdbUrl,
   title,
 }: {
-  pdbId: string;
+  pdbId?: string;
+  pdbUrl?: string;
   title: string;
 }) {
   const [frameState, setFrameState] = useState<"loading" | "ready" | "failed">(
     "loading",
   );
+
+  const src = pdbUrl ? icn3dUrlFromPdb(pdbUrl) : pdbId ? icn3dUrl(pdbId) : null;
+  const sourceKey = pdbUrl ?? pdbId ?? "";
 
   // An iframe fires no error event for a request that never answers, so a
   // slow or blocked NCBI would otherwise leave the panel blank indefinitely.
@@ -62,7 +86,15 @@ export function Icn3dFrame({
       LOAD_TIMEOUT_MS,
     );
     return () => clearTimeout(timer);
-  }, [pdbId]);
+  }, [sourceKey]);
+
+  if (!src) {
+    return (
+      <div className="chrom-note">
+        No structure to display.
+      </div>
+    );
+  }
 
   return (
     <>
@@ -70,20 +102,24 @@ export function Icn3dFrame({
         <div className="error-box">
           Couldn't load iCn3D. It's fetched from ncbi.nlm.nih.gov, so
           this fails when you're offline or NCBI is unreachable.{" "}
-          <a
-            href={icn3dUrl(pdbId)}
-            target="_blank"
-            rel="noreferrer"
-          >
-            Open {pdbId} at NCBI
-          </a>{" "}
+          {pdbId ? (
+            <a
+              href={icn3dUrl(pdbId)}
+              target="_blank"
+              rel="noreferrer"
+            >
+              Open {pdbId} at NCBI
+            </a>
+          ) : (
+            <span>Try again later.</span>
+          )}{" "}
           instead.
         </div>
       )}
 
       <iframe
         title={title}
-        src={icn3dUrl(pdbId)}
+        src={src}
         onLoad={() => setFrameState("ready")}
         onError={() => setFrameState("failed")}
         style={{
