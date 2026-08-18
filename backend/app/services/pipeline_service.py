@@ -1372,6 +1372,10 @@ UNKNOWN_ASSEMBLY_MEM_MB = 16384
 # number.
 ANNOTATE_GENOME_MEM_MB = 16384
 
+# Sized for bwa-mem2's alignment step, not for Polypolish -- see the handler's
+# own note on why peak RSS scales with the draft rather than the reads.
+POLISH_MEM_MB = 16384
+
 
 def refuse_if_over_budget(
     *, declared_mb: int, budget_mb: int, resource_override: bool
@@ -5251,6 +5255,7 @@ async def launch_polish(
     owner: str,
     reads_object_id: PydanticObjectId | None = None,
     mate_object_id: PydanticObjectId | None = None,
+    resource_override: bool = False,
 ) -> Job:
     """Queue a Polypolish run: short reads correcting a draft assembly.
 
@@ -5271,6 +5276,15 @@ async def launch_polish(
     """
     from app.queue import queue
     from app.services import object_service, reference_assembly, run_service
+
+    # Hoisted above the enqueue for the same reason as launch_assembly: a
+    # declaration the budget can never satisfy is unclaimable, and claim.lua
+    # has no starvation escape (#478, #527).
+    refuse_if_over_budget(
+        declared_mb=POLISH_MEM_MB,
+        budget_mb=await current_admission_budget_mb(),
+        resource_override=resource_override,
+    )
 
     tool = tools.require(tools.polypolish())
     tools.require(tools.bwa_mem2())
@@ -5375,11 +5389,12 @@ async def launch_polish(
         # Sized for bwa-mem2, not for Polypolish -- see the handler's own
         # note on why peak RSS here scales with the draft rather than the
         # reads.
-        resources=JobResources(cpu=8, mem_mb=16384, io=IoClass.HEAVY),
+        resources=JobResources(cpu=8, mem_mb=POLISH_MEM_MB, io=IoClass.HEAVY),
         max_attempts=1,
         dedup_key=f"polish:{draft.id}:{chosen[0].id}",
         project_id=draft.project_id,
         object_id=draft.id,
+        resource_override=resource_override,
     )
     if job is None:
         await run_service.discard_run(run.id, owner=run.owner)
