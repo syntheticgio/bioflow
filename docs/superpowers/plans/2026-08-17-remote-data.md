@@ -11,15 +11,40 @@ go to write the code.
 Per CLAUDE.md, **nothing ticks these checkboxes.** Verify against the code, not
 against this file.
 
+## Decisions settled on 2026-08-18
+
+Three things the plan left implicit, resolved before implementation began.
+
+**An offloaded object keeps `ObjectStatus.READY`.** `locality` carries the
+remoteness; `status` continues to mean what it always meant. This is what makes
+Stage 3's regression guard pass rather than merely be written: the reference
+picker and the Actions rules both filter on `READY`, and the Actions filter is
+at the *query* layer, so a non-`READY` offloaded object would be excluded in the
+database and never reach Python. The refusal therefore comes from exactly one
+new place -- the remote check in `_resolve_readable` -- and not from `status` at
+all. `_check_fastq_ready` will pass an offloaded object; that is intended, and
+the chokepoint catches it a moment later.
+
+**v1 offloads SRA runs only.** `metadata.sra_run` is the one re-fetch key
+verified to exist on downloaded objects (`services/sra_service.py:56`). The
+plan's earlier mention of an "assembly accession" was never checked against the
+tree. `release_bytes_for_object`'s precondition is therefore `metadata.sra_run`
+is present and `parse_accession` recovers it; everything else refuses. Genome
+assemblies are a follow-up, and need their own look at what accession an
+assembly object actually stores and whether a single component can be re-fetched.
+
+**Line numbers in this file drifted between 2026-08-17 and 2026-08-18.** See
+the corrections below. Re-grep anyway.
+
 ## What was verified before writing this
 
 - `grep -rn "Locality\|RemoteSource\|locality\|fetch_remote" backend/app frontend/src`
   → zero hits. Nothing is built.
-- `_resolve_readable` (`services/pipeline_service.py:156`) is still the single
+- `_resolve_readable` (`services/pipeline_service.py:162` as of 2026-08-18) is still the single
   chokepoint the spec describes, and still branches on `BlobStorage.EXTERNAL`
   exactly as quoted.
-- It has **56 call sites** (55 in `pipeline_service.py`, one in
-  `api/v1/pipelines.py:2286`). This is the single most important number in the
+- It has **57 call sites** (55 in `pipeline_service.py` plus its definition,
+  two in `api/v1/pipelines.py`). This is the single most important number in the
   plan: it is why the fetch gate goes in the chokepoint and why no handler or
   runner is touched.
 - `metadata.sra_run` is stored on downloaded runs
@@ -53,16 +78,33 @@ exactly the kind of call site nobody can read later.
 ### 2. `ObjectStatus.MISSING` already means "the blob went away"
 
 `models/object.py:24` defines `MISSING = "missing"  # underlying blob went
-away`. An offloaded object has, literally, no blob — so whatever code sets or
-infers `MISSING` must not start firing on offloaded objects, or every offloaded
+away`. An offloaded object has, literally, no blob, so the concern is that
+whatever sets `MISSING` starts firing on offloaded objects and every offloaded
 file reads as broken.
 
-This is the same class of mistake the spec's central decision avoids
-(`locality`, not a new `ObjectStatus`), arriving from the other direction:
-there, a new status broke the guards; here, an *existing* status wrongly claims
-an offloaded file. Audit every writer and reader of `MISSING` and make
-`locality is REMOTE` win. Add the negative test: an offloaded object does not
-become `MISSING`, and a genuinely-lost blob still does.
+Verified on 2026-08-18, the risk is **narrower than it first looks, and the
+mitigation is a specific ordering requirement rather than a broad audit.** Both
+writers live in `verify_blobs` (`queue/handlers.py`) and both key off the
+digest:
+
+- `:688` sets objects to `MISSING` via `DataObject.blob_sha256 == blob.id`.
+- `:753` heals back to `READY` via the same digest plus `status == MISSING`.
+
+Because `release_bytes_for_object` **clears `blob_sha256`**, an offloaded object
+matches neither query. It cannot be marked `MISSING` and it cannot be
+spuriously healed. That is the mechanism -- not luck -- and it is what the test
+must pin.
+
+The real hazard is **ordering inside `release_bytes_for_object`**. Clearing
+`blob_sha256` and decrementing the refcount must happen in one transaction. If
+the refcount drops first and the digest is cleared second, a `verify_blobs` pass
+landing in between sees an object still pointing at a blob whose bytes are on
+their way out, which is precisely the `MISSING` mislabel this trap warns about.
+
+- [ ] Test: an offloaded object does not become `MISSING` when `verify_blobs`
+      runs against a store where its former blob has been reaped.
+- [ ] Test: a genuinely-lost blob still marks its objects `MISSING` -- the
+      permissive direction, which must keep working.
 
 ### 3. `blob_sha256 is None` currently means "not ready yet"
 
@@ -83,8 +125,8 @@ The spec's central argument rests on two sites that filter *collections* on
 `ObjectStatus.READY`. Both still exist, but only one is where the spec says,
 and the other is no longer a list comprehension at all:
 
-- **The reference picker** is now at `api/v1/pipelines.py:1842` (spec said
-  529). The code is otherwise verbatim what the spec quotes, including the
+- **The reference picker** is now at `api/v1/pipelines.py:1843` (spec said
+  529; 1842 on 2026-08-17). The code is otherwise verbatim what the spec quotes, including the
   `and o.status is ObjectStatus.READY` line.
 - **The Actions rules** no longer filter in Python. `suggestion_service.py`
   passes `status=ObjectStatus.READY` **into the query** at `:2047` and `:2132`
@@ -110,6 +152,7 @@ plan; they were accurate on the date written and the file moves.
       every existing object correct without a migration.
 - [ ] Test: an object loaded from a document with no `locality` key reads back
       as `LOCAL`.
+- [ ] Test: offloading does not change `status` — it stays `READY`.
 
 ## Stage 2 — The refusal gate (before any fetching)
 
@@ -132,8 +175,8 @@ This is the one test the spec calls out as the one that would have caught the
 `REMOTE`-status design being wrong. Write it before the UI exists.
 
 - [ ] A remote object **still appears** in the reference picker
-      (`api/v1/pipelines.py:1842`) and in Actions-tab suggestions
-      (`suggestion_service.py:2047` and `:2132` — a query argument, not a
+      (`api/v1/pipelines.py:1843`) and in Actions-tab suggestions
+      (`suggestion_service.py:2099` and `:2184` — a query argument, not a
       comprehension; see trap 4).
 - [ ] Per CLAUDE.md, also check both against a **real project** via
       `docker compose exec api python -c "..."`, not only fixtures — these
@@ -144,9 +187,10 @@ This is the one test the spec calls out as the one that would have caught the
 
 - [ ] `blob_service.release_bytes_for_object` per trap 1.
 - [ ] `object_service` action: flip `locality` to `REMOTE`, populate
-      `remote_source` from `metadata.sra_run` / assembly accession, release the
-      bytes. Refuse when no re-fetchable source exists — that is the whole
-      precondition of the feature.
+      `remote_source` from `metadata.sra_run`, release the bytes, and **leave
+      `status` at `READY`** per the decisions above. Refuse when no
+      `sra_run` is recoverable — that is the whole precondition of the
+      feature, and in v1 an assembly is one of the things it refuses.
 - [ ] API endpoint in `api/v1/objects.py`.
 - [ ] Audit `MISSING` writers/readers per trap 2.
 - [ ] Tests: `qc_reports/` intact, facts unchanged, `derived_from` intact on
@@ -175,7 +219,8 @@ This is the one test the spec calls out as the one that would have caught the
 
 ## Stage 6 — Frontend
 
-- [ ] `api/types.ts`: `locality`, `remote_source`.
+- [ ] `api/types/object.ts` (not `api/types.ts`, which does not exist):
+      `locality`, `remote_source`.
 - [ ] Badges in `ProjectExplorer.tsx` / `FileHeadline.tsx`, computed not
       stored: `Local` + `NCBI` when downloaded, `NCBI` alone when offloaded.
 - [ ] Drop-bytes action in `ManageFile.tsx`, with the confirmation dialog
