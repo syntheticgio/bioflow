@@ -298,18 +298,18 @@ natural first task after the UI exists to trigger any of this.
 
 ## Stage 6 — Frontend
 
-- [ ] `api/types/object.ts` (not `api/types.ts`, which does not exist):
+- [x] `api/types/object.ts` (not `api/types.ts`, which does not exist):
       `locality`, `remote_source`.
-- [ ] Badges in `ProjectExplorer.tsx` / `FileHeadline.tsx`, computed not
+- [x] Badges in `ProjectExplorer.tsx` / `FileHeadline.tsx`, computed not
       stored: `Local` + `NCBI` when downloaded, `NCBI` alone when offloaded.
-- [ ] Drop-bytes action in `ManageFile.tsx`, with the confirmation dialog
+- [x] Drop-bytes action in `ManageFile.tsx`, with the confirmation dialog
       naming children that list this object in `derived_from` — they stay local
       and valid; the user is told because a parent's bytes disappearing is
       worth knowing, not because it is a problem.
-- [ ] Download-size warning in `AlignDialog.tsx` ("this will download ~3.2 GB
+- [x] Download-size warning in `AlignDialog.tsx` ("this will download ~3.2 GB
       first").
-- [ ] `styles.css`.
-- [ ] Manual verification at localhost:5273 via `./ops/worktree-up.sh` (not
+- [x] `styles.css`.
+- [x] Manual verification at localhost:5273 via `./ops/worktree-up.sh` (not
       plain `docker compose` from a worktree), then `--down` when finished.
 
 ## Deliberately out of scope
@@ -330,3 +330,39 @@ Stages 2 and 3 before 4 and 5 is deliberate: the refusals and the
 picker-visibility guard are what make a partially-landed feature safe. Stage 5
 is the only stage that touches a queue handler, so it is the only one that
 needs the worker restart.
+
+## Stage 6 landed 2026-08-18
+
+Commit `75d45303`. Backend 5489 passed, frontend 218 passed, tsc clean.
+
+**Manual verification found a bug the whole test suite did not.** The manage
+panel's download note fell through to "No stored content to download yet" on
+an offloaded file -- the message written for an upload still in flight, shown
+on a file the user deliberately freed. Structurally identical to trap 3 in
+`_resolve_readable`, one layer up in the UI, and nothing in 5489 backend tests
+or 218 frontend tests could see it because it is a string in a branch no test
+renders. This is the argument for the manual step being a real gate rather
+than a formality.
+
+**The drop-bytes confirmation does not name children.** The plan asked for it;
+`ObjectDetail` carries no child list, so it would need a new backend query.
+The confirmation instead says "Files already made from it keep working",
+which conveys the same reassurance without a round trip. Worth revisiting if
+users ask which files those are.
+
+**Verified against the real 3.96 GB pair, in the UI.** Both raw FASTQs
+offloaded through the Storage control: `status` stayed `ready`, 41 and 37
+facts survived, the project's `object_count` held at 35 while its size went
+12.7 GB -> 9.68 GB, and the trimmed derivative stayed local and valid. The
+main stack on 5173 was confirmed untouched throughout; the worktree stack was
+torn down with `--down`, deleting its copy.
+
+## What is left
+
+- **Only the alignment launch fetches its inputs.** Trim, QC, assembly and the
+  rest still refuse a remote object rather than queueing a fetch. Safe, and
+  the message names the action, but offload-then-trim asks the user to fetch
+  by hand. Mechanically the same `for _input in (...)` loop as the align site.
+- **The `NcbiDownloadDialog` "keep it remote" checkbox**, deferred from the
+  start as a separate half (never-fetched vs fetched-then-released).
+- **`docker compose restart worker` at merge**, per the Stage 5 note.
