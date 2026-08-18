@@ -168,6 +168,12 @@ _NO_NARRATIVE_STEP: frozenset[str] = frozenset(
         "run_vcf_stats",
         "run_annotation_stats",
         "ingest_headers",
+        # Restores bytes an object already had. Not a step in any lineage:
+        # the file, its facts and its provenance were all established when it
+        # was first downloaded, and a fetch changes none of them -- it only
+        # moves the bytes back. `download_sra_run`, which *creates* the object
+        # and is a genuine origin, remains a narrative step.
+        "fetch_remote",
         # Bookkeeping on bytes already ingested.
         "hash_blob",
         "register_hash",

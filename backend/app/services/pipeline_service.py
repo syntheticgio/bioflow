@@ -1645,6 +1645,69 @@ def _aligner_tool(aligner: Aligner):
     return aligner_registry.spec_for(aligner).tool()
 
 
+async def ensure_local(obj: DataObject, *, owner: str) -> PydanticObjectId | None:
+    """Queue the fetch an offloaded object needs, returning a job to wait on.
+
+    Returns None when the object's bytes are already here, which is the
+    overwhelmingly common case -- callers can chain this unconditionally and
+    only extend `depends_on` when something comes back.
+
+    The dedup key is the object id rather than its content: an offloaded
+    object has no digest to key on, which is the whole reason it is remote.
+    `queue.enqueue` folds the owner in, so two profiles never collide.
+
+    When the key deduplicates the job away, the in-flight job is found and
+    returned instead -- the same race `_enqueue_build_index`'s caller handles,
+    and for the same reason: two pipelines started seconds apart on one
+    offloaded file must wait on one download, not race two.
+    """
+    if obj.locality is not Locality.REMOTE:
+        return None
+
+    from app.queue import queue
+
+    accession = _refetch_accession(obj)
+    if not accession:
+        raise ValidationError(
+            f"{obj.name!r} is stored remotely but nothing records where to fetch it from",
+            details={"object_id": str(obj.id)},
+        )
+
+    job = await queue.enqueue(
+        "fetch_remote",
+        owner=owner,
+        payload={
+            "object_id": str(obj.id),
+            "accession": accession,
+            "project_id": str(obj.project_id),
+            "bytes_estimate": obj.remote_source.size if obj.remote_source else None,
+        },
+        job_class=JobClass.USER_INTERACTIVE,
+        project_id=obj.project_id,
+        object_id=obj.id,
+        dedup_key=f"fetch_remote:{obj.id}",
+    )
+    if job is not None:
+        return job.id
+
+    existing = await Job.find_one(active_fetch_job_query(obj.id))
+    return existing.id if existing is not None else None
+
+
+def active_fetch_job_query(object_id: PydanticObjectId) -> dict:
+    """The in-flight fetch for an offloaded object, if there is one.
+
+    A raw Mongo query for the reason `active_index_job_query` records:
+    `Job.state` is not resolvable as an attribute outside a query context.
+    Extracted and named so the shape is assertable without a database.
+    """
+    return {
+        "type": "fetch_remote",
+        "state": {"$in": [s.value for s in ACTIVE_STATES]},
+        "object_id": object_id,
+    }
+
+
 def active_index_job_query(reference_id: PydanticObjectId) -> dict:
     """The in-flight index build for a reference, if there is one.
 
