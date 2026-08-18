@@ -1,4 +1,5 @@
 import type { ContigCoverage } from "../api/types";
+import { InfoMarker } from "./InfoMarker";
 
 const MAX_BARS = 50;
 
@@ -42,6 +43,7 @@ export function ContigDepthChart({
       <div style={{ fontSize: 11, color: "var(--text-faint)" }}>
         Mean depth per contig
         {capped ? ` (top ${shown.length} of ${totalContigs.toLocaleString()} by mapped reads)` : ""}
+        <InfoMarker metric="ui.chart_contig_depth" />
       </div>
       <svg
         width="100%"

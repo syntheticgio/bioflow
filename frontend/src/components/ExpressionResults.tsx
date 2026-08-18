@@ -4,6 +4,7 @@ import { api } from "../api/client";
 import type { DeRow, ObjectDetail as ObjectDetailData } from "../api/types";
 import { AiSummary } from "./AiSummary";
 import { MAPlot, SamplePcaPlot, VolcanoPlot, type PcaPoint } from "./ExpressionCharts";
+import { InfoMarker } from "./InfoMarker";
 import { NodeSelector } from "./NodeSelector";
 
 const PAGE_SIZE = 50;
@@ -132,7 +133,10 @@ export function ExpressionResults({ obj }: { obj: ObjectDetailData }) {
         <table className="facts-table">
           <tbody>
             <tr>
-              <th>Contrast</th>
+              <th>
+                Contrast
+                <InfoMarker metric="ui.de_contrast" />
+              </th>
               <td>
                 {f.contrast_test} vs {f.contrast_reference}
                 {f.samples_by_condition && (
@@ -148,7 +152,10 @@ export function ExpressionResults({ obj }: { obj: ObjectDetailData }) {
               </td>
             </tr>
             <tr>
-              <th>Genes tested</th>
+              <th>
+                Genes tested
+                <InfoMarker metric="ui.de_genes_tested" />
+              </th>
               <td>
                 {f.genes_tested?.toLocaleString() ?? "—"}
                 {f.genes_in_matrix != null && (
@@ -161,7 +168,10 @@ export function ExpressionResults({ obj }: { obj: ObjectDetailData }) {
               </td>
             </tr>
             <tr>
-              <th>Significant</th>
+              <th>
+                Significant
+                <InfoMarker metric="ui.de_significant" />
+              </th>
               <td>
                 {f.significant_genes?.toLocaleString() ?? "—"} at padj &lt;{" "}
                 {alpha}
@@ -193,7 +203,10 @@ export function ExpressionResults({ obj }: { obj: ObjectDetailData }) {
 
       {f.sample_pca && f.sample_pca.length > 0 && (
         <div className="section">
-          <div className="section-title">Sample clustering</div>
+          <div className="section-title">
+            Sample clustering
+            <InfoMarker metric="ui.chart_sample_pca" />
+          </div>
           <SamplePcaPlot points={f.sample_pca} />
           <div className="section-note">
             Replicates of a condition should sit together. One sitting with the
@@ -205,7 +218,10 @@ export function ExpressionResults({ obj }: { obj: ObjectDetailData }) {
       )}
 
       <div className="section">
-        <div className="section-title">Volcano</div>
+        <div className="section-title">
+          Volcano
+          <InfoMarker metric="ui.chart_volcano" />
+        </div>
         <VolcanoPlot rows={plotRows} alpha={alpha} />
         <div className="section-note">
           Coloured points clear both padj &lt; {alpha} and a two-fold change.
@@ -214,7 +230,10 @@ export function ExpressionResults({ obj }: { obj: ObjectDetailData }) {
       </div>
 
       <div className="section">
-        <div className="section-title">MA</div>
+        <div className="section-title">
+          MA
+          <InfoMarker metric="ui.chart_ma" />
+        </div>
         <MAPlot rows={plotRows} alpha={alpha} />
         <div className="section-note">
           Fold change against expression level. A funnel widening to the left
@@ -224,7 +243,10 @@ export function ExpressionResults({ obj }: { obj: ObjectDetailData }) {
       </div>
 
       <div className="section">
-        <div className="section-title">Genes</div>
+        <div className="section-title">
+          Genes
+          <InfoMarker metric="ui.de_gene_table" />
+        </div>
 
         <div className="detail-actions" style={{ marginBottom: 8 }}>
           <input

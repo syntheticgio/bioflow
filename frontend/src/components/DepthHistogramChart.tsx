@@ -1,4 +1,5 @@
 import type { DepthHistogramBucket } from "../api/types";
+import { InfoMarker } from "./InfoMarker";
 
 /**
  * How many reference positions sit at each depth.
@@ -47,6 +48,7 @@ export function DepthHistogramChart({
     <div>
       <div style={{ fontSize: 11, color: "var(--text-faint)" }}>
         Reference positions by depth
+        <InfoMarker metric="ui.chart_depth_histogram" />
       </div>
       <svg
         width="100%"

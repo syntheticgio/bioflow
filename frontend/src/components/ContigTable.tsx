@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "../api/client";
 import { mapqScaleNote } from "../lib/mapq";
+import { InfoMarker } from "./InfoMarker";
 
 const PAGE_SIZE = 25;
 
@@ -38,6 +39,7 @@ export function ContigTable({
         style={{ display: "flex", alignItems: "center", gap: 8 }}
       >
         <span>Per-contig coverage</span>
+        <InfoMarker metric="ui.bam_contig_table" />
         <a
           className="btn"
           href={api.bamStatsDownloadUrl(objectId, reportPath)}
