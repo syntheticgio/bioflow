@@ -12,10 +12,16 @@ import { ActivityLead } from "./activity/ActivityLead";
 import { RunLedger } from "./activity/RunLedger";
 import { SectionHead } from "./activity/SectionHead";
 import { useWorkflowRuns } from "./activity/WorkflowRuns";
-import { BLOCKED, RUNNING, WAITING, jobLabel } from "../lib/runFormat";
+import { BLOCKED, RUNNING, WAITING, isMaintenance, jobLabel } from "../lib/runFormat";
 
 /** How many finished runs the ledger column carries. */
 const LEDGER_LIMIT = 10;
+
+/** How many maintenance rows the upkeep section carries.
+ *
+ *  Lower than the loose-job slice on purpose: these repeat every minute, so a
+ *  long tail of identical succeeded sweeps is scroll, not information. */
+const UPKEEP_LIMIT = 15;
 
 /**
  * Everything the system is doing, and why it is not doing the rest.
@@ -88,6 +94,17 @@ export function ActivityView() {
     refetchInterval: 5000,
   });
 
+  // Which handlers are the installation's own housekeeping. Fetched rather
+  // than hardcoded so a sweep added to the backend files itself correctly
+  // here without a matching frontend edit -- the silent-drift shape
+  // CLAUDE.md warns about for hand-maintained registries. The handler set
+  // only changes on deploy, so this never needs refetching.
+  const { data: jobTypes } = useQuery({
+    queryKey: ["jobs", "types"],
+    queryFn: api.jobTypes,
+    staleTime: Infinity,
+  });
+
   const cancel = useMutation({
     mutationFn: (id: string) => api.cancelJob(id),
     onSuccess: (res) => {
@@ -118,11 +135,21 @@ export function ActivityView() {
     for (const job of detail?.jobs ?? []) grouped.add(job.job_id);
   }
 
-  const loose = jobs.filter((j) => !grouped.has(j.id));
+  // Maintenance is split out before anything else is counted (#556). The
+  // storage sweeps post a job a minute, so left in the same lists they push
+  // the user's own loose work off the end of a 40-row slice -- and the one
+  // sweep somebody fired by hand is the hardest of all to find, because it
+  // looks exactly like the ninety scheduled ones around it.
+  const allLoose = jobs.filter((j) => !grouped.has(j.id));
+  const upkeep = allLoose.filter((j) => isMaintenance(j, jobTypes));
+  const loose = allLoose.filter((j) => !isMaintenance(j, jobTypes));
   const running = loose.filter((j) => RUNNING.has(j.state));
   const waiting = loose.filter((j) => WAITING.has(j.state));
   const recent = loose.filter(
     (j) => !RUNNING.has(j.state) && !WAITING.has(j.state),
+  );
+  const upkeepActive = upkeep.filter(
+    (j) => RUNNING.has(j.state) || WAITING.has(j.state),
   );
 
   const activeRuns = runs.filter(
@@ -232,6 +259,50 @@ export function ActivityView() {
           ))
         ) : (
           <div className="activity-empty">No finished jobs.</div>
+        )}
+
+        {/* System upkeep, in its own section rather than mixed into the work
+            above (#556). Two things made it unfindable before: it renders far
+            more rows than everything else combined -- verification alone runs
+            once a minute -- and each row read as a raw handler token. The
+            answer to "where did my storage cleanup go?" is now a section that
+            names itself, with the sweeps in it named in words. */}
+        <SectionHead
+          title="System upkeep"
+          note={
+            upkeepActive.length > 0
+              ? `${upkeepActive.length} running`
+              : upkeep.length > 0
+                ? String(upkeep.length)
+                : undefined
+          }
+        />
+        {upkeep.length > 0 ? (
+          upkeep
+            .slice(0, UPKEEP_LIMIT)
+            .map((job) => (
+              <JobRow
+                key={job.id}
+                job={job}
+                onSelect={select}
+                onCancel={
+                  RUNNING.has(job.state) || WAITING.has(job.state)
+                    ? () => cancel.mutate(job.id)
+                    : undefined
+                }
+                onRetry={
+                  job.state === "failed" || job.state === "dead"
+                    ? () => retry.mutate(job.id)
+                    : undefined
+                }
+                onToggleLog={() =>
+                  setOpenLog(openLog === job.id ? null : job.id)
+                }
+                logOpen={openLog === job.id}
+              />
+            ))
+        ) : (
+          <div className="activity-empty">No maintenance has run recently.</div>
         )}
       </div>
     </div>
