@@ -1712,6 +1712,9 @@ class AssemblyQvRequest(BaseModel):
     # user wanting a non-default k) names them explicitly.
     read_object_id: PydanticObjectId | None = None
     k: int | None = None
+    # "Launch anyway" from the refusal card. Skips the declared-budget refusal
+    # and persists on the job, where claim.lua admits it as sole occupant.
+    resource_override: bool = False
 
 
 @router.post("/assembly-qv", response_model=JobOut, status_code=status.HTTP_201_CREATED)
@@ -1727,6 +1730,7 @@ async def launch_assembly_qv_route(body: AssemblyQvRequest, owner: OwnerDep) -> 
         owner=owner,
         read_object_id=body.read_object_id,
         k=body.k,
+        resource_override=body.resource_override,
     )
     return JobOut.of(job)
 

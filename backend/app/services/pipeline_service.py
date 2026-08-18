@@ -1376,6 +1376,11 @@ ANNOTATE_GENOME_MEM_MB = 16384
 # own note on why peak RSS scales with the draft rather than the reads.
 POLISH_MEM_MB = 16384
 
+# Matches the handler's own @handler(...) registration -- see
+# assess_assembly_qv's docstring for the real-data measurement this figure
+# is based on.
+QV_QC_MEM_MB = 12288
+
 
 def refuse_if_over_budget(
     *, declared_mb: int, budget_mb: int, resource_override: bool
@@ -6103,6 +6108,7 @@ async def launch_qv_qc(
     owner: str,
     read_object_id: PydanticObjectId | None = None,
     k: int | None = None,
+    resource_override: bool = False,
 ) -> Job:
     """Queue a Merqury QV run: reference-free k-mer base accuracy for one
     assembly, scored against the reads it came from.
@@ -6127,6 +6133,15 @@ async def launch_qv_qc(
     """
     from app.queue import queue
     from app.services import object_service, reference_assembly
+
+    # Hoisted above the enqueue for the same reason as launch_assembly: a
+    # declaration the budget can never satisfy is unclaimable, and claim.lua
+    # has no starvation escape (#478, #527).
+    refuse_if_over_budget(
+        declared_mb=QV_QC_MEM_MB,
+        budget_mb=await current_admission_budget_mb(),
+        resource_override=resource_override,
+    )
 
     tools.require(tools.meryl())
     tool = tools.require(tools.merqury())
@@ -6230,11 +6245,12 @@ async def launch_qv_qc(
         # Matches the handler's own @handler(...) registration -- see
         # assess_assembly_qv's docstring for the real-data measurement this
         # figure is based on.
-        resources=JobResources(cpu=4, mem_mb=12288, io=IoClass.HEAVY),
+        resources=JobResources(cpu=4, mem_mb=QV_QC_MEM_MB, io=IoClass.HEAVY),
         max_attempts=1,
         dedup_key=f"assess_assembly_qv:{assembly.id}:{read_obj.id}:{resolved_k}",
         project_id=assembly.project_id,
         object_id=assembly.id,
+        resource_override=resource_override,
     )
     if job is None:
         raise ConflictError("This QV assessment job is already queued")
