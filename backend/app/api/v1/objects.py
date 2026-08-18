@@ -159,6 +159,7 @@ async def list_protein_records(
     return ProteinRecordsOut(
         total=total,
         truncated=bool(obj.facts.get("protein_records_truncated")),
+        indexed="protein_records_indexed" in obj.facts,
         rows=[
             ProteinRecordOut(
                 ordinal=r.ordinal,

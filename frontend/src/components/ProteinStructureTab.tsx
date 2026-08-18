@@ -184,6 +184,18 @@ export function ProteinStructureTab({ objectId }: { objectId: string }) {
           <div style={{ color: "var(--text-faint)", fontSize: 12 }}>
             Loading…
           </div>
+        ) : rows.length === 0 && data?.indexed === false ? (
+          // Distinct from "no records match your search" below: this object
+          // has never had protein indexing run at all, most likely because
+          // its role was set to Protein after ingest rather than before --
+          // ingest_headers is the only place indexing runs, and there is no
+          // automatic re-index to catch a role changed later. Re-ingesting
+          // is the actual fix, so say that instead of leaving the user to
+          // guess why an apparently-valid protein FASTA shows nothing.
+          <div className="chrom-note">
+            This file's proteins haven't been indexed yet. Re-ingest the file
+            to enable this view.
+          </div>
         ) : rows.length === 0 ? (
           <div style={{ color: "var(--text-faint)", fontSize: 12 }}>
             No records match this search.
@@ -208,8 +220,23 @@ export function ProteinStructureTab({ objectId }: { objectId: string }) {
                         selected?.ordinal === row.ordinal
                           ? "var(--bg-elevated)"
                           : undefined,
+                      // has_reference is false when the header names no
+                      // accession the app can resolve -- true for every
+                      // record of a de-novo-annotated proteome (Prokka/Bakta
+                      // locus tags, for instance). Muting those rows lets a
+                      // user tell at a glance which will resolve to
+                      // something before clicking each one, same as the
+                      // reduced-emphasis treatment other tables in this repo
+                      // use for a row that is in a lesser state.
+                      color: row.has_reference
+                        ? undefined
+                        : "var(--text-faint)",
                     }}
-                    title={row.description}
+                    title={
+                      row.has_reference
+                        ? row.description
+                        : `${row.description} (header names no protein we can look up)`
+                    }
                   >
                     <td className="mono">{row.identifier}</td>
                     <td style={{ textAlign: "right" }}>
