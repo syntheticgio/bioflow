@@ -56,15 +56,60 @@ export function initialPresetSelection({
   presets?: Record<string, AlignerPreset>;
 }): string | null {
   if (!presets) return null;
-  if (isNamedPreset(presets, params.preset)) return params.preset;
   if (aligner === "bowtie2") {
     const defaultPreset = presets[BOWTIE2_DEFAULT_PRESET_ID];
-    return !hasAnyPresetManagedValue(params, defaultPreset) ||
-      paramsMatchPreset(params, defaultPreset)
-      ? BOWTIE2_DEFAULT_PRESET_ID
-      : BOWTIE2_CUSTOM_PRESET_VALUE;
+    const explicitPreset = isNamedPreset(presets, params.preset)
+      ? params.preset
+      : null;
+    if (!hasAnyPresetManagedValue(params, defaultPreset)) {
+      return explicitPreset ?? BOWTIE2_DEFAULT_PRESET_ID;
+    }
+    const matchingPreset = Object.entries(presets).find(([, preset]) =>
+      paramsMatchPreset(params, preset),
+    );
+    return matchingPreset?.[0] ?? BOWTIE2_CUSTOM_PRESET_VALUE;
   }
+  if (isNamedPreset(presets, params.preset)) return params.preset;
   return ADVANCED_PRESET_VALUE;
+}
+
+export function reconcileParameterSetPreset({
+  aligner,
+  currentParams,
+  appliedValues,
+  presets,
+}: {
+  aligner: AlignerName | undefined;
+  currentParams: Partial<AlignParams>;
+  appliedValues: Record<string, unknown>;
+  presets?: Record<string, AlignerPreset>;
+}): {
+  overrides: Partial<AlignParams>;
+  presetSelection: string | null;
+} {
+  const nextParams = {
+    ...currentParams,
+    ...appliedValues,
+  } as Partial<AlignParams>;
+  const presetSelection = initialPresetSelection({
+    aligner,
+    params: nextParams,
+    presets,
+  });
+  const preset =
+    aligner === "bowtie2" &&
+    presetSelection != null &&
+    presets?.[presetSelection]
+      ? presetSelection
+      : "";
+
+  return {
+    overrides: {
+      ...(appliedValues as Partial<AlignParams>),
+      ...(aligner === "bowtie2" ? { preset } : {}),
+    },
+    presetSelection,
+  };
 }
 
 export function shouldClearPresetOnFieldEdit({

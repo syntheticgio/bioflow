@@ -664,10 +664,10 @@ def _prefix_aligner_argv(
                 argv.append("--no-contain")
             if params.no_overlap:
                 argv.append("--no-overlap")
-        if params.no_mixed:
-            argv.append("--no-mixed")
-        if params.no_discordant:
-            argv.append("--no-discordant")
+            if params.no_mixed:
+                argv.append("--no-mixed")
+            if params.no_discordant:
+                argv.append("--no-discordant")
     else:
         if params.rna_strandness:
             # The flag has no "unstranded" value -- omitting it is how that is

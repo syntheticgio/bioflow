@@ -13,7 +13,7 @@ from pathlib import Path
 import pytest
 
 from app.errors import ValidationError
-from app.pipelines import align_params, align_runner
+from app.pipelines import align_params, align_runner, aligner_registry
 from app.pipelines.align_runner import (
     AlignParams,
     AlignProgress,
@@ -492,6 +492,8 @@ class TestBowtie2Command:
                 "dovetail": True,
                 "no_contain": True,
                 "no_overlap": True,
+                "no_mixed": True,
+                "no_discordant": True,
                 "report_k": 10,
             }
         )
@@ -507,6 +509,8 @@ class TestBowtie2Command:
         assert "--dovetail" in script
         assert "--no-contain" in script
         assert "--no-overlap" in script
+        assert "--no-mixed" in script
+        assert "--no-discordant" in script
         assert "-k 10" in script
         assert " -a " not in script
 
@@ -520,6 +524,8 @@ class TestBowtie2Command:
                 "dovetail": True,
                 "no_contain": True,
                 "no_overlap": True,
+                "no_mixed": True,
+                "no_discordant": True,
             }
         )
         script = align_cmd(
@@ -536,8 +542,65 @@ class TestBowtie2Command:
             "--dovetail",
             "--no-contain",
             "--no-overlap",
+            "--no-mixed",
+            "--no-discordant",
         ):
             assert flag not in script
+
+    @pytest.mark.parametrize(
+        ("preset_id", "expected_controls", "omitted_controls"),
+        [
+            (
+                "standard_short_read",
+                ("--sensitive", "-X 500", "--fr"),
+                ("--local", "-I ", "--rf", "--dovetail", "-k "),
+            ),
+            (
+                "long_insert",
+                ("--sensitive", "-I 500", "-X 20000", "--fr"),
+                ("--local", "--rf", "--dovetail", "-k "),
+            ),
+            (
+                "mate_pair",
+                ("--sensitive", "-I 500", "-X 20000", "--rf"),
+                ("--local", "--fr", "--dovetail", "-k "),
+            ),
+            (
+                "adapter_partial_reference",
+                ("--sensitive", "--local", "-X 500", "--fr"),
+                ("-I ", "--rf", "--dovetail", "-k "),
+            ),
+            (
+                "structural_variant",
+                ("--sensitive", "-X 500", "--fr", "--dovetail"),
+                ("--local", "-I ", "--rf", "-k "),
+            ),
+            (
+                "repeat_multimapping",
+                ("--sensitive", "-X 500", "--fr", "-k 10"),
+                ("--local", "-I ", "--rf", "--dovetail"),
+            ),
+        ],
+    )
+    def test_every_bowtie2_preset_resolves_to_its_command_controls(
+        self, preset_id, expected_controls, omitted_controls
+    ):
+        preset = aligner_registry.schema_for(Aligner.BOWTIE2)["presets"][preset_id]
+        params = align_params.from_dict(
+            {"aligner": "bowtie2", "preset": preset_id, **preset["values"]}
+        )
+        script = align_cmd(
+            aligner=Aligner.BOWTIE2,
+            aligner_path="bowtie2",
+            params=params,
+            r2=Path("/w/r2.fq.gz"),
+        )[-1]
+
+        assert params.preset == preset_id
+        for control in expected_controls:
+            assert control in script
+        for control in omitted_controls:
+            assert control not in script
 
     def test_report_k_is_omitted_when_zero(self):
         """0 means 'leave the flag off'. Passing -k 0 tells bowtie2 to report

@@ -15,6 +15,7 @@ rather than silently dropped.
 from dataclasses import dataclass
 
 from app.errors import ValidationError
+from app.pipelines.aligner_preset_ids import BOWTIE2_PRESET_IDS
 from app.pipelines.aligners import Aligner
 
 # samtools spills to disk below this, which is slower than the memory saved.
@@ -211,6 +212,8 @@ BOWTIE2_ORIENTATIONS: tuple[str, ...] = ("FR", "RF", "FF")
 @dataclass
 class Bowtie2Params(BaseAlignParams):
     aligner: Aligner = Aligner.BOWTIE2
+    # Registry workflow identity. Empty means custom values.
+    preset: str = ""
     sensitivity: str = "--sensitive"
     # End-to-end requires the whole read to align; --local soft-clips the
     # ends. Local is the right choice when reads carry adapter remnants or
@@ -235,6 +238,7 @@ class Bowtie2Params(BaseAlignParams):
     def as_dict(self) -> dict:
         return {
             **super().as_dict(),
+            "preset": self.preset,
             "sensitivity": self.sensitivity,
             "local": self.local,
             "minins": self.minins,
@@ -251,6 +255,13 @@ class Bowtie2Params(BaseAlignParams):
 
     @classmethod
     def from_dict(cls, data: dict) -> "Bowtie2Params":
+        preset = str(data.get("preset") or "")
+        if preset and preset not in BOWTIE2_PRESET_IDS:
+            raise ValidationError(
+                f"Unknown bowtie2 preset {preset!r}",
+                details={"valid": list(BOWTIE2_PRESET_IDS)},
+            )
+
         sensitivity = data.get("sensitivity") or "--sensitive"
         if sensitivity not in BOWTIE2_SENSITIVITIES:
             raise ValidationError(
@@ -285,6 +296,7 @@ class Bowtie2Params(BaseAlignParams):
 
         return cls(
             aligner=Aligner.BOWTIE2,
+            preset=preset,
             sensitivity=sensitivity,
             local=bool(data.get("local", False)),
             minins=minins,

@@ -17,7 +17,7 @@ from collections.abc import Callable
 from dataclasses import asdict, dataclass, field
 from typing import Any, Literal
 
-from app.pipelines import align_params, aligners, tools
+from app.pipelines import align_params, aligner_preset_ids, aligners, tools
 from app.pipelines.aligners import Aligner, IndexLayout
 
 
@@ -559,7 +559,7 @@ REGISTRY: dict[Aligner, AlignerSpec] = {
             *_SHARED_FIELDS,
         ),
         presets={
-            "standard_short_read": {
+            aligner_preset_ids.BOWTIE2_STANDARD_SHORT_READ: {
                 "label": "Standard short-read DNA",
                 "description": (
                     "Conservative paired-end defaults; check insert sizes "
@@ -580,7 +580,7 @@ REGISTRY: dict[Aligner, AlignerSpec] = {
                     "report_all": False,
                 },
             },
-            "long_insert": {
+            aligner_preset_ids.BOWTIE2_LONG_INSERT: {
                 "label": "Long-insert paired-end",
                 "description": (
                     "Broad starting range for long-insert libraries; check "
@@ -601,7 +601,7 @@ REGISTRY: dict[Aligner, AlignerSpec] = {
                     "report_all": False,
                 },
             },
-            "mate_pair": {
+            aligner_preset_ids.BOWTIE2_MATE_PAIR: {
                 "label": "Mate-pair",
                 "description": (
                     "RF mate-pair starting values; confirm orientation and "
@@ -622,11 +622,12 @@ REGISTRY: dict[Aligner, AlignerSpec] = {
                     "report_all": False,
                 },
             },
-            "adapter_partial_reference": {
+            aligner_preset_ids.BOWTIE2_ADAPTER_PARTIAL_REFERENCE: {
                 "label": "Adapter-contaminated / partial reference",
                 "description": (
                     "Uses local alignment to tolerate unaligned read ends or "
-                    "a partial reference."
+                    "a partial reference. The insert-size range is a starting "
+                    "point; verify it against the library."
                 ),
                 "values": {
                     "sensitivity": "--sensitive",
@@ -643,11 +644,12 @@ REGISTRY: dict[Aligner, AlignerSpec] = {
                     "report_all": False,
                 },
             },
-            "structural_variant": {
+            aligner_preset_ids.BOWTIE2_STRUCTURAL_VARIANT: {
                 "label": "Structural-variant discovery",
                 "description": (
                     "Preserves discordant and mixed evidence and allows "
-                    "dovetailing mates."
+                    "dovetailing mates. The insert-size range is a starting "
+                    "point; verify it against the library."
                 ),
                 "values": {
                     "sensitivity": "--sensitive",
@@ -664,11 +666,12 @@ REGISTRY: dict[Aligner, AlignerSpec] = {
                     "report_all": False,
                 },
             },
-            "repeat_multimapping": {
+            aligner_preset_ids.BOWTIE2_REPEAT_MULTIMAPPING: {
                 "label": "Repeat / multi-mapping analysis",
                 "description": (
                     "Reports up to 10 alignments per read; output size can "
-                    "grow substantially."
+                    "grow substantially. The insert-size range is a starting "
+                    "point; verify it against the library."
                 ),
                 "values": {
                     "sensitivity": "--sensitive",

@@ -10,6 +10,7 @@ import {
   launchValidationMessage,
   initialPresetSelection,
   isBowtie2PairOnlyField,
+  reconcileParameterSetPreset,
   shouldClearPresetOnFieldEdit,
 } from "./alignDialogPresets";
 
@@ -157,6 +158,28 @@ describe("initialPresetSelection", () => {
         presets: bowtie2Presets,
       }),
     ).toBe("mate_pair");
+  });
+
+  it("clears an inherited built-in label when a saved set changes its values", () => {
+    const currentParams: Partial<AlignParams> = {
+      aligner: "bowtie2",
+      preset: BOWTIE2_DEFAULT_PRESET_ID,
+      ...bowtie2Presets.standard_short_read.values,
+    };
+
+    const result = reconcileParameterSetPreset({
+      aligner: "bowtie2",
+      currentParams,
+      appliedValues: { sensitivity: "--very-sensitive", maxins: 750 },
+      presets: bowtie2Presets,
+    });
+
+    expect(result.presetSelection).toBe(BOWTIE2_CUSTOM_PRESET_VALUE);
+    expect(result.overrides).toEqual({
+      sensitivity: "--very-sensitive",
+      maxins: 750,
+      preset: "",
+    });
   });
 
   it("keeps advanced as the non-bowtie2 free-form mode", () => {
