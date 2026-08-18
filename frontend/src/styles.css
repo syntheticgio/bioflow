@@ -6834,3 +6834,37 @@ label.checkbox em {
   color: var(--text-dim);
   margin-bottom: 6px;
 }
+
+/* Saved-parameter-set picker in the align/assemble dialogs. See
+   components/ParameterSetPicker.tsx. */
+
+.preset-picker {
+  margin-bottom: 0.75rem;
+}
+
+.preset-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.preset-row select {
+  flex: 1;
+}
+
+.preset-error {
+  color: var(--error);
+  font-size: 0.85rem;
+}
+
+.preset-drift {
+  margin-top: 0.5rem;
+  padding: 0.6rem 0.75rem;
+  border-left: 3px solid var(--warn);
+  background: color-mix(in srgb, var(--warn) 12%, transparent);
+  font-size: 0.85rem;
+}
+
+.preset-drift ul {
+  margin: 0.35rem 0 0.5rem 1rem;
+}
