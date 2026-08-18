@@ -1661,7 +1661,11 @@ async def ensure_local(obj: DataObject, *, owner: str) -> PydanticObjectId | Non
     and for the same reason: two pipelines started seconds apart on one
     offloaded file must wait on one download, not race two.
     """
-    if obj.locality is not Locality.REMOTE:
+    # `getattr` rather than attribute access: this is called from every launch
+    # path, several of which are exercised with lightweight object stand-ins,
+    # and an object without the field is by definition one that predates
+    # offloading -- which is local. Same defaulting the model itself does.
+    if getattr(obj, "locality", Locality.LOCAL) is not Locality.REMOTE:
         return None
 
     from app.queue import queue
@@ -2285,6 +2289,22 @@ async def launch_alignment(
                 await run_service.link_job(
                     run.id, existing.id, RunJobRole.INDEX, shared=True
                 )
+
+    # Any input that was offloaded is fetched first, and the alignment waits on
+    # it via depends_on -- the same shape as the index build above. Done before
+    # `_resolve_readable`, which refuses a remote object by design: the refusal
+    # is the right answer for a caller that cannot queue work, and the wrong
+    # one here, where fetching is exactly what we can do about it.
+    #
+    # The mate and the reference are included because any of the three can be
+    # remote independently, and a launch that fetched only the R1 would fail
+    # at the next resolve with the other two still missing.
+    for _input in (primary_set.r1, mate, reference):
+        if _input is None:
+            continue
+        _fetch_job_id = await ensure_local(_input, owner=owner)
+        if _fetch_job_id is not None and _fetch_job_id not in depends_on:
+            depends_on.append(_fetch_job_id)
 
     r1_digest, r1_path = await _resolve_readable(primary_set.r1)
     payload: dict = {
