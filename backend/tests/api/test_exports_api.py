@@ -10,6 +10,7 @@ since this process has no Redis.
 
 import pytest
 
+from app.config import settings
 from app.queue import queue
 from tests.services.helpers import make_project
 
@@ -67,11 +68,68 @@ async def test_download_refuses_a_traversal_name(client, two_profiles):
     assert resp.status_code in (400, 404)
 
 
-async def test_list_exports_returns_a_list(client, two_profiles):
-    resp = await client.get("/api/v1/exports", headers=two_profiles["a_headers"])
+async def test_list_exports_returns_a_list(client, two_profiles, tmp_path, monkeypatch):
+    owner = two_profiles["a"].owner_id()
+    prefix = f"{owner}__"
+    bioinfo_home = tmp_path / "bio1"
+    bioinfo_home.mkdir()
+    monkeypatch.setattr(settings, "bioinfo_home", bioinfo_home)
+    exports_dir = settings.exports_dir
+    exports_dir.mkdir(parents=True)
 
+    # Create a test archive for profile A
+    (exports_dir / f"{prefix}my-project-20240818T120000Z.tar.gz").write_text("fake archive")
+    # Create an archive for another profile
+    other = two_profiles["b"].owner_id()
+    (exports_dir / f"{other}__other-project-20240818T120000Z.tar.gz").write_text("fake archive")
+
+    resp = await client.get("/api/v1/exports", headers=two_profiles["a_headers"])
     assert resp.status_code == 200
-    assert isinstance(resp.json(), list)
+    data = resp.json()
+    assert len(data) == 1
+    assert data[0]["name"] == f"{prefix}my-project-20240818T120000Z.tar.gz"
+
+
+async def test_list_exports_is_owner_scoped(client, two_profiles, tmp_path, monkeypatch):
+    bioinfo_home = tmp_path / "bio2"
+    bioinfo_home.mkdir()
+    monkeypatch.setattr(settings, "bioinfo_home", bioinfo_home)
+    exports_dir = settings.exports_dir
+    exports_dir.mkdir(parents=True)
+
+    # Create archives for both profiles
+    a_owner = two_profiles["a"].owner_id()
+    b_owner = two_profiles["b"].owner_id()
+    (exports_dir / f"{a_owner}__a-project.tar.gz").write_text("a data")
+    (exports_dir / f"{b_owner}__b-project.tar.gz").write_text("b data")
+
+    # Profile B should only see their own
+    resp = await client.get("/api/v1/exports", headers=two_profiles["b_headers"])
+    assert resp.status_code == 200
+    data = resp.json()
+    assert len(data) == 1
+    assert data[0]["name"] == f"{b_owner}__b-project.tar.gz"
+
+
+async def test_download_export_404s_for_another_owners_archive(
+    client, two_profiles, tmp_path, monkeypatch
+):
+    bioinfo_home = tmp_path / "bio3"
+    bioinfo_home.mkdir()
+    monkeypatch.setattr(settings, "bioinfo_home", bioinfo_home)
+    exports_dir = settings.exports_dir
+    exports_dir.mkdir(parents=True)
+
+    a_owner = two_profiles["a"].owner_id()
+    a_file = exports_dir / f"{a_owner}__a-project.tar.gz"
+    a_file.write_text("a data")
+
+    # Profile B tries to download profile A's archive
+    resp = await client.get(
+        f"/api/v1/exports/{a_file.name}/download",
+        headers=two_profiles["b_headers"],
+    )
+    assert resp.status_code == 404
 
 
 async def test_download_404s_for_a_nonexistent_export(client, two_profiles):
