@@ -265,3 +265,30 @@ async def test_offload_leaves_report_directories_alone(tmp_path, monkeypatch):
 
     assert report.is_dir(), "offloading deleted a report directory"
     assert (report / "fastqc_report.html").read_text() == "<html>qc</html>"
+
+
+async def test_gc_reclaims_the_released_blob_after_the_grace_window():
+    """The bytes are freed by the same refcount-driven GC as a deletion.
+
+    `gc_candidates` is what actually unlinks; offloading only has to leave
+    the blob in a state it will pick up. Both halves are asserted: the blob
+    is not a candidate while it is still inside GC_GRACE, and is one once
+    its `updated_at` predates the window.
+    """
+    from datetime import UTC, datetime, timedelta
+
+    project = await _project()
+    obj = await _downloaded(project)
+    digest = obj.blob_sha256
+    await object_service.offload_object(obj.id, owner=OWNER)
+
+    fresh = await blob_service.gc_candidates(limit=100)
+    assert digest not in [b.id for b in fresh], (
+        "a just-released blob must wait out GC_GRACE before collection"
+    )
+
+    await Blob.find_one(Blob.id == digest).update(
+        {"$set": {"updated_at": datetime.now(UTC) - blob_service.GC_GRACE - timedelta(minutes=1)}}
+    )
+    aged = await blob_service.gc_candidates(limit=100)
+    assert digest in [b.id for b in aged], "the released bytes were never collectable"

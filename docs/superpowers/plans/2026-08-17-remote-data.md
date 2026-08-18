@@ -210,17 +210,37 @@ test Stage 4 against.
 
 ## Stage 4 — Dropping the bytes
 
-- [ ] `blob_service.release_bytes_for_object` per trap 1.
-- [ ] `object_service` action: flip `locality` to `REMOTE`, populate
+- [x] `blob_service.release_bytes_for_object` per trap 1.
+- [x] `object_service` action: flip `locality` to `REMOTE`, populate
       `remote_source` from `metadata.sra_run`, release the bytes, and **leave
       `status` at `READY`** per the decisions above. Refuse when no
       `sra_run` is recoverable — that is the whole precondition of the
       feature, and in v1 an assembly is one of the things it refuses.
-- [ ] API endpoint in `api/v1/objects.py`.
-- [ ] Audit `MISSING` writers/readers per trap 2.
-- [ ] Tests: `qc_reports/` intact, facts unchanged, `derived_from` intact on
+- [x] API endpoint in `api/v1/objects.py`.
+- [x] Audit `MISSING` writers/readers per trap 2.
+- [x] Tests: `qc_reports/` intact, facts unchanged, `derived_from` intact on
       children, `object_count` **unchanged** while `total_bytes` drops, GC
       reclaims after `GC_GRACE`.
+
+## Stage 4 landed 2026-08-18
+
+Commit `d07e7c28`. Full suite 5472 passed, 7 skipped.
+
+Two things worth carrying into Stage 5:
+
+**`ObjectOut` did not serialize `locality`.** The offload itself worked; the
+field simply never reached the client, so the frontend could not have badged
+anything. It surfaced only because the endpoint test asserted on the
+response rather than on the database. Stage 6 would have found it as "the
+badge never appears" with the backend looking correct.
+
+**The real-data check ran against a copy, not the real object.** Offloading
+the user's actual 3.96 GB FASTQ would release bytes nobody asked to lose, so
+the probe copies the real document into a throwaway project, offloads the
+copy, and restores the refcount afterwards. It still exercised a document
+with real shape -- 41 fact keys -- which is the part a fixture cannot
+provide. Stage 5's fetch check should follow the same pattern: a real
+document, a disposable copy.
 
 ## Stage 5 — The fetch job
 
