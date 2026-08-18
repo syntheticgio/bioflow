@@ -3,7 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { useState } from "react";
 import { api } from "../api/client";
 import { assertEach, assertRunSummary } from "../api/validators";
-import { formatBytes, formatDuration } from "../lib/format";
+import { formatBytes } from "../lib/format";
 import { notify } from "../stores/messageStore";
 import type { JobSummary, RunDetail, RunSummary, SystemLoad } from "../api/types";
 import { JobLogView } from "./JobLogView";
@@ -271,9 +271,9 @@ function JobRow({
   const isRunning = RUNNING.has(job.state);
   const isWaiting = WAITING.has(job.state);
   const isBlocked = BLOCKED.has(job.state);
-  const { pct, phase, message, phase_index, phase_total, units_done, units_total, unit_label, eta_seconds, pct_estimated } = job.progress ?? {};
-  const indeterminate = pct === null && pct_estimated == null;
-  const hasProgress = isRunning && (pct != null || pct_estimated != null || phase != null);
+  const { pct, phase, message, phase_index, phase_total, units_done, units_total, unit_label } = job.progress ?? {};
+  const indeterminate = pct === null;
+  const hasProgress = isRunning && (pct != null || phase != null);
   return (
     <div className="activity-row">
       <div className="activity-row-head">
@@ -299,8 +299,8 @@ function JobRow({
         <div style={{ marginTop: 4, paddingLeft: 2 }}>
           <div className="progress" style={{ height: 4 }}>
             <div
-              className={`progress-bar${indeterminate ? " indeterminate" : ""}${pct_estimated != null ? " estimated" : ""}`}
-              style={indeterminate ? undefined : { width: `${Math.round((pct_estimated ?? pct ?? 0) * 100)}%` }}
+              className={`progress-bar${indeterminate ? " indeterminate" : ""}`}
+              style={indeterminate ? undefined : { width: `${Math.round(pct! * 100)}%` }}
             />
           </div>
           <div style={{ color: "var(--text-faint)", fontSize: 10, marginTop: 2, display: "flex", gap: 8 }}>
@@ -310,9 +310,6 @@ function JobRow({
             )}
             {units_done != null && units_total != null && (
               <span>{units_done.toLocaleString()}/{units_total.toLocaleString()}{unit_label ? ` ${unit_label}` : ""}</span>
-            )}
-            {eta_seconds != null && (
-              <span>~{formatDuration(eta_seconds * 1000)} left{pct_estimated != null ? " (est.)" : ""}</span>
             )}
           </div>
         </div>

@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api/client";
-import { formatBytes, formatDate, formatDuration } from "../lib/format";
+import { formatBytes, formatDate } from "../lib/format";
 import { notify } from "../stores/messageStore";
 import type { JobSummary } from "../api/types";
 
@@ -102,8 +102,8 @@ export function JobList({ projectId, limit = 10 }: { projectId?: string; limit?:
             {job.state === "running" && (
               <div className="progress" style={{ marginTop: 5 }}>
                 <div
-                  className={`progress-bar${indeterminate ? " indeterminate" : ""}${job.progress.pct_estimated != null ? " estimated" : ""}`}
-                  style={indeterminate ? undefined : { width: `${Math.round((job.progress.pct_estimated ?? pct) * 100)}%` }}
+                  className={`progress-bar${indeterminate ? " indeterminate" : ""}`}
+                  style={indeterminate ? undefined : { width: `${Math.round(pct * 100)}%` }}
                 />
               </div>
             )}
@@ -117,13 +117,6 @@ export function JobList({ projectId, limit = 10 }: { projectId?: string; limit?:
                   {job.progress.unit_label && ` ${job.progress.unit_label}`}
                 </div>
               )}
-
-            {job.state === "running" && job.progress.eta_seconds != null && (
-              <div style={{ color: "var(--text-faint)", fontSize: 11, marginTop: 3 }}>
-                ~{formatDuration(job.progress.eta_seconds * 1000)} remaining
-                {job.progress.pct_estimated != null && " (estimated)"}
-              </div>
-            )}
 
             {job.state === "running" &&
               (job.progress.rss_bytes != null || job.progress.cpu_percent != null) && (
