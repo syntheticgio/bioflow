@@ -7,8 +7,15 @@ import {
   jobLabel,
   formatBlockedReason,
   isUnsatisfiable,
+  maintenanceLabel,
+  isMaintenance,
 } from "./runFormat";
-import type { BlockedReason, JobSummary, SystemLoad } from "../api/types";
+import type {
+  BlockedReason,
+  JobSummary,
+  JobTypeInfo,
+  SystemLoad,
+} from "../api/types";
 
 /**
  * These moved out of ActivityView.tsx so the mobile feed could reuse them
@@ -250,5 +257,76 @@ describe("jobLabel", () => {
     expect(jobLabel(job({ type: "run_qc", payload: { name: 42 } }))).toBe(
       "run_qc",
     );
+  });
+});
+
+/**
+ * Maintenance work, told apart from the biological work and given a name a
+ * person can read.
+ *
+ * #556: pressing "Clean up storage now" toasts "Progress is in Activity", and
+ * the job really is in the list -- but it renders as the raw token `gc_blobs`
+ * in "Other recent", under a wall of `verify_files` rows that the same sweep
+ * posts once a minute. The user reasonably reads that as "it isn't shown".
+ *
+ * The split is keyed on the job *type* rather than on `job_class`, because
+ * `scheduler.run_now` deliberately re-classes a hand-fired sweep as
+ * `user_interactive` -- someone is watching it. Keying on the runtime class
+ * would put the one sweep the user actually asked for in the other section.
+ */
+describe("maintenanceLabel", () => {
+  it("names a storage sweep in words rather than its type token", () => {
+    expect(maintenanceLabel("gc_blobs")).toBe("Storage cleanup");
+  });
+
+  it("names the file verification sweep", () => {
+    expect(maintenanceLabel("verify_files")).toBe("File verification");
+  });
+
+  it("returns undefined for work that is not maintenance", () => {
+    expect(maintenanceLabel("align_reads")).toBeUndefined();
+  });
+});
+
+describe("isMaintenance", () => {
+  const types: Record<string, JobTypeInfo> = {
+    gc_blobs: { default_class: "maintenance" },
+    verify_files: { default_class: "maintenance" },
+    align_reads: { default_class: "compute" },
+  };
+
+  it("treats a sweep as maintenance even when fired by hand", () => {
+    // run_now enqueues at user_interactive; the *type* is still maintenance.
+    expect(
+      isMaintenance(job({ type: "gc_blobs", job_class: "user_interactive" }), types),
+    ).toBe(true);
+  });
+
+  it("leaves pipeline work out of maintenance", () => {
+    expect(isMaintenance(job({ type: "align_reads" }), types)).toBe(false);
+  });
+
+  it("falls back to the built-in list when the type map has not loaded", () => {
+    // The map is fetched; a cold cache must not reclassify every sweep as
+    // biological work and flood the main list again.
+    expect(isMaintenance(job({ type: "gc_blobs" }), undefined)).toBe(true);
+  });
+
+  it("does not guess about an unknown type with no map", () => {
+    expect(isMaintenance(job({ type: "brand_new_thing" }), undefined)).toBe(false);
+  });
+});
+
+describe("jobLabel on maintenance jobs", () => {
+  it("uses the readable maintenance name instead of the type token", () => {
+    expect(jobLabel(job({ type: "gc_blobs", payload: {} }))).toBe(
+      "Storage cleanup",
+    );
+  });
+
+  it("still prefers a payload file name when there is one", () => {
+    expect(
+      jobLabel(job({ type: "verify_blob", payload: { name: "reads.fastq" } })),
+    ).toBe("reads.fastq");
   });
 });
