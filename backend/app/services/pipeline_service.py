@@ -1404,6 +1404,8 @@ SYNTENY_MEM_MB = 8192
 
 ASSEMBLY_ERROR_QC_MEM_MB = 8192
 
+QUANTIFY_MEM_MB = 4096
+
 
 def refuse_if_over_budget(
     *, declared_mb: int, budget_mb: int, resource_override: bool
@@ -3924,6 +3926,7 @@ async def launch_quantify(
     owner: str,
     annotation_id: PydanticObjectId | None = None,
     params: dict | None = None,
+    resource_override: bool = False,
 ) -> Job:
     """Queue a per-gene count over one aligned BAM.
 
@@ -3932,6 +3935,15 @@ async def launch_quantify(
     """
     from app.queue import queue
     from app.services import object_service
+
+    # Hoisted above the enqueue for the same reason as launch_assembly: a
+    # declaration the budget can never satisfy is unclaimable, and claim.lua
+    # has no starvation escape (#478, #527).
+    refuse_if_over_budget(
+        declared_mb=QUANTIFY_MEM_MB,
+        budget_mb=await current_admission_budget_mb(),
+        resource_override=resource_override,
+    )
 
     bam = await object_service.get_object(bam_id, owner=owner)
     _check_quantifiable(bam)
@@ -3982,7 +3994,9 @@ async def launch_quantify(
         owner=owner,
         payload=payload,
         job_class=JobClass.COMPUTE,
-        resources=JobResources(cpu=merged.threads, mem_mb=4096, io=IoClass.LIGHT),
+        resources=JobResources(
+            cpu=merged.threads, mem_mb=QUANTIFY_MEM_MB, io=IoClass.LIGHT
+        ),
         max_attempts=2,
         dedup_key=(
             f"quantify:{bam.id}:{annotation.id}:"
@@ -3990,6 +4004,7 @@ async def launch_quantify(
         ),
         project_id=bam.project_id,
         object_id=bam.id,
+        resource_override=resource_override,
     )
     if job is None:
         await run_service.discard_run(run.id, owner=run.owner)
