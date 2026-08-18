@@ -2606,6 +2606,11 @@ a.btn {
   color: var(--accent);
 }
 
+.tool-row-badge.incompatible {
+  background: color-mix(in srgb, var(--error) 15%, transparent);
+  color: var(--error);
+}
+
 .tool-detail {
   overflow-y: auto;
   max-height: 60vh;
