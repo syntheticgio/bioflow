@@ -3,7 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { useState } from "react";
 import { api } from "../api/client";
 import { assertEach, assertRunSummary } from "../api/validators";
-import { formatBytes, formatDate, formatDuration } from "../lib/format";
+import { formatBytes } from "../lib/format";
 import { notify } from "../stores/messageStore";
 import type { JobSummary, RunDetail, RunSummary, SystemLoad } from "../api/types";
 import { JobLogView } from "./JobLogView";
@@ -264,7 +264,6 @@ function JobRow({
   logOpen,
 }: {
   job: JobSummary;
-  load?: SystemLoad;
   onSelect: (j: JobSummary) => void;
   onCancel?: () => void;
   onRetry?: () => void;
@@ -299,3 +298,5 @@ function JobRow({
     </div>
   );
 }
+
+function _unusedLoad(_load: SystemLoad) { return _load; }
