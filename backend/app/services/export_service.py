@@ -38,7 +38,7 @@ from app.services import project_service, run_service
 
 # Bumped when the archive layout changes in a way a reader must notice.
 # Preserved ObjectIds plus this stamp are what a future importer needs.
-BIOFLOW_EXPORT_VERSION = 1
+BIOFLOW_EXPORT_VERSION = 2
 
 # Blobs at or below this size have their bytes packed into the archive;
 # larger ones are listed in the manifest as excluded. A collaborator wants
@@ -307,16 +307,49 @@ def redact(bundle: ExportBundle) -> tuple[dict[str, list[dict]], RedactionSummar
 
 
 _MANIFEST_HEADER = (
-    "blob_id",
+    "artifact_type",
+    "artifact_id",
+    "object_id",
+    "category",
+    "source_path",
+    "archive_path",
     "size",
-    "content_sha256",
-    "state",
-    "rel_path",
-    "bytes",
+    "sha256",
+    "status",
 )
 
 
-def build_manifest(bundle: ExportBundle, *, threshold_bytes: int) -> tuple[str, list[Blob]]:
+def artifact_rows(bundle: ExportBundle) -> list[ExportArtifact]:
+    rows = [
+        ExportArtifact(
+            artifact_type="blob",
+            artifact_id=str(blob.id),
+            category="",
+            source_path=blob.rel_path or "",
+            archive_path=f"blobs/{blob.id}" if blob.rel_path else "",
+            size=blob.size,
+            sha256=blob.content_sha256 or blob.id,
+            status=str(blob.state),
+            state=str(blob.state),
+        )
+        for blob in bundle.blobs
+    ]
+    rows.extend(bundle.report_artifacts)
+    return sorted(
+        rows,
+        key=lambda artifact: (
+            artifact.artifact_type,
+            artifact.category,
+            artifact.object_id or "",
+            artifact.archive_path,
+            artifact.artifact_id,
+        ),
+    )
+
+
+def build_manifest(
+    bundle: ExportBundle, *, threshold_bytes: int
+) -> tuple[str, list[ExportArtifact]]:
     """Render data-manifest.tsv and decide which blobs' bytes to pack.
 
     Every blob in scope gets a row, including those whose bytes are left
@@ -329,24 +362,25 @@ def build_manifest(bundle: ExportBundle, *, threshold_bytes: int) -> tuple[str, 
     not to have the app. Same shape as ops/backup.sh's manifest.
     """
     lines = ["\t".join(_MANIFEST_HEADER)]
-    included: list[Blob] = []
+    included: list[ExportArtifact] = []
 
-    for blob in sorted(bundle.blobs, key=lambda b: str(b.id)):
-        pack = blob.size <= threshold_bytes and blob.rel_path is not None
+    for artifact in artifact_rows(bundle):
+        pack = artifact.size <= threshold_bytes and bool(artifact.archive_path)
+        if artifact.artifact_type == "blob":
+            pack = pack and bool(artifact.source_path)
         if pack:
-            included.append(blob)
+            included.append(artifact)
         lines.append(
             "\t".join(
                 (
-                    str(blob.id),
-                    str(blob.size),
-                    # content_sha256 is only set when it differs from id (the
-                    # compressed-blob case) -- for the common case (an
-                    # uncompressed blob, or one predating compression) it is
-                    # None, and id is already the canonical stored-bytes hash.
-                    blob.content_sha256 or blob.id,
-                    str(blob.state),
-                    blob.rel_path or "",
+                    artifact.artifact_type,
+                    artifact.artifact_id,
+                    artifact.object_id or "",
+                    artifact.category,
+                    artifact.source_path,
+                    artifact.archive_path,
+                    str(artifact.size),
+                    artifact.sha256,
                     "included" if pack else "excluded",
                 )
             )
@@ -502,8 +536,17 @@ async def export_project(
     """Produce one archive for a project and its descendants."""
     bundle = await collect(project_id, owner=owner)
     docs, redaction = redact(bundle)
+    artifacts = artifact_rows(bundle)
     manifest_tsv, included = build_manifest(bundle, threshold_bytes=threshold_bytes)
     report = await render_report(bundle, owner=owner)
+    included_blobs = [
+        blob
+        for blob in bundle.blobs
+        if any(
+            artifact.artifact_type == "blob" and artifact.artifact_id == str(blob.id)
+            for artifact in included
+        )
+    ]
 
     stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
     dest = settings.exports_dir / f"{owner}__{bundle.root.slug}-{stamp}.tar.gz"
@@ -516,7 +559,13 @@ async def export_project(
         "project_count": len(bundle.projects),
         "counts": {name: len(rows) for name, rows in docs.items()},
         "blob_count": len(bundle.blobs),
-        "included_blob_count": len(included),
+        "included_blob_count": len(included_blobs),
+        "artifact_count": len(artifacts),
+        "report_artifact_count": len(bundle.report_artifacts),
+        "included_artifact_count": len(included),
+        "included_report_artifact_count": sum(
+            1 for artifact in included if artifact.artifact_type == "report"
+        ),
         "blob_threshold_bytes": threshold_bytes,
         "redaction_profile": redaction.profile,
     }
@@ -528,13 +577,13 @@ async def export_project(
         manifest_json=manifest_json,
         manifest_tsv=manifest_tsv,
         report=report,
-        included=included,
+        included=included_blobs,
     )
 
     return ExportResult(
         path=dest,
         size_bytes=dest.stat().st_size,
         blob_count=len(bundle.blobs),
-        included_blob_count=len(included),
+        included_blob_count=len(included_blobs),
         redaction=redaction,
     )
