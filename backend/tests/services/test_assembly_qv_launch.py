@@ -24,7 +24,7 @@ import pytest
 from beanie import PydanticObjectId
 
 from app.config import settings
-from app.errors import ValidationError
+from app.errors import PermanentError, ValidationError
 from app.models import FormatKind, ObjectStatus, SidecarRole
 from app.pipelines.tools import Tool
 from app.services import pipeline_service
@@ -223,6 +223,41 @@ class TestReadSetResolution:
 
         assert enqueued["resources"].cpu == 4
         assert enqueued["resources"].mem_mb == 12288
+
+
+class TestToolRefusal:
+    """A missing binary refuses the launch before any object is touched.
+
+    The available direction is asserted implicitly by every other test in
+    this file (the probes are patched to installed tools); this is the
+    direction that actually fails when the require() seam breaks, per
+    CLAUDE.md's note that the image ships most tools as installed.
+    """
+
+    _MISSING = Tool(name="missing", path=None, version=None, error="not found")
+
+    async def _launch_with(self, *, meryl, merqury):
+        assembly = _assembly()
+        get_object = AsyncMock(return_value=assembly)
+
+        with (
+            patch("app.pipelines.tools.meryl", return_value=meryl),
+            patch("app.pipelines.tools.merqury", return_value=merqury),
+            patch("app.services.object_service.get_object", get_object),
+            patch(
+                "app.services.pipeline_service.current_admission_budget_mb",
+                AsyncMock(return_value=10_000_000),
+            ),
+        ):
+            with pytest.raises(PermanentError):
+                await pipeline_service.launch_qv_qc(assembly.id, owner="local")
+        get_object.assert_not_awaited()
+
+    async def test_missing_meryl_is_refused_before_anything_else(self):
+        await self._launch_with(meryl=self._MISSING, merqury=_MERQURY)
+
+    async def test_missing_merqury_is_refused_before_anything_else(self):
+        await self._launch_with(meryl=_MERYL, merqury=self._MISSING)
 
 
 class TestMerylCacheMaterialization:
