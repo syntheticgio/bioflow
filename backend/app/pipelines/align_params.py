@@ -189,7 +189,10 @@ def _optional_int(
     value = data.get(key)
     if value in (None, ""):
         return None
-    value = int(value)
+    try:
+        value = int(value)
+    except (TypeError, ValueError) as exc:
+        raise ValidationError(f"{key} must be an integer") from exc
     if value < minimum:
         raise ValidationError(f"{key} must be at least {minimum}")
     if maximum is not None and value > maximum:
@@ -207,7 +210,10 @@ def _optional_float(
     value = data.get(key)
     if value in (None, ""):
         return None
-    value = float(value)
+    try:
+        value = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValidationError(f"{key} must be a number") from exc
     if value < minimum or value > maximum:
         raise ValidationError(f"{key} must be between {minimum} and {maximum}")
     return value
