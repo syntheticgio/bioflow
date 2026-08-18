@@ -108,7 +108,6 @@ if [ "$LINE" = "app" ]; then
   CORE="${CORE%-beta}"
   case "$VERSION" in
     *-alpha)
-      STAGE="alpha"
       TARGET="alpha/$CORE"
       # Retrying a cut that died after switching (see the branch check below)
       # legitimately starts from the target branch itself.
@@ -116,13 +115,11 @@ if [ "$LINE" = "app" ]; then
         || die "an alpha release must be cut from main, not '$BRANCH'"
       ;;
     *-beta)
-      STAGE="beta"
       TARGET="beta/$CORE"
       [ "$BRANCH" = "alpha/$CORE" ] || [ "$BRANCH" = "$TARGET" ] \
         || die "a beta release must be cut from alpha/$CORE, not '$BRANCH'"
       ;;
     *)
-      STAGE="release"
       TARGET="release/$CORE"
       [ "$BRANCH" = "main" ] || [ "$BRANCH" = "beta/$CORE" ] || [ "$BRANCH" = "$TARGET" ] \
         || die "a production release must be cut from main or beta/$CORE, not '$BRANCH'"
