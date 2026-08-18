@@ -27,11 +27,11 @@ class TestSpecFields:
         assert all(hasattr(f, "key") for f in fields)
 
     def test_a_spec_with_no_fields_resolves_to_empty(self):
-        """`AssemblerSpec.fields` defaults to `()`. HIFIASM and SPADES take
-        that default today, so they resolve without raising and yield no
+        """`AssemblerSpec.fields` defaults to `()`. HIFIASM takes that
+        default today, so it resolves without raising and yields no
         eligible keys -- which is what `has_parameter_sets` below exists to
         detect, so the UI never offers a picker that can only save nothing."""
-        assert svc.spec_fields(ParamSpecFamily.ASSEMBLER, Assembler.SPADES.value) == ()
+        assert svc.spec_fields(ParamSpecFamily.ASSEMBLER, Assembler.HIFIASM.value) == ()
 
     def test_unknown_tool_raises(self):
         with pytest.raises(svc.UnknownToolError):
@@ -70,7 +70,7 @@ class TestHasParameterSets:
         assert svc.has_parameter_sets(ParamSpecFamily.ALIGNER, Aligner.MINIMAP2.value)
 
     def test_false_when_the_spec_declares_none(self):
-        assert not svc.has_parameter_sets(ParamSpecFamily.ASSEMBLER, Assembler.SPADES.value)
+        assert not svc.has_parameter_sets(ParamSpecFamily.ASSEMBLER, Assembler.HIFIASM.value)
 
     def test_false_for_an_unknown_tool(self):
         assert not svc.has_parameter_sets(ParamSpecFamily.ALIGNER, "not-a-real-aligner")
