@@ -215,18 +215,18 @@ SPADES_SPEC = AssemblerSpec(
         # Filenames confirmed against a real 4.3.0 run of the bundled
         # test dataset, not read from documentation.
         #
-        # contigs.fasta is listed after scaffolds.fasta deliberately: both
-        # share OutputKind.CONTIGS (there is no separate "scaffolds" kind --
-        # see assemblers.OutputKind), and callers that key outputs by kind
-        # (e.g. `{o.kind: o for o in spec.outputs}`, as the required-output
-        # test does) keep whichever entry comes last. contigs.fasta is the
-        # one that must win that lookup, since it is the required output that
-        # becomes the REFERENCE DataObject.
+        # No scaffolds.fasta entry, deliberately: `harvest()` returns
+        # `dict[OutputKind, Path]` keyed by kind, and there is no separate
+        # "scaffolds" OutputKind (see assemblers.OutputKind) -- so a
+        # scaffolds.fasta Output here would share OutputKind.CONTIGS with
+        # contigs.fasta and simply lose the collision, silently absent from
+        # every real run's harvested outputs despite being declared. The
+        # minimal, honest fix is not declaring it: contigs.fasta (required)
+        # and the graph below are both harvestable without collision.
         Output(
             kind=OutputKind.GRAPH,
             filename="assembly_graph_with_scaffolds.gfa",
         ),
-        Output(kind=OutputKind.CONTIGS, filename="scaffolds.fasta"),
         Output(kind=OutputKind.CONTIGS, filename="contigs.fasta", required=True),
     ),
     fields=(

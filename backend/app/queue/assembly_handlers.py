@@ -108,10 +108,18 @@ def assemble_reads(ctx: JobContext) -> dict:
 
     if assembler is Assembler.ABYSS:
         progress = assembly_runner.AbyssProgress()
-    else:
+    elif assembler is Assembler.FLYE:
         progress = assembly_runner.AssemblyProgress(
             stage_order=assembly_runner.flye_stage_order(params)
         )
+    else:
+        # SPAdes (and any future assembler landing here): no stage-order
+        # source exists for it (flye_stage_order reads params.iterations,
+        # which only FlyeParams has), and nothing in this codebase parses
+        # SPAdes' own progress banners. An empty stage_order is the honest
+        # default -- AssemblyProgress's docstring says exactly this falls
+        # back to reporting the phase name alone, with no phase structure.
+        progress = assembly_runner.AssemblyProgress()
     ctx.progress(phase="starting", pct=None, message=f"starting {assembler.value}")
     ctx.extend_lease(ASSEMBLY_LEASE_SECONDS)
 
@@ -204,11 +212,17 @@ def _contigs_name(ctx: JobContext) -> str:
 
 
 def _graph_suffix(assembler: str) -> str:
-    """ABySS emits Graphviz `.dot`; Flye emits GFA.
+    """ABySS emits Graphviz `.dot`; Flye and SPAdes both emit GFA.
 
     Naming an ABySS graph `.gfa` would be a lie that survives into the object
     store, and `AssemblyGraph.tsx` would then try to render it as GFA and fail
     confusingly rather than declining cleanly.
+
+    Still a two-way string comparison with an `else` fallback rather than a
+    mapping keyed by every `Assembler` member, so a future assembler emitting
+    neither format would be silently misnamed as GFA. That structural gap is
+    tracked as a follow-up rather than fixed here; SPAdes happens to be
+    correct today because it genuinely does emit GFA.
     """
     return ".assembly_graph.dot" if assembler == "abyss" else ".assembly_graph.gfa"
 

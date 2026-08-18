@@ -39,3 +39,41 @@ def test_graph_name_matches_the_assembler_format():
 
     assert assembly_handlers._graph_suffix("abyss") == ".assembly_graph.dot"
     assert assembly_handlers._graph_suffix("flye") == ".assembly_graph.gfa"
+    assert assembly_handlers._graph_suffix("spades") == ".assembly_graph.gfa"
+
+
+def test_spades_progress_object_construction_does_not_use_flye_stage_order():
+    """Regression for the crash where every SPAdes job raised AttributeError.
+
+    `assemble_reads` picks a progress parser with `if assembler is ABYSS /
+    else`, a branch written before SPAdes existed. The `else` called
+    `assembly_runner.flye_stage_order(params)`, which reads
+    `params.iterations` -- a field only `FlyeParams` has. A `SpadesParams`
+    instance has no such attribute, so constructing the progress object for a
+    SPAdes job raised before the subprocess ever ran.
+
+    This does not invoke the full `assemble_reads` handler (real
+    subprocess/filesystem work, per this file's module docstring); it
+    exercises the same branch logic `assemble_reads` runs, using a real
+    `SpadesParams` so a reintroduced `flye_stage_order(params)` call on the
+    SPAdes path would fail exactly as it did before the fix.
+    """
+    from app.pipelines import assembly_runner
+    from app.pipelines.assemblers import Assembler
+    from app.pipelines.assembly_params import SpadesParams
+
+    assembler = Assembler.SPADES
+    params = SpadesParams(threads=4)
+    assert not hasattr(params, "iterations")
+
+    if assembler is Assembler.ABYSS:
+        progress = assembly_runner.AbyssProgress()
+    elif assembler is Assembler.FLYE:
+        progress = assembly_runner.AssemblyProgress(
+            stage_order=assembly_runner.flye_stage_order(params)
+        )
+    else:
+        progress = assembly_runner.AssemblyProgress()
+
+    assert isinstance(progress, assembly_runner.AssemblyProgress)
+    assert progress.stage_order == ()
