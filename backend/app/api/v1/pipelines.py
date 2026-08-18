@@ -15,6 +15,7 @@ from app.api.v1.jobs import JobOut
 from app.config import settings
 from app.errors import ConflictError, NotFoundError, ValidationError
 from app.models import BlobStorage, ObjectRole, ObjectStatus
+from app.models.run import AppliedParameterSet
 from app.pipelines import (
     align_runner,
     aligner_registry,
@@ -1325,6 +1326,7 @@ class AlignRequest(BaseModel):
     # "Launch anyway" from the refusal card. Skips the enqueue-time BLOCK and
     # persists on the job, where claim.lua admits it only as sole occupant.
     resource_override: bool = False
+    from_parameter_set: AppliedParameterSet | None = None
 
 
 class BuildIndexRequest(BaseModel):
@@ -1413,6 +1415,7 @@ class AssembleRequest(BaseModel):
     # "Launch anyway" from the refusal card. Skips the enqueue-time BLOCK and
     # persists on the job, where claim.lua admits it only as sole occupant.
     resource_override: bool = False
+    from_parameter_set: AppliedParameterSet | None = None
 
 
 @router.post("/assemble", response_model=JobOut, status_code=status.HTTP_201_CREATED)
@@ -1423,6 +1426,7 @@ async def launch_assemble(body: AssembleRequest, owner: OwnerDep) -> JobOut:
         owner=owner,
         params=body.params,
         resource_override=body.resource_override,
+        from_parameter_set=body.from_parameter_set,
     )
     return JobOut.of(job)
 
@@ -1908,6 +1912,7 @@ async def launch_alignment(body: AlignRequest, owner: OwnerDep) -> JobOut:
         params=body.params,
         paired=body.paired,
         resource_override=body.resource_override,
+        from_parameter_set=body.from_parameter_set,
     )
     return JobOut.of(job)
 

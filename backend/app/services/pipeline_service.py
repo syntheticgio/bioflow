@@ -34,6 +34,7 @@ from app.models import (
     SequencingPlatform,
     SidecarRole,
 )
+from app.models.run import AppliedParameterSet
 from app.pipelines import (
     align_params as align_params_module,
 )
@@ -1779,6 +1780,7 @@ async def launch_alignment(
     params: dict | None = None,
     paired: bool = True,
     resource_override: bool = False,
+    from_parameter_set: AppliedParameterSet | None = None,
 ):
     """Queue an alignment, building the reference index first if it is missing.
 
@@ -2079,6 +2081,7 @@ async def launch_alignment(
         # naming the caller states which of them is authoritative rather than
         # leaving a reader to work out that it does not matter.
         owner=owner,
+        from_parameter_set=from_parameter_set,
     )
 
     # Build the index first if it is missing, and hold the alignment behind it.
@@ -4383,6 +4386,7 @@ async def launch_assembly(
     params: dict | None = None,
     resource_override: bool = False,
     mate_object_id: PydanticObjectId | None = None,
+    from_parameter_set: AppliedParameterSet | None = None,
 ) -> Job:
     """Queue a de novo assembly of one FASTQ, paired when we can identify both mates."""
     from app.queue import queue
@@ -4524,6 +4528,7 @@ async def launch_assembly(
         params=parsed.as_dict(),
         owner=owner,
         tool=parsed.assembler.value,
+        from_parameter_set=from_parameter_set,
     )
 
     payload: dict = {
