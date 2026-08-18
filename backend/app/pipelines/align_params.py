@@ -179,18 +179,113 @@ def _validate_comma_pair(value: str, name: str) -> None:
         ) from None
 
 
+def _optional_int(
+    data: dict,
+    key: str,
+    *,
+    minimum: int,
+    maximum: int | None = None,
+) -> int | None:
+    value = data.get(key)
+    if value in (None, "", "default", "none"):
+        return None
+    value = int(value)
+    if value < minimum:
+        raise ValidationError(f"{key} must be at least {minimum}")
+    if maximum is not None and value > maximum:
+        raise ValidationError(f"{key} must be at most {maximum}")
+    return value
+
+
+def _optional_float(
+    data: dict,
+    key: str,
+    *,
+    minimum: float,
+    maximum: float,
+) -> float | None:
+    value = data.get(key)
+    if value in (None, "", "default", "none"):
+        return None
+    value = float(value)
+    if value < minimum or value > maximum:
+        raise ValidationError(f"{key} must be between {minimum} and {maximum}")
+    return value
+
+
+def _optional_choice(
+    data: dict,
+    key: str,
+    *,
+    valid: tuple[str, ...],
+    sentinel: str,
+) -> str | None:
+    value = data.get(key)
+    if value in (None, "", sentinel):
+        return None
+    if value not in valid:
+        raise ValidationError(
+            f"Unknown {key} {value!r}",
+            details={"valid": [sentinel, *valid]},
+        )
+    return value
+
+
+def _optional_bool(data: dict, key: str) -> bool | None:
+    value = data.get(key)
+    if value is True:
+        return True
+    return None
+
+
 # minimap2 presets. Not cosmetic: the wrong preset for long reads produces
 # silently poor alignments rather than an error.
 MINIMAP2_PRESETS: tuple[str, ...] = ("map-ont", "map-pb", "map-hifi", "lr:hq", "sr")
+MINIMAP2_SECONDARY_MODES: tuple[str, ...] = ("enabled", "disabled")
+MINIMAP2_SECONDARY_MODE_DEFAULT = "default"
+MINIMAP2_CS_MODES: tuple[str, ...] = ("short", "long")
+MINIMAP2_CS_MODE_DEFAULT = "none"
 
 
 @dataclass
 class Minimap2Params(BaseAlignParams):
     aligner: Aligner = Aligner.MINIMAP2
     preset: str = "sr"
+    kmer_size: int | None = None
+    window_size: int | None = None
+    min_chain_score: int | None = None
+    max_gap: int | None = None
+    secondary_ratio: float | None = None
+    max_secondary: int | None = None
+    batch_size: int | None = None
+    secondary_mode: str | None = None
+    soft_clip_supplementary: bool | None = None
+    cs_mode: str | None = None
+    emit_md: bool | None = None
 
     def as_dict(self) -> dict:
-        return {**super().as_dict(), "preset": self.preset}
+        data = {**super().as_dict(), "preset": self.preset}
+        for name in (
+            "kmer_size",
+            "window_size",
+            "min_chain_score",
+            "max_gap",
+            "secondary_ratio",
+            "max_secondary",
+            "batch_size",
+        ):
+            value = getattr(self, name)
+            if value is not None:
+                data[name] = value
+        if self.secondary_mode is not None:
+            data["secondary_mode"] = self.secondary_mode
+        if self.soft_clip_supplementary is True:
+            data["soft_clip_supplementary"] = True
+        if self.cs_mode is not None:
+            data["cs_mode"] = self.cs_mode
+        if self.emit_md is True:
+            data["emit_md"] = True
+        return data
 
     @classmethod
     def from_dict(cls, data: dict) -> "Minimap2Params":
@@ -200,7 +295,35 @@ class Minimap2Params(BaseAlignParams):
                 f"Unknown minimap2 preset {preset!r}",
                 details={"valid": list(MINIMAP2_PRESETS)},
             )
-        return cls(aligner=Aligner.MINIMAP2, preset=preset, **cls._shared(data))
+
+        return cls(
+            aligner=Aligner.MINIMAP2,
+            preset=preset,
+            kmer_size=_optional_int(data, "kmer_size", minimum=1, maximum=28),
+            window_size=_optional_int(data, "window_size", minimum=1, maximum=255),
+            min_chain_score=_optional_int(data, "min_chain_score", minimum=1),
+            max_gap=_optional_int(data, "max_gap", minimum=1),
+            secondary_ratio=_optional_float(
+                data, "secondary_ratio", minimum=0.0, maximum=1.0
+            ),
+            max_secondary=_optional_int(data, "max_secondary", minimum=1),
+            batch_size=_optional_int(data, "batch_size", minimum=1),
+            secondary_mode=_optional_choice(
+                data,
+                "secondary_mode",
+                valid=MINIMAP2_SECONDARY_MODES,
+                sentinel=MINIMAP2_SECONDARY_MODE_DEFAULT,
+            ),
+            soft_clip_supplementary=_optional_bool(data, "soft_clip_supplementary"),
+            cs_mode=_optional_choice(
+                data,
+                "cs_mode",
+                valid=MINIMAP2_CS_MODES,
+                sentinel=MINIMAP2_CS_MODE_DEFAULT,
+            ),
+            emit_md=_optional_bool(data, "emit_md"),
+            **cls._shared(data),
+        )
 
 
 BOWTIE2_SENSITIVITIES: tuple[str, ...] = (
