@@ -1015,6 +1015,89 @@ async def offload_object(object_id: PydanticObjectId, *, owner: str) -> DataObje
     )
 
 
+async def restore_bytes_for_object(
+    object_id: PydanticObjectId,
+    *,
+    owner: str,
+    path: Path,
+    content_sha256: str | None = None,
+) -> DataObject:
+    """Re-attach fetched bytes to an object that was offloaded.
+
+    The counterpart to `offload_object`, and deliberately *not*
+    `ingest_local_file`: that creates a new DataObject, which is exactly what
+    must not happen here. The object already exists, and every link pointing
+    at it -- `derived_from` on its children, `sidecar_of`, a mate, a run's
+    inputs -- names this id. Creating a second object would leave all of them
+    pointing at the empty original.
+
+    Dedup still applies, and matters more here than elsewhere: the bytes being
+    restored may already be in the store because another object shares them,
+    in which case the refcount is incremented and the staged copy discarded
+    rather than a second identical blob written.
+
+    `locality` flips back to LOCAL only after the blob is attached, so a crash
+    between the two leaves an object that still reads as remote -- fetchable
+    again -- rather than one claiming local bytes it does not have.
+    """
+    obj = await get_object(object_id, owner=owner)
+
+    if not await asyncio.to_thread(path.exists):
+        raise NotFoundError(f"Fetched file is missing: {path}")
+
+    staged = await _stage_for_placement(
+        path, obj.name, precomputed_content_sha256=content_sha256
+    )
+    path, digest, size = staged.path, staged.digest, staged.size
+
+    dedup_hit = (
+        await blob_service.find_present_blob_by_content(staged.content_sha256)
+        if staged.content_sha256
+        else None
+    )
+    existing = dedup_hit or await blob_service.find_present_blob(digest)
+    if existing is not None and _blob_bytes_present(existing):
+        await _discard(path)
+        digest, size = existing.id, existing.size
+        log.info("fetched_file_deduplicated", digest=digest, name=obj.name)
+    else:
+        await asyncio.to_thread(cas.place_blob, path, digest, size)
+
+    await blob_service.attach_blob_to_object(
+        object_id=obj.id,
+        digest=digest,
+        size=size,
+        storage=BlobStorage.MANAGED,
+        # READY, not INGESTING: the format was detected when this object was
+        # first downloaded and none of that was discarded at offload. Sending
+        # it back through ingest would re-derive facts that are already right,
+        # and would leave the object briefly non-READY -- which is precisely
+        # the state the picker and the Actions rules filter out.
+        status=ObjectStatus.READY,
+        content_sha256=staged.content_sha256,
+    )
+    await DataObject.find_one(DataObject.id == obj.id).update(
+        {
+            "$set": {
+                "locality": Locality.LOCAL.value,
+                "remote_source": None,
+                "updated_at": datetime.now(UTC),
+            }
+        }
+    )
+    await project_service.bump_counters(obj.project_id, objects=0, total_bytes=size)
+
+    log.info(
+        "object_bytes_restored",
+        object_id=str(obj.id),
+        digest=digest,
+        size=size,
+    )
+    refreshed = await DataObject.get(obj.id)
+    assert refreshed is not None
+    return refreshed
+
+
 def check_local(obj: DataObject, *, verb: str) -> None:
     """Refuse an offloaded object before a caller reaches for its bytes.
 

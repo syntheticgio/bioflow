@@ -549,6 +549,73 @@ async def _apply_trim_reads(result: dict, *, owner: str) -> None:
     )
 
 
+async def _apply_fetch_remote(result: dict, *, owner: str) -> None:
+    """Re-attach fetched bytes to the object that was offloaded.
+
+    Where `_apply_sra_download` creates objects, this restores one. The
+    distinction is the entire point of the handler existing separately: the
+    object's id is referenced by its children's `derived_from`, by any
+    sidecar, by its mate, and by the runs it took part in, so a fetch that
+    created a new object would leave every one of those pointing at a file
+    with no bytes.
+
+    A run downloaded as a pair stages two files but each offloaded object owns
+    exactly one of them, so the staged entry matching this object's name is the
+    one restored and the other is discarded. Fetching the mate is its own job,
+    enqueued when the mate is itself needed -- fetching both here would
+    re-download gigabytes the user may not have asked for.
+    """
+    from app.services import object_service
+
+    object_id = result.get("object_id")
+    staged = result.get("staged") or []
+    if not object_id or not staged:
+        return
+
+    object_id = PydanticObjectId(object_id)
+    obj = await DataObject.get(object_id)
+    if obj is None:
+        log.warning("fetch_remote_object_gone", object_id=str(object_id))
+        return
+
+    from app.storage.detect import strip_compression_suffix
+
+    wanted = strip_compression_suffix(obj.name)
+    match = next(
+        (e for e in staged if strip_compression_suffix(Path(e["name"]).name) == wanted),
+        None,
+    )
+    # Fall back to the sole staged file: a single-end run names its output
+    # after the accession alone, which need not equal the object's name if the
+    # user renamed the file after downloading it.
+    if match is None and len(staged) == 1:
+        match = staged[0]
+
+    for entry in staged:
+        if entry is match:
+            continue
+        path = Path(entry["path"])
+        if await asyncio.to_thread(path.exists):
+            await asyncio.to_thread(path.unlink)
+
+    if match is None:
+        log.error(
+            "fetch_remote_no_matching_file",
+            object_id=str(object_id),
+            name=obj.name,
+            staged=[e["name"] for e in staged],
+        )
+        return
+
+    await object_service.restore_bytes_for_object(
+        object_id,
+        owner=owner,
+        path=Path(match["path"]),
+        content_sha256=match.get("content_sha256"),
+    )
+    log.info("fetch_remote_restored", object_id=str(object_id), name=obj.name)
+
+
 async def _apply_sra_download(result: dict, *, owner: str) -> None:
     """Take a finished SRA download into the project, and chain its QC.
 
@@ -2877,6 +2944,7 @@ _APPLIERS = {
     "summarize_de_results": _apply_summarize_de_results,
     "summarize_variant_results": _apply_summarize_variant_results,
     "download_sra_run": _apply_sra_download,
+    "fetch_remote": _apply_fetch_remote,
     "download_assembly": _apply_assembly_download,
     "download_uniprot": _apply_uniprot_download,
     "build_index": _apply_build_index,

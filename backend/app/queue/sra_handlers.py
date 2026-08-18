@@ -143,6 +143,39 @@ def download_sra_run(ctx: JobContext) -> dict:
     }
 
 
+@handler(
+    "fetch_remote",
+    mode=HandlerMode.SUBPROCESS,
+    # Same class and resources as `download_sra_run`: this *is* that download,
+    # differing only in what the applier does with the bytes. Someone is
+    # waiting on a pipeline that cannot start until this lands.
+    job_class=JobClass.USER_INTERACTIVE,
+    resources=JobResources(cpu=1, mem_mb=512, io=IoClass.HEAVY),
+    # 3 for the reason download_sra_run gives: a failed transfer is usually the
+    # network rather than the input.
+    max_attempts=3,
+)
+def fetch_remote(ctx: JobContext) -> dict:
+    """Re-download an offloaded object's bytes.
+
+    The transfer is identical to `download_sra_run` -- same tool, same staging,
+    same compression -- so the body delegates to it rather than growing a
+    second copy of prefetch/fasterq-dump/bgzip that would drift. What differs
+    is entirely in the applier: `_apply_sra_download` *creates* objects, while
+    `_apply_fetch_remote` re-attaches bytes to the object that is already
+    there, keeping its id, facts, provenance and every link pointing at it.
+
+    Requires `object_id` on the payload, which is what the applier restores.
+    """
+    object_id = ctx.payload.get("object_id")
+    if not object_id:
+        raise PermanentError("fetch_remote requires an 'object_id'")
+
+    result = download_sra_run(ctx)
+    result["object_id"] = str(object_id)
+    return result
+
+
 def _check_disk_space(work: Path, estimate: int | None, accession: str) -> None:
     """Refuse a download that cannot fit before spending an hour on it.
 
