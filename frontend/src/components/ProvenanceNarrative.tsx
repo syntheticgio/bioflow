@@ -5,6 +5,7 @@ import { useState } from "react";
 import { api } from "../api/client";
 import type { ProvenanceStep } from "../api/types";
 import { notify } from "../stores/messageStore";
+import { InfoMarker } from "./InfoMarker";
 
 /**
  * One numbered lineage row.
@@ -119,7 +120,10 @@ export function ProvenanceNarrative({
     <div className="history-layout">
       <div>
         <div className="history-head">
-          <div className="section-title">How this file was made</div>
+          <div className="section-title">
+            How this file was made
+            <InfoMarker metric="ui.provenance" />
+          </div>
           <button
             type="button"
             className="btn-text"

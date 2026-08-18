@@ -1,6 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import { api } from "../api/client";
+import { InfoMarker } from "./InfoMarker";
 import type { ComputationRecord } from "../api/types";
 import { formatBytes, formatDate } from "../lib/format";
 
@@ -124,7 +125,10 @@ export function ComputationHistory({ objectId }: { objectId: string }) {
 
   return (
     <div className="section" style={{ marginTop: 30 }}>
-      <div className="section-title">Runs on this file</div>
+      <div className="section-title">
+        Runs on this file
+        <InfoMarker metric="ui.computation_history" />
+      </div>
 
       {!hasRecords && !predatesRecording && (
         <div className="section-note">

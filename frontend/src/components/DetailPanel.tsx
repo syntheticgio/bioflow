@@ -338,7 +338,10 @@ function ProjectDetail({ id }: { id: string }) {
           </div>
 
           <div className="section">
-            <div className="section-title">Project metadata</div>
+            <div className="section-title">
+              Project metadata
+              <InfoMarker metric="ui.project_metadata" />
+            </div>
             <div className="section-note">
               Inherited by every file ingested into this project.
             </div>
@@ -1617,7 +1620,10 @@ function MetadataTab({
           Full width: its groups lay out in columns of their own, which a
           half-width column would collapse into one cramped stack. */}
       <div className="section">
-        <div className="section-title">Record</div>
+        <div className="section-title">
+          Record
+          <InfoMarker metric="ui.file_metadata" />
+        </div>
         <div className="section-note">
           Editable — these fields travel with the file into every pipeline it
           feeds.

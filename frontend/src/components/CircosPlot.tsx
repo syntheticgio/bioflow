@@ -1,4 +1,5 @@
 import React, { useMemo } from "react";
+import { InfoMarker } from "./InfoMarker";
 
 // ─── types ────────────────────────────────────────────────────────────
 
@@ -161,6 +162,11 @@ const CircosPlot: React.FC<CircosPlotProps> = ({
       {title && (
         <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 6, color: c.label }}>
           {title}
+        </div>
+      )}
+      {!title && (
+        <div style={{ fontSize: 11, color: c.label, marginBottom: 4 }}>
+          GC tracks <InfoMarker metric="ui.chart_gc_tracks" />
         </div>
       )}
       {tracks.gc_tracks_partial && (

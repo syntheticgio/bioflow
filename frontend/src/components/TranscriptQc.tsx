@@ -8,6 +8,7 @@ import type {
   ObjectDetail as ObjectDetailData,
 } from "../api/types";
 import { OnDemandCompute } from "./OnDemandCompute";
+import { InfoMarker } from "./InfoMarker";
 
 /**
  * RNA-seq QC: where reads sit within a transcript, and where they sit
@@ -102,7 +103,9 @@ export function TranscriptQc({
         <div style={{ display: "flex", gap: 24, flexWrap: "wrap" }}>
           {geneBody && f.gene_body_coverage && f.gene_body_coverage.length > 0 && (
             <div style={{ flex: "1 1 300px" }}>
-              <div className="section-title">Gene body coverage</div>
+              <div className="section-title">
+                Gene body coverage <InfoMarker metric="ui.chart_transcript_gene_body" />
+              </div>
               <GeneBodyChart curve={f.gene_body_coverage} />
               <Provenance
                 annotation={f.transcript_qc_annotation}
@@ -112,7 +115,9 @@ export function TranscriptQc({
           )}
           {featureDistribution && f.feature_distribution && (
             <div style={{ flex: "1 1 300px" }}>
-              <div className="section-title">Read distribution</div>
+              <div className="section-title">
+                Read distribution <InfoMarker metric="ui.chart_transcript_distribution" />
+              </div>
               <FeatureBar counts={f.feature_distribution} />
               <Provenance
                 annotation={f.transcript_qc_annotation}

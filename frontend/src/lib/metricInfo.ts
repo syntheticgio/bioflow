@@ -449,6 +449,75 @@ export const METRIC_INFO: Record<string, MetricInfo> = {
       "Contig length against the percentage of the assembly covered. Nx measures against the assembly's own size; NGx measures against the expected genome size, so an NGx curve that stops short of the axis is showing you the fraction of the genome the assembly never reached.",
   },
 
+  // ---- Remaining standalone surfaces ------------------------------------
+  "ui.project_metadata": {
+    term: "Project metadata",
+    description:
+      "Free-form key/value fields inherited by every file ingested into this project. Values are stored with their JSON type when possible, so metadata can be searched and reused by downstream work.",
+  },
+  "ui.file_metadata": {
+    term: "Record metadata",
+    description:
+      "Metadata attached to this file and carried into pipelines that use it. Schema suggestions are conveniences rather than a restriction; custom fields remain valid alongside them.",
+  },
+  "ui.provenance": {
+    term: "File provenance",
+    description:
+      "The recorded lineage of this file, oldest input first. Missing facts are shown as unrecorded rather than inferred, so the narrative remains citable without overstating what BioFlow knows.",
+  },
+  "ui.computation_history": {
+    term: "Computation history",
+    description:
+      "Individual jobs recorded against this file, including their outcome, duration, threads, and peak memory when available. These are observations of runs, not estimates of future jobs.",
+  },
+  "ui.metrics_overview": {
+    term: "Metrics overview",
+    description:
+      "A project-wide view of computation records. Run counts include failures, while duration, input size, read counts, and resource summaries use the successful outcome-filtered rows used by the predictive models.",
+    computed:
+      "Peak memory is absent for jobs shorter than 60 seconds because resource sampling has a minimum duration floor; the dash means no measurement, not zero.",
+  },
+  "ui.metrics_estimates": {
+    term: "Job-type estimates",
+    description:
+      "Median and p90 measurements grouped by job type. They describe the recent successful sample used for modelling, not every recorded run and not a guarantee for the next run.",
+  },
+  "ui.metrics_recent_runs": {
+    term: "Recent runs",
+    description:
+      "The newest recorded runs for each job type, with failures included. This list is the audit trail behind the summaries and may therefore disagree with their successful-run-only medians.",
+  },
+  "ui.chart_busco": {
+    term: "BUSCO completeness",
+    description:
+      "The percentage of lineage-specific single-copy orthologs found in the assembly, split into single-copy, duplicated, fragmented, and missing markers. Higher complete content is useful, but duplication can indicate retained haplotypes rather than extra genes.",
+  },
+  "ui.chart_gc_tracks": {
+    term: "GC tracks",
+    description:
+      "GC content, GC skew, and any available repeat or gene-density tracks along the assembly. Local peaks and troughs show composition or annotation changes by sequence position; they are not whole-assembly averages.",
+  },
+  "ui.chart_synteny": {
+    term: "Synteny plot",
+    description:
+      "The order and orientation of assembly contigs against the selected reference. Coloured blocks show matching intervals; reversals and breaks reveal rearrangements or mis-assembly candidates.",
+  },
+  "ui.chart_assembly_graph": {
+    term: "Assembly graph",
+    description:
+      "The assembler's segment and link topology. Branches and cycles represent unresolved alternative paths or repeats, so this graph is structural evidence rather than a finished sequence.",
+  },
+  "ui.chart_transcript_gene_body": {
+    term: "Gene body coverage",
+    description:
+      "Where sampled reads fall from the 5′ to 3′ end of annotated transcripts. A strong slope indicates transcript-end bias, which can make expression estimates less comparable across genes.",
+  },
+  "ui.chart_transcript_distribution": {
+    term: "Read distribution",
+    description:
+      "The share of sampled reads assigned to exons, introns, and intergenic sequence. It is interpreted against the annotation and library type; it is not a measure of expression abundance.",
+  },
+
   // ---- Results tab: alignment coverage ------------------------------------
   "ui.bam_mean_depth": {
     term: "Mean depth",

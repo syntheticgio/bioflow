@@ -14,6 +14,7 @@
 
 import { useEffect, useMemo, useRef } from "react";
 import cytoscape from "cytoscape";
+import { InfoMarker } from "./InfoMarker";
 
 interface Props {
   /** `[id, length]` per segment, from `gfa_segments`. */
@@ -119,7 +120,7 @@ export function AssemblyGraph({ segments, links }: Props) {
   return (
     <div style={{ marginTop: 12 }}>
       <div style={{ fontSize: 11, color: "var(--text-faint)", marginBottom: 6 }}>
-        Assembly graph · {segments.length.toLocaleString()} segments ·{" "}
+        Assembly graph <InfoMarker metric="ui.chart_assembly_graph" /> · {segments.length.toLocaleString()} segments ·{" "}
         {links.length.toLocaleString()} links · drag to pan, scroll to zoom
       </div>
       <div
