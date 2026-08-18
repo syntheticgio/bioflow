@@ -474,13 +474,84 @@ class TestBowtie2Command:
         assert "--local" not in " ".join(self.cmd(local=False))
 
     def test_maxins_reaches_the_command(self):
-        assert "-X 800" in " ".join(self.cmd(maxins=800))
+        cmd = align_cmd(
+            aligner=Aligner.BOWTIE2,
+            aligner_path="bowtie2",
+            params=align_params.from_dict({"aligner": "bowtie2", "maxins": 800}),
+            r2=Path("/w/r2.fq.gz"),
+        )
+        assert "-X 800" in cmd[-1]
+
+    def test_bowtie2_paired_command_emits_geometry_and_reporting_flags(self):
+        params = align_params.Bowtie2Params.from_dict(
+            {
+                "aligner": "bowtie2",
+                "minins": 500,
+                "maxins": 20000,
+                "orientation": "RF",
+                "dovetail": True,
+                "no_contain": True,
+                "no_overlap": True,
+                "report_k": 10,
+            }
+        )
+        script = align_cmd(
+            aligner=Aligner.BOWTIE2,
+            aligner_path="bowtie2",
+            params=params,
+            r2=Path("/w/r2.fq.gz"),
+        )[-1]
+        assert "-I 500" in script
+        assert "-X 20000" in script
+        assert "--rf" in script
+        assert "--dovetail" in script
+        assert "--no-contain" in script
+        assert "--no-overlap" in script
+        assert "-k 10" in script
+        assert " -a " not in script
+
+    def test_bowtie2_single_end_omits_pair_only_flags(self):
+        params = align_params.Bowtie2Params.from_dict(
+            {
+                "aligner": "bowtie2",
+                "minins": 500,
+                "maxins": 20000,
+                "orientation": "RF",
+                "dovetail": True,
+            }
+        )
+        script = align_cmd(
+            aligner=Aligner.BOWTIE2,
+            aligner_path="bowtie2",
+            params=params,
+        )[-1]
+        assert " -I " not in script
+        assert " -X " not in script
+        for flag in (
+            "--fr",
+            "--rf",
+            "--ff",
+            "--dovetail",
+            "--no-contain",
+            "--no-overlap",
+        ):
+            assert flag not in script
 
     def test_report_k_is_omitted_when_zero(self):
         """0 means 'leave the flag off'. Passing -k 0 tells bowtie2 to report
         zero alignments, which silently produces an empty BAM."""
         assert " -k " not in " ".join(self.cmd(report_k=0))
         assert "-k 4" in " ".join(self.cmd(report_k=4))
+
+    def test_report_all_emits_dash_a(self):
+        script = self.cmd(report_all=True)[-1]
+        assert " -a " in script
+        assert " -k " not in script
+
+    def test_report_k_zero_emits_neither_k_nor_a(self):
+        script = self.cmd(report_k=0, report_all=False)[-1]
+        assert " -k " not in script
+        assert " -a " not in script
 
     def test_the_read_group_is_split_into_id_and_fields(self):
         """bowtie2 has no single -R: it takes --rg-id for the ID and one --rg
