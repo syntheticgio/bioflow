@@ -1383,6 +1383,8 @@ QV_QC_MEM_MB = 12288
 
 CONTINUITY_QC_MEM_MB = 16384
 
+VARIANT_CALLING_MEM_MB = 8192
+
 
 def refuse_if_over_budget(
     *, declared_mb: int, budget_mb: int, resource_override: bool
@@ -3256,6 +3258,7 @@ async def launch_variant_calling(
     # _require_or_offer_install); the dialog re-posts with this set once the
     # user has actually seen and accepted that number.
     install_optional: bool = False,
+    resource_override: bool = False,
 ):
     """Queue a variant calling run over an aligned BAM.
 
@@ -3267,6 +3270,15 @@ async def launch_variant_calling(
     """
     from app.queue import queue
     from app.services import object_service
+
+    # Hoisted above the enqueue for the same reason as launch_assembly: a
+    # declaration the budget can never satisfy is unclaimable, and claim.lua
+    # has no starvation escape (#478, #527).
+    refuse_if_over_budget(
+        declared_mb=VARIANT_CALLING_MEM_MB,
+        budget_mb=await current_admission_budget_mb(),
+        resource_override=resource_override,
+    )
 
     bam = await object_service.get_object(bam_id, owner=owner)
     _check_variant_callable(bam)
@@ -3343,7 +3355,9 @@ async def launch_variant_calling(
         owner=owner,
         payload=payload,
         job_class=JobClass.COMPUTE,
-        resources=JobResources(cpu=merged.threads, mem_mb=8192, io=IoClass.HEAVY),
+        resources=JobResources(
+            cpu=merged.threads, mem_mb=VARIANT_CALLING_MEM_MB, io=IoClass.HEAVY
+        ),
         max_attempts=2,
         dedup_key=_variant_dedup_key(bam_id=bam.id, params=merged.as_dict()),
         project_id=bam.project_id,
@@ -3355,6 +3369,7 @@ async def launch_variant_calling(
         # forever: queue.py's _failed_dependencies already covers that, the
         # same mechanism launch_alignment's index-build dependency relies on.
         depends_on=[install_job_id] if install_job_id is not None else [],
+        resource_override=resource_override,
     )
     if job is None:
         await run_service.discard_run(run.id, owner=run.owner)

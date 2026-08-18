@@ -411,3 +411,82 @@ async def test_continuity_qc_override_enqueues_with_the_flag(monkeypatch):
                 resource_override=True,
             )
     assert captured["resource_override"] is True
+
+@pytest.mark.asyncio
+async def test_variant_calling_refuses_over_budget(monkeypatch):
+    monkeypatch.setattr(
+        pipeline_service, "current_admission_budget_mb", _budget_of(5600)
+    )
+    with pytest.raises(ValidationError) as excinfo:
+        await pipeline_service.launch_variant_calling(
+            bam_id=PydanticObjectId(), owner="t", resource_override=False
+        )
+    assert excinfo.value.details["refusal"] == "declared"
+
+
+@pytest.mark.asyncio
+async def test_variant_calling_override_enqueues_with_the_flag(monkeypatch):
+    monkeypatch.setattr(
+        pipeline_service, "current_admission_budget_mb", _budget_of(5600)
+    )
+    project_id = PydanticObjectId()
+    bam = SimpleNamespace(
+        id=PydanticObjectId(),
+        name="reads.bam",
+        format=SimpleNamespace(kind=FormatKind.BAM),
+        status=ObjectStatus.READY,
+        role=None,
+        facts={},
+        metadata={},
+        blob_sha256="h" * 64,
+        project_id=project_id,
+        owner="t",
+        derived_from=[],
+    )
+    captured = {}
+
+    async def _fake_enqueue(job_type, **kwargs):
+        captured.update(kwargs)
+        return None
+
+    with (
+        patch("app.queue.queue.enqueue", _fake_enqueue),
+        _no_tool_check(),
+        patch(
+            "app.services.object_service.get_object",
+            AsyncMock(return_value=bam),
+        ),
+        patch(
+            "app.services.pipeline_service._check_variant_callable",
+            lambda obj: None,
+        ),
+        patch(
+            "app.services.pipeline_service.read_chemistry_for_alignment",
+            AsyncMock(return_value=None),
+        ),
+        patch(
+            "app.services.pipeline_service._resolve_variant_reference",
+            AsyncMock(return_value=bam),
+        ),
+        patch(
+            "app.services.pipeline_service._sidecar_of_role",
+            AsyncMock(return_value=bam),
+        ),
+        patch(
+            "app.services.pipeline_service.default_variant_params",
+            AsyncMock(return_value={}),
+        ),
+        patch(
+            "app.services.pipeline_service._variant_payload",
+            AsyncMock(return_value={}),
+        ),
+        patch(
+            "app.services.run_service.create_run",
+            AsyncMock(return_value=SimpleNamespace(id="run1", owner="t")),
+        ),
+    ):
+        with pytest.raises(Exception):
+            await pipeline_service.launch_variant_calling(
+                bam_id=bam.id, owner="t", resource_override=True
+            )
+    assert captured["resource_override"] is True

@@ -1351,6 +1351,9 @@ class VariantRequest(BaseModel):
     # pay for; the dialog re-posts with this set once the user has actually
     # seen and accepted that number.
     install_optional: bool = False
+    # "Launch anyway" from the refusal card. Skips the declared-budget refusal
+    # and persists on the job, where claim.lua admits it as sole occupant.
+    resource_override: bool = False
 
 
 @router.get("/align/defaults/{object_id}")
@@ -1981,6 +1984,7 @@ async def launch_variant_calling(body: VariantRequest, owner: OwnerDep) -> JobOu
         caller=body.caller,
         params=body.params,
         install_optional=body.install_optional,
+        resource_override=body.resource_override,
     )
     return JobOut.of(job)
 
