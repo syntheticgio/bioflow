@@ -9,10 +9,10 @@ import type { JobSummary, RunDetail, RunSummary, SystemLoad } from "../api/types
 import { JobLogView } from "./JobLogView";
 import { ActivityDesk } from "./activity/ActivityDesk";
 import { ActivityLead } from "./activity/ActivityLead";
-import { FailureExplanationExpander } from "./activity/FailureExplanationExpander";
 import { RunLedger } from "./activity/RunLedger";
+import { SectionHead } from "./activity/SectionHead";
 import { useWorkflowRuns } from "./activity/WorkflowRuns";
-import { BLOCKED, RUNNING, WAITING, jobLabel, waitingReason } from "../lib/runFormat";
+import { BLOCKED, RUNNING, WAITING, jobLabel } from "../lib/runFormat";
 
 /** How many finished runs the ledger column carries. */
 const LEDGER_LIMIT = 10;
@@ -155,13 +155,31 @@ export function ActivityView() {
           is one user action that becomes several runs, so it belongs in the
           same columns rather than in a third place with its own look. */}
       <div className="activity-grid">
-        <ActivityLead
-          runs={activeRuns}
-          workflows={workflows.active}
-          details={details}
-          load={load}
-          onSelect={selectObject}
-        />
+        <div className="activity-lead-column">
+          <ActivityLead
+            runs={activeRuns}
+            workflows={workflows.active}
+            details={details}
+            load={load}
+            onSelect={selectObject}
+          />
+
+          <SectionHead title="Other running" note={running.length > 0 ? String(running.length) : undefined} />
+          {running.length > 0 ? (
+            running.map((job) => (
+              <JobRow
+                key={job.id}
+                job={job}
+                onSelect={select}
+                onCancel={() => cancel.mutate(job.id)}
+                onToggleLog={() => setOpenLog(openLog === job.id ? null : job.id)}
+                logOpen={openLog === job.id}
+              />
+            ))
+          ) : (
+            <div className="activity-empty">Nothing running.</div>
+          )}
+        </div>
 
         <RunLedger
           runs={finishedRuns.slice(0, LEDGER_LIMIT)}
@@ -182,25 +200,9 @@ export function ActivityView() {
           it is diagnostic rather than a headline, but it is the only place a
           dead job can be retried or a trim's log read. */}
       <div className="activity-loose">
-        <Section title="Other running" count={running.length} empty="Nothing running.">
-          {running.map((job) => (
-            <JobRow
-              key={job.id}
-              job={job}
-              onSelect={select}
-              onCancel={() => cancel.mutate(job.id)}
-              onToggleLog={() => setOpenLog(openLog === job.id ? null : job.id)}
-              logOpen={openLog === job.id}
-            />
-          ))}
-        </Section>
-
-        <Section
-          title="Other waiting"
-          count={waiting.length}
-          empty="Nothing queued."
-        >
-          {waiting.map((job) => (
+        <SectionHead title="Other waiting" note={waiting.length > 0 ? String(waiting.length) : undefined} />
+        {waiting.length > 0 ? (
+          waiting.map((job) => (
             <JobRow
               key={job.id}
               job={job}
@@ -208,11 +210,14 @@ export function ActivityView() {
               onSelect={select}
               onCancel={() => cancel.mutate(job.id)}
             />
-          ))}
-        </Section>
+          ))
+        ) : (
+          <div className="activity-empty">Nothing queued.</div>
+        )}
 
-        <Section title="Other recent" count={recent.length} empty="No finished jobs.">
-          {recent.slice(0, 40).map((job) => (
+        <SectionHead title="Other recent" note={recent.length > 0 ? String(recent.length) : undefined} />
+        {recent.length > 0 ? (
+          recent.slice(0, 40).map((job) => (
             <JobRow
               key={job.id}
               job={job}
@@ -225,49 +230,26 @@ export function ActivityView() {
               onToggleLog={() => setOpenLog(openLog === job.id ? null : job.id)}
               logOpen={openLog === job.id}
             />
-          ))}
-        </Section>
+          ))
+        ) : (
+          <div className="activity-empty">No finished jobs.</div>
+        )}
       </div>
     </div>
   );
 }
 
-function Section({
-  title,
-  count,
-  empty,
-  children,
+function GovernorNote({
+  load,
+  waiting,
 }: {
-  title: string;
-  count: number;
-  empty: string;
-  children: React.ReactNode;
+  load: SystemLoad;
+  waiting: number;
 }) {
+  const text = `${load.used_cpu_percent.toFixed(1)}% CPU · ${formatBytes(load.used_memory_bytes)} RAM`;
   return (
-    <div className="section">
-      <div className="section-title activity-section-title">
-        <span>{title}</span>
-        {count > 0 && <span className="activity-count">{count}</span>}
-      </div>
-      {count === 0 ? (
-        <div style={{ color: "var(--text-faint)", fontSize: 13 }}>{empty}</div>
-      ) : (
-        children
-      )}
-    </div>
-  );
-}
-
-/** Why queued work is not starting, when the governor is the reason. */
-function GovernorNote({ load, waiting }: { load: SystemLoad; waiting: number }) {
-  if (load.state === "OPEN" || waiting === 0) return null;
-  const detail =
-    load.state === "CLOSED"
-      ? "System loaded — only interactive work is starting"
-      : "System busy — background and pipeline work is deferred";
-  return (
-    <span style={{ marginLeft: "auto", fontSize: 11, color: "var(--warn)" }}>
-      {detail}
+    <span className="governor-note" title={waiting > 0 ? `${waiting} waiting` : undefined}>
+      {text}
     </span>
   );
 }
@@ -289,143 +271,31 @@ function JobRow({
   onToggleLog?: () => void;
   logOpen?: boolean;
 }) {
-  const { pct } = job.progress;
-  const indeterminate = pct === null;
-  const started = job.timing.started_at;
-  const elapsed = started ? Date.now() - new Date(started).getTime() : null;
-
-  // Only shown for jobs that shell out to a tool; everything else writes none.
-  const mayHaveLog = job.type === "trim_reads";
-
+  const isRunning = RUNNING.has(job.state);
+  const isWaiting = WAITING.has(job.state);
+  const isBlocked = BLOCKED.has(job.state);
   return (
     <div className="activity-row">
       <div className="activity-row-head">
-        <button
-          type="button"
-          className="activity-name"
-          onClick={() => onSelect(job)}
-          title={job.object_id ? "Show this file" : undefined}
-          disabled={!job.object_id}
-        >
+        <span className="activity-row-label" onClick={() => onSelect(job)}>
           {jobLabel(job)}
-        </button>
-        <span className={`badge ${job.state}`}>{job.state}</span>
-
-        <span style={{ marginLeft: "auto", display: "flex", gap: 6 }}>
-          {mayHaveLog && onToggleLog && (
-            <button
-              type="button"
-              className="btn"
-              style={{ padding: "2px 8px", fontSize: 12 }}
-              onClick={onToggleLog}
-            >
-              {logOpen ? "Hide log" : "Log"}
-            </button>
-          )}
-          {onRetry && (
-            <button
-              type="button"
-              className="btn"
-              style={{ padding: "2px 8px", fontSize: 12 }}
-              onClick={onRetry}
-            >
-              Retry
-            </button>
-          )}
-          {onCancel && (
-            <button
-              type="button"
-              className="btn"
-              style={{ padding: "2px 8px", fontSize: 12 }}
-              onClick={onCancel}
-              disabled={job.cancel_requested}
-            >
-              {job.cancel_requested ? "Cancelling…" : "Cancel"}
-            </button>
-          )}
         </span>
+        <span className="activity-row-state">
+          {isBlocked ? "blocked" : isRunning ? "running" : isWaiting ? "waiting" : job.state}
+        </span>
+        {onCancel && (isRunning || isWaiting) && (
+          <button className="btn-text" onClick={onCancel}>Cancel</button>
+        )}
+        {onRetry && !isRunning && !isWaiting && (
+          <button className="btn-text" onClick={onRetry}>Retry</button>
+        )}
+        {onToggleLog && (
+          <button className="btn-text" onClick={onToggleLog}>
+            {logOpen ? "Hide log" : "Log"}
+         Monochromatic</button>
+        )}
       </div>
-
-      {job.state === "running" && (
-        <div
-          className="progress"
-          style={{ marginTop: 5, opacity: indeterminate || pct > 0 ? 1 : 0.25 }}
-          title={
-            !indeterminate && pct >= 0.95
-              ? "Read counts are estimates, so the bar stops short of complete"
-              : undefined
-          }
-        >
-          <div
-            className={`progress-bar${indeterminate ? " indeterminate" : ""}`}
-            style={indeterminate ? undefined : { width: `${Math.round(pct * 100)}%` }}
-          />
-        </div>
-      )}
-
-      <div className="activity-row-meta">
-        <span className="mono">{job.type}</span>
-        <span>{job.job_class}</span>
-        {job.progress.message && <span>{job.progress.message}</span>}
-        {job.progress.phase_index != null && job.progress.phase_total != null && (
-          <span>
-            step {job.progress.phase_index}/{job.progress.phase_total}
-          </span>
-        )}
-        {job.state === "running" &&
-          job.progress.units_done != null &&
-          job.progress.units_total != null && (
-            <span>
-              {job.progress.units_done.toLocaleString()} /{" "}
-              {job.progress.units_total.toLocaleString()}
-              {job.progress.unit_label && ` ${job.progress.unit_label}`}
-            </span>
-          )}
-        {job.state === "running" && job.progress.rss_bytes != null && (
-          <span>{formatBytes(job.progress.rss_bytes)}</span>
-        )}
-        {job.state === "running" && job.progress.cpu_percent != null && (
-          <span>{job.progress.cpu_percent.toFixed(0)}% CPU</span>
-        )}
-        {job.state === "running" && job.progress.peak_rss_bytes != null && (
-          <span>peak {formatBytes(job.progress.peak_rss_bytes)}</span>
-        )}
-        {job.attempts > 1 && (
-          <span>
-            attempt {job.attempts}/{job.max_attempts}
-            {job.last_attempt_progress && (
-              <>
-                {" — attempt "}
-                {job.last_attempt_progress.attempt} reached{" "}
-                {job.last_attempt_progress.pct !== null
-                  ? `${Math.round(job.last_attempt_progress.pct * 100)}%`
-                  : job.last_attempt_progress.phase || "no progress"}
-                {job.last_attempt_progress.peak_rss_bytes != null &&
-                  `, peaking at ${formatBytes(job.last_attempt_progress.peak_rss_bytes)}`}
-              </>
-            )}
-          </span>
-        )}
-        {job.state === "running" && elapsed !== null && (
-          <span>{formatDuration(elapsed)} elapsed</span>
-        )}
-        {(WAITING.has(job.state) || BLOCKED.has(job.state)) && (
-          <span>{waitingReason(job, load)}</span>
-        )}
-        {job.timing.duration_ms != null && (
-          <span>took {formatDuration(job.timing.duration_ms)}</span>
-        )}
-        <span style={{ marginLeft: "auto" }}>{formatDate(job.created_at)}</span>
-      </div>
-
-      {job.error && (
-        <div style={{ color: "var(--error)", fontSize: 11, marginTop: 3 }}>
-          {job.error.code}: {job.error.message}
-          <FailureExplanationExpander code={job.error.code} message={job.error.message} />
-        </div>
-      )}
-
-      {logOpen && <JobLogView jobId={job.id} live={job.state === "running"} />}
+      {logOpen && <JobLogView jobId={job.id} />}
     </div>
   );
 }
