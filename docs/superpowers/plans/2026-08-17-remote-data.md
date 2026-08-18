@@ -144,27 +144,34 @@ plan; they were accurate on the date written and the file moves.
 
 ## Stage 1 — Model
 
-- [ ] `Locality` StrEnum (`LOCAL`, `REMOTE`) in `models/object.py`, beside
+- [x] `Locality` StrEnum (`LOCAL`, `REMOTE`) in `models/object.py`, beside
       `ObjectStatus`.
-- [ ] `RemoteSource` model: accession, component, size reported by the source.
-- [ ] `DataObject.locality: Locality = Locality.LOCAL` and
+- [x] `RemoteSource` model: accession, component, size reported by the source.
+- [x] `DataObject.locality: Locality = Locality.LOCAL` and
       `remote_source: RemoteSource | None`. Defaulting to `LOCAL` is what makes
       every existing object correct without a migration.
-- [ ] Test: an object loaded from a document with no `locality` key reads back
+- [x] Test: an object loaded from a document with no `locality` key reads back
       as `LOCAL`.
-- [ ] Test: offloading does not change `status` — it stays `READY`.
+- [x] Test: offloading does not change `status` — it stays `READY`.
 
 ## Stage 2 — The refusal gate (before any fetching)
 
 Ship the refusals before the fetch. A half-built feature that refuses cleanly
 is safe; one that silently returns a path to bytes that are not there is not.
 
-- [ ] `_resolve_readable` raises for `locality is REMOTE`, **above** the
+- [x] `_resolve_readable` raises for `locality is REMOTE`, **above** the
       `blob_sha256 is None` check (trap 3), naming the fetch action.
-- [ ] Re-ingest / re-detect-format refuse, in the style `_check_fastq_ready`
+- [x] Re-ingest / re-detect-format refuse, in the style `_check_fastq_ready`
       already uses.
-- [ ] The sequence viewer and interactive reads refuse.
-- [ ] Tests, all negative per the spec: each operation refuses a remote object
+- [ ] The sequence viewer and interactive reads refuse. **Deferred, and the
+      plan's wording was wrong:** there is no sequence-viewer or interactive-
+      reads route in `api/v1/` to patch — grepping for one on 2026-08-18 found
+      nothing. The byte-reading routes that do exist are download, reingest,
+      infer-molecule-type, and the DE results table; all four now call
+      `object_service.check_local`. If a viewer route lands later it inherits
+      the refusal from `_resolve_readable` only if it goes through the
+      chokepoint, so this box stays open as a reminder to check that.
+- [x] Tests, all negative per the spec: each operation refuses a remote object
       with its own message. Assert the refusal direction, not the permissive
       one — per CLAUDE.md, a permissive assertion passes whether or not the
       mechanism did anything.
@@ -174,14 +181,32 @@ is safe; one that silently returns a path to bytes that are not there is not.
 This is the one test the spec calls out as the one that would have caught the
 `REMOTE`-status design being wrong. Write it before the UI exists.
 
-- [ ] A remote object **still appears** in the reference picker
+- [x] A remote object **still appears** in the reference picker
       (`api/v1/pipelines.py:1843`) and in Actions-tab suggestions
       (`suggestion_service.py:2099` and `:2184` — a query argument, not a
       comprehension; see trap 4).
-- [ ] Per CLAUDE.md, also check both against a **real project** via
+- [x] Per CLAUDE.md, also check both against a **real project** via
       `docker compose exec api python -c "..."`, not only fixtures — these
       exact rules previously passed a green suite while being wrong about real
       objects.
+
+## Stages 1-3 landed 2026-08-18
+
+Commits `fe16a0fb` (model), `c7594ebc` (refusals + regression guard),
+`ff2e4c1f` (accession fallback). Full suite 5457 passed, 7 skipped.
+
+One thing the real-project check caught that the fixtures could not: every
+SRA-backed object in the live database carries its accession in
+`metadata.sra_run` and nothing in `remote_source`, because `remote_source`
+is only written at offload time. The refusal therefore named no accession
+on any real object until a fallback was added. The unit tests missed it by
+hand-building a `RemoteSource` — fixtures shaped the way the code expects,
+which is the exact failure mode CLAUDE.md describes for the suggestion rules.
+
+Also worth carrying into Stage 4: the offload candidate in the real project
+is `DRR1066343_1.fastq`/`_2.fastq`, 3.96 GB each, both already trimmed. That
+is the motivating workflow with real bytes attached, and it is the pair to
+test Stage 4 against.
 
 ## Stage 4 — Dropping the bytes
 
