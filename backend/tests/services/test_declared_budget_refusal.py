@@ -27,6 +27,15 @@ def _budget_of(mb: int):
     return _budget
 
 
+def _no_tool_check():
+    """Stub for tools.require -- the test image is arm64 and several tools
+    these launchers require (polypolish, bwa-mem2, ...) have no linux-aarch64
+    build, so the real check fails before the launcher can reach enqueue.
+    Unrelated to the budget refusal under test.
+    """
+    return patch.object(pipeline_service.tools, "require", lambda tool: tool)
+
+
 def _annotate_genome_fixture():
     """A ready, bacterial-FASTA assembly, shaped like launch_annotate_genome
     expects to get past its own validation (organism, format, readability)
@@ -167,7 +176,7 @@ async def test_annotate_genome_override_enqueues_with_the_flag(monkeypatch):
     # stubbed out to let the launcher actually reach the (patched) enqueue.
     with (
         patch("app.queue.queue.enqueue", _fake_enqueue),
-        patch.object(pipeline_service.tools, "require", lambda tool: tool),
+        _no_tool_check(),
         patch(
             "app.services.object_service.get_object",
             AsyncMock(return_value=obj),
@@ -180,5 +189,97 @@ async def test_annotate_genome_override_enqueues_with_the_flag(monkeypatch):
         with pytest.raises(Exception):
             await pipeline_service.launch_annotate_genome(
                 object_id=obj.id, owner="t", resource_override=True
+            )
+    assert captured["resource_override"] is True
+
+
+@pytest.mark.asyncio
+async def test_polish_refuses_over_budget(monkeypatch):
+    monkeypatch.setattr(
+        pipeline_service, "current_admission_budget_mb", _budget_of(5600)
+    )
+    with pytest.raises(ValidationError) as excinfo:
+        await pipeline_service.launch_polish(
+            draft_object_id=PydanticObjectId(), owner="t", resource_override=False
+        )
+    assert excinfo.value.details["refusal"] == "declared"
+
+
+def _short_read_fixture(project_id):
+    return SimpleNamespace(
+        id=PydanticObjectId(),
+        name="reads.fastq",
+        format=SimpleNamespace(kind=FormatKind.FASTQ),
+        status=ObjectStatus.READY,
+        role=None,
+        facts={},
+        metadata={},
+        blob_sha256="b" * 64,
+        project_id=project_id,
+        owner="t",
+        size=1_000_000,
+    )
+
+
+def _draft_assembly_fixture():
+    project_id = PydanticObjectId()
+    return SimpleNamespace(
+        id=PydanticObjectId(),
+        name="draft.fasta",
+        format=SimpleNamespace(kind=FormatKind.FASTA),
+        status=ObjectStatus.READY,
+        role=None,
+        facts={},
+        metadata={},
+        blob_sha256="c" * 64,
+        project_id=project_id,
+        owner="t",
+        size=5_000_000,
+    )
+
+
+@pytest.mark.asyncio
+async def test_polish_override_enqueues_with_the_flag(monkeypatch):
+    monkeypatch.setattr(
+        pipeline_service, "current_admission_budget_mb", _budget_of(5600)
+    )
+    draft = _draft_assembly_fixture()
+    reads = _short_read_fixture(draft.project_id)
+    captured = {}
+
+    async def _fake_enqueue(job_type, **kwargs):
+        captured.update(kwargs)
+        return None
+
+    with (
+        patch("app.queue.queue.enqueue", _fake_enqueue),
+        _no_tool_check(),
+        patch(
+            "app.services.object_service.get_object",
+            AsyncMock(side_effect=[draft, reads]),
+        ),
+        patch(
+            "app.services.reference_assembly.check_draft_assembly",
+            lambda obj: obj,
+        ),
+        patch(
+            "app.services.reference_assembly.is_short_read",
+            lambda obj: True,
+        ),
+        patch(
+            "app.services.pipeline_service._resolve_readable",
+            AsyncMock(return_value=("d" * 64, None)),
+        ),
+        patch(
+            "app.services.run_service.create_run",
+            AsyncMock(return_value=SimpleNamespace(id="run1", owner="t")),
+        ),
+    ):
+        with pytest.raises(Exception):
+            await pipeline_service.launch_polish(
+                draft_object_id=draft.id,
+                owner="t",
+                reads_object_id=reads.id,
+                resource_override=True,
             )
     assert captured["resource_override"] is True

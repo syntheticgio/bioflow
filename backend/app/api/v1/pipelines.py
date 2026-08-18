@@ -1575,6 +1575,9 @@ class PolishRequest(BaseModel):
     # result, so the ambiguous case has to fail loudly.
     reads_object_id: PydanticObjectId | None = None
     mate_object_id: PydanticObjectId | None = None
+    # "Launch anyway" from the refusal card. Skips the declared-budget refusal
+    # and persists on the job, where claim.lua admits it as sole occupant.
+    resource_override: bool = False
 
 
 @router.post("/polish", response_model=JobOut, status_code=status.HTTP_201_CREATED)
@@ -1589,6 +1592,7 @@ async def launch_polish_route(body: PolishRequest, owner: OwnerDep) -> JobOut:
         reads_object_id=body.reads_object_id,
         mate_object_id=body.mate_object_id,
         owner=owner,
+        resource_override=body.resource_override,
     )
     return JobOut.of(job)
 
