@@ -54,6 +54,25 @@ class TestCompleteness:
             assert has_builder_tool == (aligner in with_builder)
             assert has_builder_tool == has_builder_name
 
+    def test_builder_gzip_support_matches_what_the_binaries_accept(self):
+        """`align_handlers.build_index` decompresses the reference exactly when
+        this flag is False, so a spec that overstates what its builder accepts
+        hands a gzipped FASTA to a tool that cannot read one.
+
+        That is #560: hisat2-build exits 1 on a compressed reference, deleting
+        the .ht2 files it had already written, and the call site decompressed
+        only for STAR. Measured against the binaries this image ships, on both
+        plain gzip and bgzip -- bowtie2-build, `bwa-mem2 index` and
+        `minimap2 -d` accept both; hisat2-build and STAR reject both.
+
+        Listed explicitly rather than derived so that adding an aligner is a
+        decision here, not an inherited default that happens to be wrong.
+        """
+        rejects_gzip = {Aligner.HISAT2, Aligner.STAR}
+        for aligner in Aligner:
+            spec = aligner_registry.spec_for(aligner)
+            assert spec.builder_accepts_gzip == (aligner not in rejects_gzip)
+
 
 class TestFieldMetadataMatchesParams:
     def test_every_field_key_is_accepted_by_the_params_class(self):
