@@ -134,4 +134,7 @@ class JobRunTiming(TimestampedDocument):
             ),
             # Provenance: every run that touched one object.
             IndexModel([("object_id", ASCENDING)], name="by_object"),
+            # Export: every run belonging to one project, including the
+            # project-scoped ones that carry no object_id at all.
+            IndexModel([("project_id", ASCENDING)], name="by_project"),
         ]
