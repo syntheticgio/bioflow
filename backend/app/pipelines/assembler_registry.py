@@ -197,12 +197,63 @@ HIFIASM_SPEC = AssemblerSpec(
 
 SPADES_SPEC = AssemblerSpec(
     assembler=Assembler.SPADES,
+    # Flipped to tools.spades once the binary is installed -- see the
+    # install-spades.sh task. Until then `available()` returns False and the
+    # card reads as not installed.
     tool=None,
+    # Empty by construction, like ABySS: SPAdes has no read-accuracy mode
+    # flag, and `spec_for_chemistry` does not reach it by chemistry lookup.
     mode_flags={},
     layout="paired",
-    memory_model=AssemblyMemoryModel(bytes_per_genome_base=90.0, fixed_overhead_mb=4096),
-    outputs=(),
-    unavailable_reason="Short-read assembly is not installed.",
+    memory_model=AssemblyMemoryModel(
+        # Published guidance, not measured on this hardware -- the same caveat
+        # FLYE_SPEC and ABYSS_SPEC both carry. SPAdes holds more per genome
+        # base than ABySS because it is not a Bloom-filter assembler: its
+        # graph is held outright rather than in a bounded filter.
+        bytes_per_genome_base=90.0,
+        bytes_per_read_base=0.6,
+        fixed_overhead_mb=4096,
+    ),
+    outputs=(
+        # Filenames confirmed against a real 4.3.0 run of the bundled
+        # test dataset, not read from documentation.
+        #
+        # contigs.fasta is listed after scaffolds.fasta deliberately: both
+        # share OutputKind.CONTIGS (there is no separate "scaffolds" kind --
+        # see assemblers.OutputKind), and callers that key outputs by kind
+        # (e.g. `{o.kind: o for o in spec.outputs}`, as the required-output
+        # test does) keep whichever entry comes last. contigs.fasta is the
+        # one that must win that lookup, since it is the required output that
+        # becomes the REFERENCE DataObject.
+        Output(
+            kind=OutputKind.GRAPH,
+            filename="assembly_graph_with_scaffolds.gfa",
+        ),
+        Output(kind=OutputKind.CONTIGS, filename="scaffolds.fasta"),
+        Output(kind=OutputKind.CONTIGS, filename="contigs.fasta", required=True),
+    ),
+    fields=(
+        *_SHARED_FIELDS,
+        ParamField(
+            key="mode",
+            label="Running mode",
+            kind="select",
+            default="isolate",
+            group="biology",
+            help=(
+                "Isolate is recommended for high-coverage bacterial isolates "
+                "and is the usual choice. Careful reduces mismatches and short "
+                "indels but is only for small genomes. The two cannot be "
+                "combined."
+            ),
+            choices=(
+                Choice(value="isolate", label="Isolate (high-coverage, recommended)"),
+                Choice(value="careful", label="Careful (small genomes only)"),
+                Choice(value="standard", label="Standard"),
+            ),
+        ),
+    ),
+    unavailable_reason="SPAdes is not installed in this build.",
 )
 
 ABYSS_SPEC = AssemblerSpec(

@@ -41,6 +41,34 @@ def test_abyss_charges_for_read_volume():
     assert spec.memory_model.bytes_per_read_base > 0
 
 
+def test_spades_declares_contigs_as_required_output():
+    spec = assembler_registry.spec_for(Assembler.SPADES)
+    kinds = {o.kind: o for o in spec.outputs}
+    assert kinds[OutputKind.CONTIGS].required is True
+    assert kinds[OutputKind.CONTIGS].filename == "contigs.fasta"
+    assert kinds[OutputKind.GRAPH].filename == "assembly_graph_with_scaffolds.gfa"
+
+
+def test_spades_offers_exactly_the_three_modes():
+    assert assembler_registry.modes_for(Assembler.SPADES) == frozenset(
+        {"isolate", "careful", "standard"}
+    )
+
+
+def test_spades_does_not_offer_a_kmer_field():
+    """SPAdes picks k from read length; ABySS does not, which is why only
+    ABySS has the field."""
+    spec = assembler_registry.spec_for(Assembler.SPADES)
+    assert not any(f.key == "k" for f in spec.fields)
+
+
+def test_short_reads_still_route_to_abyss_after_spades_is_installed():
+    """Installing an assembler makes it selectable. Promoting it to the
+    default changes every existing user's results and is a separate decision."""
+    spec = assembler_registry.spec_for_chemistry(ReadChemistry.SHORT)
+    assert spec.assembler is Assembler.ABYSS
+
+
 class TestExhaustiveness:
     """A declared-and-installed assembler with no command builder would be
     dispatched to another tool's builder or refused at runtime. Both are
