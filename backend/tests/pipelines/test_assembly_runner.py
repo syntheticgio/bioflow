@@ -13,7 +13,7 @@ import pytest
 
 from app.pipelines import assembly_runner
 from app.pipelines.assemblers import Assembler
-from app.pipelines.assembly_params import AbyssParams, FlyeParams
+from app.pipelines.assembly_params import AbyssParams, FlyeParams, SpadesParams
 from app.pipelines.assembly_runner import AssemblyProgress, parse_assembly_info
 
 
@@ -125,6 +125,65 @@ class TestBuildAssemblyCommand:
                 out_dir=Path("/work/out"),
                 params=AbyssParams(),
             )
+
+
+def _spades_cmd(**kwargs):
+    defaults = dict(
+        assembler=Assembler.SPADES,
+        tool_path="/usr/local/bin/spades.py",
+        reads=Path("/work/r1.fastq.gz"),
+        out_dir=Path("/work/out"),
+        params=SpadesParams(mode="isolate", threads=4),
+        mate=Path("/work/r2.fastq.gz"),
+        memory_bytes=8 * 1024**3,
+    )
+    defaults.update(kwargs)
+    return assembly_runner.build_assembly_command(**defaults)
+
+
+class TestSpadesCommand:
+    def test_pairs_mates_as_separate_flags(self):
+        """Unlike abyss-pe's single `in=` variable, SPAdes takes -1 and -2."""
+        cmd = _spades_cmd()
+        assert "-1" in cmd
+        assert cmd[cmd.index("-1") + 1] == "/work/r1.fastq.gz"
+        assert "-2" in cmd
+        assert cmd[cmd.index("-2") + 1] == "/work/r2.fastq.gz"
+
+    def test_falls_back_to_single_end(self):
+        cmd = _spades_cmd(mate=None)
+        assert "-s" in cmd
+        assert cmd[cmd.index("-s") + 1] == "/work/r1.fastq.gz"
+        assert "-1" not in cmd
+
+    def test_isolate_mode_passes_the_flag(self):
+        assert "--isolate" in _spades_cmd(params=SpadesParams(mode="isolate"))
+
+    def test_careful_mode_passes_the_flag(self):
+        cmd = _spades_cmd(params=SpadesParams(mode="careful"))
+        assert "--careful" in cmd
+        assert "--isolate" not in cmd
+
+    def test_standard_mode_passes_neither_flag(self):
+        cmd = _spades_cmd(params=SpadesParams(mode="standard"))
+        assert "--isolate" not in cmd
+        assert "--careful" not in cmd
+
+    def test_memory_ceiling_is_in_whole_gigabytes(self):
+        """-m is in GB and SPAdes terminates on reaching it."""
+        cmd = _spades_cmd(memory_bytes=8 * 1024**3)
+        assert "-m" in cmd
+        assert cmd[cmd.index("-m") + 1] == "8"
+
+    def test_memory_ceiling_is_floored_when_no_estimate_exists(self):
+        """Never inherit upstream's 250GB default: a run with no estimate
+        would then die late rather than never starting."""
+        cmd = _spades_cmd(memory_bytes=None)
+        assert cmd[cmd.index("-m") + 1] == str(assembly_runner.MIN_SPADES_MEMORY_GB)
+
+    def test_tiny_estimate_is_raised_to_the_floor(self):
+        cmd = _spades_cmd(memory_bytes=100 * 1024**2)
+        assert cmd[cmd.index("-m") + 1] == str(assembly_runner.MIN_SPADES_MEMORY_GB)
 
 
 class TestAssemblyProgress:
