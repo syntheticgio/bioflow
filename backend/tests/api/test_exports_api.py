@@ -71,9 +71,11 @@ async def test_download_refuses_a_traversal_name(client, two_profiles):
 async def test_list_exports_returns_a_list(client, two_profiles, tmp_path, monkeypatch):
     owner = two_profiles["a"].owner_id()
     prefix = f"{owner}__"
-    exports_dir = tmp_path / "exports"
-    exports_dir.mkdir()
-    monkeypatch.setattr(settings, "exports_dir", exports_dir)
+    bioinfo_home = tmp_path / "bio1"
+    bioinfo_home.mkdir()
+    monkeypatch.setattr(settings, "bioinfo_home", bioinfo_home)
+    exports_dir = settings.exports_dir
+    exports_dir.mkdir(parents=True)
 
     # Create a test archive for profile A
     (exports_dir / f"{prefix}my-project-20240818T120000Z.tar.gz").write_text("fake archive")
@@ -89,9 +91,11 @@ async def test_list_exports_returns_a_list(client, two_profiles, tmp_path, monke
 
 
 async def test_list_exports_is_owner_scoped(client, two_profiles, tmp_path, monkeypatch):
-    exports_dir = tmp_path / "exports2"
-    exports_dir.mkdir()
-    monkeypatch.setattr(settings, "exports_dir", exports_dir)
+    bioinfo_home = tmp_path / "bio2"
+    bioinfo_home.mkdir()
+    monkeypatch.setattr(settings, "bioinfo_home", bioinfo_home)
+    exports_dir = settings.exports_dir
+    exports_dir.mkdir(parents=True)
 
     # Create archives for both profiles
     a_owner = two_profiles["a"].owner_id()
@@ -108,9 +112,11 @@ async def test_list_exports_is_owner_scoped(client, two_profiles, tmp_path, monk
 
 
 async def test_download_export_404s_for_another_owners_archive(client, two_profiles, tmp_path, monkeypatch):
-    exports_dir = tmp_path / "exports3"
-    exports_dir.mkdir()
-    monkeypatch.setattr(settings, "exports_dir", exports_dir)
+    bioinfo_home = tmp_path / "bio3"
+    bioinfo_home.mkdir()
+    monkeypatch.setattr(settings, "bioinfo_home", bioinfo_home)
+    exports_dir = settings.exports_dir
+    exports_dir.mkdir(parents=True)
 
     a_owner = two_profiles["a"].owner_id()
     b_owner = two_profiles["b"].owner_id()
