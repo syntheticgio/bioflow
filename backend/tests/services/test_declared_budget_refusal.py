@@ -917,3 +917,86 @@ async def test_assembly_error_qc_override_enqueues_with_the_flag(monkeypatch):
                 resource_override=True,
             )
     assert captured["resource_override"] is True
+
+@pytest.mark.asyncio
+async def test_quantify_refuses_over_budget(monkeypatch):
+    monkeypatch.setattr(
+        pipeline_service, "current_admission_budget_mb", _budget_of(1000)
+    )
+    with pytest.raises(ValidationError) as excinfo:
+        await pipeline_service.launch_quantify(
+            bam_id=PydanticObjectId(), owner="t", resource_override=False
+        )
+    assert excinfo.value.details["refusal"] == "declared"
+
+
+@pytest.mark.asyncio
+async def test_quantify_override_enqueues_with_the_flag(monkeypatch):
+    monkeypatch.setattr(
+        pipeline_service, "current_admission_budget_mb", _budget_of(1000)
+    )
+    project_id = PydanticObjectId()
+    bam = SimpleNamespace(
+        id=PydanticObjectId(),
+        name="reads.bam",
+        format=SimpleNamespace(kind=FormatKind.BAM),
+        status=ObjectStatus.READY,
+        role=None,
+        facts={},
+        metadata={},
+        blob_sha256="t" * 64,
+        project_id=project_id,
+        owner="t",
+    )
+    annotation = SimpleNamespace(
+        id=PydanticObjectId(),
+        name="genes.gtf",
+        format=SimpleNamespace(kind=FormatKind.GTF),
+        status=ObjectStatus.READY,
+        role=None,
+        facts={},
+        metadata={},
+        blob_sha256="u" * 64,
+        project_id=project_id,
+        owner="t",
+    )
+    captured = {}
+
+    async def _fake_enqueue(job_type, **kwargs):
+        captured.update(kwargs)
+        return None
+
+    with (
+        patch("app.queue.queue.enqueue", _fake_enqueue),
+        _no_tool_check(),
+        patch(
+            "app.services.object_service.get_object",
+            AsyncMock(return_value=bam),
+        ),
+        patch(
+            "app.services.pipeline_service._check_quantifiable",
+            lambda obj: None,
+        ),
+        patch(
+            "app.services.pipeline_service.resolve_annotation",
+            AsyncMock(return_value=annotation),
+        ),
+        patch(
+            "app.services.pipeline_service.default_count_params",
+            AsyncMock(return_value={}),
+        ),
+        patch(
+            "app.services.pipeline_service._resolve_readable",
+            AsyncMock(return_value=("v" * 64, None)),
+        ),
+        patch(
+            "app.services.run_service.create_run",
+            AsyncMock(return_value=SimpleNamespace(id="run1", owner="t")),
+        ),
+    ):
+        with pytest.raises(Exception):
+            await pipeline_service.launch_quantify(
+                bam_id=bam.id, owner="t", resource_override=True
+            )
+    assert captured["resource_override"] is True
+    assert captured["resources"].mem_mb == pipeline_service.QUANTIFY_MEM_MB

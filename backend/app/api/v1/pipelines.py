@@ -2027,6 +2027,9 @@ class QuantifyRequest(BaseModel):
     # refuses to guess at.
     annotation_id: PydanticObjectId | None = None
     params: dict = Field(default_factory=dict)
+    # "Launch anyway" from the refusal card. Skips the declared-budget refusal
+    # and persists on the job, where claim.lua admits it as sole occupant.
+    resource_override: bool = False
 
 
 class DifferentialExpressionRequest(BaseModel):
@@ -2120,6 +2123,7 @@ async def launch_quantify(body: QuantifyRequest, owner: OwnerDep) -> JobOut:
         owner=owner,
         annotation_id=body.annotation_id,
         params=body.params,
+        resource_override=body.resource_override,
     )
     return JobOut.of(job)
 
