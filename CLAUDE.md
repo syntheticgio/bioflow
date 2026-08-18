@@ -566,6 +566,14 @@ exactly this reason; naming a project explicitly (`-p`,
 `COMPOSE_PROJECT_NAME=`) passes through, which is also what lets
 `worktree-up.sh`'s own compose calls work.
 
+The guard decides what counts as an invocation by tokenizing the command
+(`ops/hooks/compose_target.py`), not by matching the phrase, so writing
+*about* compose is not blocked -- a heredoc file write, a `gh issue create`
+body, or a `grep` for the phrase all pass, as does a compose call addressed
+to a container (`docker exec … sh -c '…'`). Before
+[#549](https://github.com/syntheticgio/bioflow/issues/549) it matched the
+substring anywhere in the command and blocked all four.
+
 To check what the stack is actually serving:
 
 ```bash

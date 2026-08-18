@@ -15,6 +15,11 @@
 # passes through. That is also what makes ops/worktree-up.sh's own compose
 # calls work.
 #
+# Whether a command *is* a compose invocation is decided by compose_target.py,
+# not by a regex here. The regex this replaced matched the phrase anywhere in
+# the command string, so it blocked writing a file whose text mentioned
+# compose and blocked filing the issue that reported it (#549).
+#
 # Exit 2 blocks the call and feeds stderr back to the model.
 set -uo pipefail
 
@@ -25,11 +30,19 @@ cwd="$(printf '%s' "$payload" | jq -r '.cwd // ""')"
 [ -n "$command" ] || exit 0
 [ -n "$cwd" ] || exit 0
 
-# Not a compose invocation at all.
-printf '%s' "$command" | grep -Eq '(^|[;&|[:space:]])docker[[:space:]]+compose([[:space:]]|$)|(^|[;&|[:space:]])docker-compose([[:space:]]|$)' || exit 0
-
-# Deliberately addressed to a named project; the caller knows which stack.
-printf '%s' "$command" | grep -Eq 'COMPOSE_PROJECT_NAME=|[[:space:]]-p[[:space:]]|--project-name' && exit 0
+# Not a host compose invocation: a mention in a quoted argument or heredoc
+# body, a call addressed to a container, or a deliberately named project.
+#
+# Only exit 1 -- the helper's considered "no" -- lets the command through. Any
+# other status means the helper never answered (no python3, a crash), and the
+# guard falls back to the old phrase test rather than waving everything past:
+# silently losing the guard is the failure it exists to prevent.
+printf '%s' "$command" | python3 "$(dirname "$0")/compose_target.py"
+case $? in
+  0) ;;
+  1) exit 0 ;;
+  *) printf '%s' "$command" | grep -Eq 'docker[[:space:]]+compose|docker-compose' || exit 0 ;;
+esac
 
 toplevel="$(git -C "$cwd" rev-parse --show-toplevel 2>/dev/null)" || exit 0
 common="$(git -C "$cwd" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)" || exit 0
@@ -56,5 +69,9 @@ Use one of these instead:
 To act on the main stack, run docker compose from $main_root.
 If you really mean to address a specific project from here, name it
 explicitly (-p <project>) and this guard will step aside.
+
+If you were only writing *about* compose rather than running it, this is a
+misfire -- use the Write tool for the file instead of a shell heredoc, and
+please report it.
 EOF
 exit 2
