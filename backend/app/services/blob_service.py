@@ -11,9 +11,16 @@ from beanie import PydanticObjectId
 from pymongo.errors import DuplicateKeyError
 
 from app.db.client import get_client, get_db
-from app.errors import NotFoundError
+from app.errors import NotFoundError, ValidationError
 from app.logging import get_logger
-from app.models import Blob, BlobState, BlobStorage, DataObject, ObjectStatus
+from app.models import (
+    Blob,
+    BlobState,
+    BlobStorage,
+    DataObject,
+    Locality,
+    ObjectStatus,
+)
 from app.storage.paths import blob_rel_path
 
 log = get_logger(__name__)
@@ -225,6 +232,101 @@ async def detach_blob_from_object(object_id: PydanticObjectId) -> None:
                     },
                     session=session,
                 )
+
+
+async def release_bytes_for_object(
+    object_id: PydanticObjectId, *, accession: str, component: str | None = None
+) -> DataObject:
+    """Release an object's bytes while keeping the object itself, atomically.
+
+    The offload half of #523: the file stays listed, badged, and provenance-
+    linked; only its content is dropped, to be fetched back on demand.
+
+    Deliberately *not* built on `detach_blob_from_object`, whose docstring
+    ("decrement its blob's refcount") describes only half of what it does --
+    its first transaction statement is `delete_one`, and it also decrements
+    `counters.object_count`. That is delete-the-object-and-release-its-blob,
+    the opposite of this. Adding a flag to it was rejected: a boolean that
+    flips whether a function deletes a row is a call site nobody can read.
+
+    Everything here happens in one transaction, and the ordering inside it is
+    load-bearing. `verify_blobs` marks objects MISSING by matching
+    `blob_sha256 == blob.id`; if the refcount dropped in one write and the
+    digest were cleared in another, a sweep landing between them would find an
+    object still pointing at a blob whose bytes are on their way out and
+    label it broken. Clearing the digest in the same transaction is what makes
+    an offloaded object invisible to that query -- a mechanism, not luck.
+
+    `status` is untouched, and stays READY. See `Locality` for why: the
+    reference picker and the Actions rules filter on READY, the latter at the
+    query layer, so an offloaded object with any other status would vanish
+    from both with no error.
+
+    The bytes themselves are not unlinked here. Once the refcount reaches zero
+    the GC job collects them after `GC_GRACE`, exactly as it does for a
+    deleted object.
+    """
+    obj = await DataObject.get(object_id)
+    if obj is None:
+        raise NotFoundError("Object not found")
+    if obj.locality is Locality.REMOTE:
+        # Idempotent rather than an error: a double-click on the offload
+        # button should not read as a failure, and there is nothing left to do.
+        return obj
+    if not obj.blob_sha256:
+        raise ValidationError(
+            f"{obj.name!r} has no stored content to release",
+            details={"object_id": str(object_id)},
+        )
+
+    now = datetime.now(UTC)
+    digest = obj.blob_sha256
+    db = get_db()
+    async with get_client().start_session() as session:
+        async with await session.start_transaction():
+            await db.objects.update_one(
+                {"_id": object_id},
+                {
+                    "$set": {
+                        "blob_sha256": None,
+                        "locality": Locality.REMOTE.value,
+                        "remote_source": {
+                            "accession": accession,
+                            "component": component,
+                            "size": obj.size,
+                        },
+                        "updated_at": now,
+                    }
+                },
+                session=session,
+            )
+            await db.blobs.update_one(
+                {"_id": digest},
+                {"$inc": {"ref_count": -1}, "$set": {"updated_at": now}},
+                session=session,
+            )
+            if obj.project_id:
+                # `object_count` is deliberately absent: the object is still
+                # there. Only the bytes left, so only total_bytes moves.
+                await db.projects.update_one(
+                    {"_id": obj.project_id},
+                    {
+                        "$inc": {"counters.total_bytes": -obj.size},
+                        "$set": {"updated_at": now},
+                    },
+                    session=session,
+                )
+
+    log.info(
+        "object_bytes_released",
+        object_id=str(object_id),
+        digest=digest,
+        accession=accession,
+        size=obj.size,
+    )
+    refreshed = await DataObject.get(object_id)
+    assert refreshed is not None
+    return refreshed
 
 
 async def find_present_blob(digest: str) -> Blob | None:
