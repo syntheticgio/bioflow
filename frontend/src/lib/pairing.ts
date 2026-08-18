@@ -337,3 +337,35 @@ export function buildReferenceRail(files: DataObject[]): ReferenceRailEntry[] {
 
   return entries;
 }
+
+/**
+ * The ids of files that something already in this launch was derived from.
+ *
+ * A read set added to a launch is frequently the *trimmed* version of a raw
+ * file that is also sitting in the project. Those are two different objects,
+ * so excluding the picker's options by selected id alone leaves the raw
+ * parents on offer -- which reads as the dialog listing files you have
+ * already added (#564).
+ *
+ * Deliberately narrower than the raw/trimmed matching above: the question
+ * here is only "did anything in this launch come from this file", which the
+ * `derived_from` link answers outright. `matchTrimmedGroup` exists to resolve
+ * *which* raw mate a trimmed file corresponds to -- real ambiguity that this
+ * question never has to face, and importing it would import that ambiguity.
+ *
+ * Scoped to the launch, not the project: a raw file whose trimmed version
+ * merely exists somewhere in the project is still offered, because the reason
+ * to hide it would not be visible anywhere in the dialog.
+ */
+export function supersededBySelection(
+  selectedIds: Iterable<string>,
+  all: DataObject[],
+): Set<string> {
+  const selected = new Set(selectedIds);
+  const superseded = new Set<string>();
+  for (const o of all) {
+    if (!selected.has(o.id)) continue;
+    for (const parent of o.derived_from) superseded.add(parent);
+  }
+  return superseded;
+}
