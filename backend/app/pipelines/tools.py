@@ -616,6 +616,17 @@ def abyss() -> Tool:
 
 
 @lru_cache(maxsize=1)
+def spades() -> Tool:
+    """SPAdes, the short-read assembler.
+
+    A conventional CLI, unlike `abyss-pe` -- `--version` writes one line to
+    stdout and exits 0, with none of the Make-wrapper stderr noise abyss()
+    documents.
+    """
+    return _probe("spades", settings.spades_path, ["--version"])
+
+
+@lru_cache(maxsize=1)
 def bakta() -> Tool:
     # On-demand delivery: this probes the binary, not the database. A missing
     # database surfaces at launch time, not here -- same posture as compleasm's
@@ -1623,6 +1634,46 @@ TOOL_META: dict[str, ToolMeta] = {
             "mates and single-end when it cannot, and derives its "
             "mandatory Bloom filter budget from the same memory estimate "
             "that guards the run."
+        ),
+        runnable=True,
+    ),
+    "spades": ToolMeta(
+        pipelines=(PipelineType.ASSEMBLE,),
+        one_liner="De novo assembler for short paired-end reads",
+        summary=(
+            "Assembles short paired-end reads into contigs without a "
+            "reference, using multi-sized de Bruijn graphs. Generally "
+            "produces more contiguous assemblies than ABySS on bacterial "
+            "isolates, at a higher memory cost -- its graph is held outright "
+            "rather than in a bounded Bloom filter."
+        ),
+        strengths=(
+            "Bacterial isolates and other high-coverage short-read data",
+            "Selects k-mer sizes automatically from read length",
+            "Built-in read error correction before assembly",
+        ),
+        homepage="https://ablab.github.io/spades/",
+        repository="https://github.com/ablab/spades",
+        # The Current Protocols paper, which upstream's README names as "our
+        # latest paper". The 2012 Bankevich paper describes the original
+        # single-cell algorithm and is not what a 4.x run reflects.
+        citation=(
+            "Prjibelski A, Antipov D, Meleshko D, Lapidus A, Korobeynikov A. "
+            "Using SPAdes De Novo Assembler. Curr Protoc Bioinformatics. 2020."
+        ),
+        citation_url="https://doi.org/10.1002/cpbi.102",
+        # Verified against upstream's own LICENSE file on 2026-08-18: "GNU
+        # General Public License, Version 2, dated June 1991". GitHub's API
+        # reports NOASSERTION for this repo, and ABySS's entry above is
+        # GPL-3.0 -- neither is this tool's license.
+        license="GPL-2.0-only",
+        usage=(
+            "Assembles short paired-end reads into contigs with no "
+            "reference. BioFlow runs it in isolate mode by default, paired "
+            "when it can identify both mates and single-end when it cannot, "
+            "and passes a memory ceiling derived from the same estimate that "
+            "guards the run -- SPAdes terminates on reaching that ceiling "
+            "rather than exceeding it."
         ),
         runnable=True,
     ),

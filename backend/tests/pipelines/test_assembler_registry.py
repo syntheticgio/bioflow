@@ -1,3 +1,5 @@
+import dataclasses
+
 from app.pipelines import assembler_registry
 from app.pipelines.align_runner import ReadChemistry
 from app.pipelines.assemblers import Assembler, OutputKind
@@ -114,3 +116,25 @@ class TestExhaustiveness:
                 continue
             params = assembly_params.from_dict({"assembler": member.value})
             assert params.assembler is member
+
+
+def test_spades_card_goes_unavailable_when_the_probe_is_off(monkeypatch):
+    """Patch spec_for, never tools.spades: AssemblerSpec is frozen and
+    captured the function object at import time, so patching the module
+    attribute never reaches spec.tool.
+
+    Asserted in the unavailable direction on purpose -- the image ships
+    SPAdes installed, so asserting availability passes whether or not the
+    patch worked."""
+    from app.pipelines import tools
+
+    missing = tools.Tool(
+        name="spades", path=None, version=None, error="not installed"
+    )
+    real = assembler_registry.spec_for(Assembler.SPADES)
+    patched = dataclasses.replace(real, tool=lambda: missing)
+    monkeypatch.setattr(
+        assembler_registry, "spec_for", lambda a: patched if a is Assembler.SPADES else real
+    )
+
+    assert assembler_registry.spec_for(Assembler.SPADES).available() is False
