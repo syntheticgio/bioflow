@@ -418,7 +418,26 @@ class JobExecutor:
             log.debug("timing_capture_failed", job_id=str(job.id), error=str(e))
 
     async def _apply_result(self, job: Job, result: dict | None) -> None:
-        """Persist side effects a sync handler could not perform itself."""
+        """Persist side effects a sync handler could not perform itself.
+
+        `PermanentError` propagates; everything else is swallowed. The two
+        halves answer different questions, which is why they are not treated
+        alike:
+
+        An unexpected exception means the write-back broke -- a Mongo blip, a
+        bad document -- while the work itself succeeded and its output is on
+        disk. Failing the job there would send hours of alignment back through
+        the queue to fix a transient error, so it stays a loud log line.
+
+        `PermanentError` means the applier *decided* this job produced nothing
+        usable, and no rerun of the write-back changes that. Swallowing it
+        leaves the job reporting succeeded with no output and only a worker log
+        line to explain -- the silent partial success of #595, where a chunked
+        alignment refuses to merge an incomplete set of buckets and the user
+        sees a finished alignment job and no alignment. Raising reaches the
+        `except PermanentError` branch in `run`, which fails the job with the
+        applier's own message and without burning retries.
+        """
         if not result:
             return
         try:
@@ -428,6 +447,8 @@ class JobExecutor:
             # setting it; the appliers that create objects from nothing but a
             # project_id have no other source for one.
             await results.apply(job.type, result, owner=job.owner)
+        except PermanentError:
+            raise
         except Exception as e:  # noqa: BLE001
             # The work succeeded; only the write-back failed. Log loudly rather
             # than failing the job and re-running expensive work.
