@@ -14,6 +14,7 @@ See docs/superpowers/specs/2026-08-17-project-export-archive-design.md.
 """
 
 import asyncio
+import csv
 import hashlib
 import io
 import json
@@ -107,20 +108,27 @@ def collect_report_artifacts(objects: list[DataObject]) -> list[ExportArtifact]:
     for obj in objects:
         object_id = str(obj.id)
         for category, settings_attr in REPORT_ARTIFACT_ROOTS:
-            root = getattr(settings, settings_attr)
+            root = Path(getattr(settings, settings_attr))
             object_dir = root / object_id
-            if not object_dir.exists() or not object_dir.is_dir():
+            if object_dir.is_symlink() or not object_dir.is_dir():
                 continue
 
-            resolved_object_dir = object_dir.resolve()
+            try:
+                resolved_root = root.resolve()
+                resolved_object_dir = object_dir.resolve(strict=True)
+                resolved_object_dir.relative_to(resolved_root)
+            except (OSError, ValueError):
+                continue
+
             for path in object_dir.rglob("*"):
                 if path.is_symlink() or not path.is_file():
                     continue
 
                 try:
-                    resolved = path.resolve()
+                    resolved = path.resolve(strict=True)
                     resolved.relative_to(resolved_object_dir)
-                    size, sha256 = _hash_file(path)
+                    resolved.relative_to(resolved_root)
+                    size, sha256 = _hash_file(resolved)
                 except (OSError, ValueError):
                     continue
 
@@ -315,29 +323,31 @@ _MANIFEST_HEADER = (
     "archive_path",
     "size",
     "sha256",
+    "state",
     "status",
 )
 
 
 def _render_manifest_rows(rows: list[ExportArtifact]) -> str:
-    lines = ["\t".join(_MANIFEST_HEADER)]
+    output = io.StringIO(newline="")
+    writer = csv.writer(output, delimiter="\t", lineterminator="\n")
+    writer.writerow(_MANIFEST_HEADER)
     for artifact in rows:
-        lines.append(
-            "\t".join(
-                (
-                    artifact.artifact_type,
-                    artifact.artifact_id,
-                    artifact.object_id or "",
-                    artifact.category,
-                    artifact.source_path,
-                    artifact.archive_path,
-                    str(artifact.size),
-                    artifact.sha256,
-                    artifact.status,
-                )
+        writer.writerow(
+            (
+                artifact.artifact_type,
+                artifact.artifact_id,
+                artifact.object_id or "",
+                artifact.category,
+                artifact.source_path,
+                artifact.archive_path,
+                str(artifact.size),
+                artifact.sha256,
+                artifact.state or "",
+                artifact.status,
             )
         )
-    return "\n".join(lines) + "\n"
+    return output.getvalue()
 
 
 def artifact_rows(bundle: ExportBundle) -> list[ExportArtifact]:
@@ -350,7 +360,6 @@ def artifact_rows(bundle: ExportBundle) -> list[ExportArtifact]:
             archive_path=f"blobs/{blob.id}" if blob.rel_path else "",
             size=blob.size,
             sha256=blob.content_sha256 or blob.id,
-            status=str(blob.state),
             state=str(blob.state),
         )
         for blob in bundle.blobs
@@ -439,6 +448,8 @@ async def render_report(bundle: ExportBundle, *, owner: str) -> str:
         "Discovered report artifacts are listed in `data-manifest.tsv`.",
         "Included files live under `reports/<category>/<object_id>/`.",
         "Oversized files may be excluded, and the manifest says which.",
+        "Size and SHA-256 are rechecked before report bytes are packed.",
+        "Files that changed after discovery are marked `error` and omitted.",
         "",
     ]
 
@@ -494,6 +505,9 @@ truth: each blob or report file is marked `included`, `excluded`,
 before packing", and "failed while packing" apart from one another. The
 per-file threshold applies independently to each artifact.
 
+Report bytes are rechecked against their listed size and SHA-256 immediately
+before packing. Changed report files are marked `error` and omitted.
+
 ## What was removed
 
 API keys, encryption keys, absolute filesystem paths, and the names of the
@@ -511,6 +525,55 @@ class ExportResult:
     redaction: RedactionSummary
 
 
+def _resolve_report_source_for_packing(
+    artifact: ExportArtifact, report_roots: dict[str, Path]
+) -> tuple[Path | None, str]:
+    """Revalidate a collected report path immediately before reading it."""
+    root = report_roots.get(artifact.category)
+    if root is None or artifact.object_id is None:
+        return None, "error"
+
+    relative = Path(artifact.source_path)
+    if relative.is_absolute() or not relative.parts or ".." in relative.parts:
+        return None, "error"
+    if Path(artifact.object_id).name != artifact.object_id:
+        return None, "error"
+
+    expected_archive_path = (
+        f"reports/{artifact.category}/{artifact.object_id}/{relative.as_posix()}"
+    )
+    if artifact.archive_path != expected_archive_path:
+        return None, "error"
+
+    object_dir = root / artifact.object_id
+    if object_dir.is_symlink():
+        return None, "error"
+    if not object_dir.exists():
+        return None, "unavailable"
+    if not object_dir.is_dir():
+        return None, "error"
+
+    source = object_dir / relative
+    if source.is_symlink():
+        return None, "error"
+    if not source.exists():
+        return None, "unavailable"
+
+    try:
+        resolved_root = root.resolve(strict=True)
+        resolved_object_dir = object_dir.resolve(strict=True)
+        resolved_source = source.resolve(strict=True)
+        resolved_object_dir.relative_to(resolved_root)
+        resolved_source.relative_to(resolved_root)
+        resolved_source.relative_to(resolved_object_dir)
+    except (OSError, ValueError):
+        return None, "error"
+
+    if not resolved_source.is_file():
+        return None, "error"
+    return resolved_source, "included"
+
+
 def _write_archive(
     dest: Path,
     *,
@@ -519,11 +582,15 @@ def _write_archive(
     report: str,
     artifacts: list[ExportArtifact],
     included: list[ExportArtifact],
+    threshold_bytes: int,
 ) -> None:
     """Pack the tarball. Sync, called via asyncio.to_thread."""
     from app.storage.paths import blob_path
 
-    report_roots = {category: getattr(settings, attr) for category, attr in REPORT_ARTIFACT_ROOTS}
+    report_roots = {
+        category: Path(getattr(settings, attr))
+        for category, attr in REPORT_ARTIFACT_ROOTS
+    }
 
     def _add_bytes(tar: tarfile.TarFile, name: str, payload: bytes) -> None:
         info = tarfile.TarInfo(name)
@@ -541,19 +608,39 @@ def _write_archive(
                 # (it is the primary key); blob_path() resolves by that stored
                 # digest, which is what the archive packs.
                 src = blob_path(artifact.artifact_id)
-            else:
-                root = report_roots.get(artifact.category)
-                if root is None or artifact.object_id is None:
-                    artifact.status = "error"
+                if not src.is_file():
+                    artifact.status = "unavailable"
                     continue
-                src = root / artifact.object_id / artifact.source_path
+                try:
+                    tar.add(src, arcname=artifact.archive_path)
+                except OSError:
+                    artifact.status = "error"
+                continue
 
-            if not src.is_file():
-                artifact.status = "unavailable"
+            src, invalid_status = _resolve_report_source_for_packing(
+                artifact, report_roots
+            )
+            if src is None:
+                artifact.status = invalid_status
                 continue
 
             try:
-                tar.add(src, arcname=artifact.archive_path)
+                payload = src.read_bytes()
+            except OSError:
+                artifact.status = "error"
+                continue
+
+            payload_sha256 = hashlib.sha256(payload).hexdigest()
+            if (
+                len(payload) != artifact.size
+                or payload_sha256 != artifact.sha256
+                or len(payload) > threshold_bytes
+            ):
+                artifact.status = "error"
+                continue
+
+            try:
+                _add_bytes(tar, artifact.archive_path, payload)
             except OSError:
                 artifact.status = "error"
 
@@ -618,6 +705,7 @@ async def export_project(
         report=report,
         artifacts=artifacts,
         included=included,
+        threshold_bytes=threshold_bytes,
     )
 
     included_blob_count = sum(

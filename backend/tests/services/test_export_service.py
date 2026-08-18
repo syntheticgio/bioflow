@@ -1,5 +1,7 @@
-import json
+import csv
 import hashlib
+import io
+import json
 import tarfile
 from pathlib import Path
 
@@ -9,15 +11,15 @@ from beanie import PydanticObjectId
 from app.config import settings
 from app.models import Blob, BlobState, JobRunTiming, RunKind, SourceInfo, SourceMode
 from app.models.timing import RunMachine
-from app.storage.paths import blob_path
 from app.services import export_service, run_service
+from app.storage.paths import blob_path
 from tests.services.helpers import TEST_OWNER, make_blob, make_object, make_project
 
 
 def _manifest_rows_from_tar(path: Path) -> dict[str, list[str]]:
     with tarfile.open(path) as tar:
         manifest_tsv = tar.extractfile("data-manifest.tsv").read().decode()
-    rows = [line.split("\t") for line in manifest_tsv.strip().splitlines()]
+    rows = list(csv.reader(io.StringIO(manifest_tsv), delimiter="\t"))
     return {row[1]: row for row in rows[1:]}
 
 
@@ -242,6 +244,21 @@ class TestCollectReportArtifacts:
 
         assert artifacts == []
 
+    async def test_rejects_a_symlinked_object_directory(self, report_roots):
+        project = await make_project("export-report-artifacts-object-dir-symlink")
+        obj = await make_object(project, "sample.vcf.gz")
+        object_id = str(obj.id)
+
+        outside_dir = report_roots["qc_reports_dir"].parent / "outside-object-dir"
+        self._write(outside_dir / "fastp.html", b"outside")
+        object_dir = report_roots["qc_reports_dir"] / object_id
+        object_dir.parent.mkdir(parents=True, exist_ok=True)
+        object_dir.symlink_to(outside_dir, target_is_directory=True)
+
+        artifacts = export_service.collect_report_artifacts([obj])
+
+        assert artifacts == []
+
     async def test_rejects_files_that_resolve_outside_the_object_directory(
         self, report_roots
     ):
@@ -419,6 +436,7 @@ def test_manifest_normalizes_mixed_artifacts_and_sorts_them_deterministically():
             "blobs/" + ("a" * 64),
             "100",
             "1" * 64,
+            "present",
             "included",
         ],
         [
@@ -430,6 +448,7 @@ def test_manifest_normalizes_mixed_artifacts_and_sorts_them_deterministically():
             "blobs/" + ("b" * 64),
             "1000",
             "2" * 64,
+            "present",
             "included",
         ],
         [
@@ -441,6 +460,7 @@ def test_manifest_normalizes_mixed_artifacts_and_sorts_them_deterministically():
             "blobs/" + ("c" * 64),
             "1001",
             "3" * 64,
+            "present",
             "excluded",
         ],
         [
@@ -452,6 +472,7 @@ def test_manifest_normalizes_mixed_artifacts_and_sorts_them_deterministically():
             "reports/annotation_stats/obj-1/features.db",
             "1001",
             "5" * 64,
+            "",
             "excluded",
         ],
         [
@@ -463,6 +484,7 @@ def test_manifest_normalizes_mixed_artifacts_and_sorts_them_deterministically():
             "reports/qc/obj-2/fastp.html",
             "200",
             "4" * 64,
+            "",
             "included",
         ],
     ]
@@ -485,6 +507,7 @@ def test_manifest_has_a_header_row():
         "archive_path",
         "size",
         "sha256",
+        "state",
         "status",
     ]
     assert included == []
@@ -503,6 +526,62 @@ def test_manifest_falls_back_to_id_when_content_sha256_is_unset():
 
     row = tsv.strip().splitlines()[1].split("\t")
     assert row[7] == "c" * 64
+
+
+def test_manifest_preserves_blob_state_separately_from_inclusion_status():
+    blob = Blob(
+        id="d" * 64,
+        size=2_000,
+        state=BlobState.MISSING,
+        rel_path="reads/missing.fastq.gz",
+    )
+
+    tsv, _ = export_service.build_manifest(
+        export_service.ExportBundle(blobs=[blob]), threshold_bytes=1_000
+    )
+
+    rows = list(csv.DictReader(io.StringIO(tsv), delimiter="\t"))
+    assert rows == [
+        {
+            "artifact_type": "blob",
+            "artifact_id": "d" * 64,
+            "object_id": "",
+            "category": "",
+            "source_path": "reads/missing.fastq.gz",
+            "archive_path": "blobs/" + ("d" * 64),
+            "size": "2000",
+            "sha256": "d" * 64,
+            "state": "missing",
+            "status": "excluded",
+        }
+    ]
+
+
+def test_manifest_quotes_tabs_and_newlines_in_report_paths():
+    source_path = "nested/odd\tname\nline.txt"
+    artifact = export_service.ExportArtifact(
+        artifact_type="report",
+        artifact_id=f"qc:obj-1:{source_path}",
+        object_id="obj-1",
+        category="qc",
+        source_path=source_path,
+        archive_path=f"reports/qc/obj-1/{source_path}",
+        size=7,
+        sha256="e" * 64,
+    )
+
+    tsv, _ = export_service.build_manifest(
+        export_service.ExportBundle(report_artifacts=[artifact]),
+        threshold_bytes=1_000,
+    )
+
+    rows = list(csv.DictReader(io.StringIO(tsv), delimiter="\t"))
+    assert len(rows) == 1
+    assert rows[0]["artifact_id"] == f"qc:obj-1:{source_path}"
+    assert rows[0]["source_path"] == source_path
+    assert rows[0]["archive_path"] == f"reports/qc/obj-1/{source_path}"
+    assert rows[0]["state"] == ""
+    assert rows[0]["status"] == "included"
 
 
 @pytest.mark.usefixtures("beanie_models")
@@ -707,9 +786,13 @@ class TestExportProject:
         assert "reports/<category>/<object_id>/" in readme
         assert "small enough to include" in readme
         assert "per-file threshold" in readme
+        assert "Report bytes are rechecked against their listed size and SHA-256" in readme
+        assert "Changed report files are marked `error` and omitted." in readme
         assert "Discovered report artifacts are listed in `data-manifest.tsv`." in report_md
         assert "Included files live under `reports/<category>/<object_id>/`." in report_md
         assert "Oversized files may be excluded, and the manifest says which." in report_md
+        assert "Size and SHA-256 are rechecked before report bytes are packed." in report_md
+        assert "Files that changed after discovery are marked `error` and omitted." in report_md
         assert "not included" not in readme.lower()
         assert "known, deliberate gap" not in readme.lower()
         assert "not included" not in report_md.lower()
@@ -756,14 +839,14 @@ class TestExportProject:
         report_path.parent.mkdir(parents=True, exist_ok=True)
         report_path.write_bytes(b"<html>error-while-packing</html>")
 
-        real_add = tarfile.TarFile.add
+        real_addfile = tarfile.TarFile.addfile
 
-        def fail_one_add(self, name, arcname=None, recursive=True, *, filter=None):
-            if arcname == f"reports/qc/{object_id}/fastp.html":
+        def fail_one_addfile(self, tarinfo, fileobj=None):
+            if tarinfo.name == f"reports/qc/{object_id}/fastp.html":
                 raise OSError("simulated pack failure")
-            return real_add(self, name, arcname=arcname, recursive=recursive, filter=filter)
+            return real_addfile(self, tarinfo, fileobj=fileobj)
 
-        monkeypatch.setattr(tarfile.TarFile, "add", fail_one_add)
+        monkeypatch.setattr(tarfile.TarFile, "addfile", fail_one_addfile)
 
         result = await export_service.export_project(
             project.id, owner=TEST_OWNER, threshold_bytes=1_000
@@ -775,6 +858,93 @@ class TestExportProject:
         assert f"reports/qc/{object_id}/fastp.html" not in names
         rows = _manifest_rows_from_tar(result.path)
         assert rows[f"qc:{object_id}:fastp.html"][-1] == "error"
+
+    async def test_packing_rejects_a_report_path_replaced_by_an_escaping_symlink(
+        self, monkeypatch, report_roots
+    ):
+        project = await make_project("export-archive-report-pack-escape")
+        obj = await make_object(project, "sample.fastq.gz")
+        object_id = str(obj.id)
+        object_dir = report_roots["qc_reports_dir"] / object_id
+        nested_dir = object_dir / "nested"
+        report_path = nested_dir / "fastp.html"
+        report_path.parent.mkdir(parents=True, exist_ok=True)
+        report_path.write_bytes(b"safe-at-discovery")
+
+        outside_dir = report_roots["qc_reports_dir"].parent / "outside-pack-target"
+        outside_dir.mkdir(parents=True, exist_ok=True)
+        (outside_dir / "fastp.html").write_bytes(b"escaped-at-pack")
+        saved_dir = object_dir / "saved-nested"
+        real_collect = export_service.collect_report_artifacts
+
+        def collect_then_replace_with_symlink(objects):
+            artifacts = real_collect(objects)
+            nested_dir.rename(saved_dir)
+            nested_dir.symlink_to(outside_dir, target_is_directory=True)
+            return artifacts
+
+        monkeypatch.setattr(
+            export_service,
+            "collect_report_artifacts",
+            collect_then_replace_with_symlink,
+        )
+
+        result = await export_service.export_project(
+            project.id, owner=TEST_OWNER, threshold_bytes=1_000
+        )
+
+        archive_path = f"reports/qc/{object_id}/nested/fastp.html"
+        with tarfile.open(result.path) as tar:
+            assert archive_path not in tar.getnames()
+            assert tar.extractfile("README.md").read().startswith(b"# BioFlow")
+        rows = _manifest_rows_from_tar(result.path)
+        assert rows[f"qc:{object_id}:nested/fastp.html"][-1] == "error"
+
+    @pytest.mark.parametrize(
+        "replacement",
+        [b"changed!", b"x" * 1_001],
+        ids=["sha256-drift", "threshold-drift"],
+    )
+    async def test_packing_omits_changed_report_bytes_without_corrupting_the_tar(
+        self, monkeypatch, report_roots, replacement
+    ):
+        project = await make_project(
+            f"export-archive-report-drift-{len(replacement)}"
+        )
+        obj = await make_object(project, "sample.fastq.gz")
+        object_id = str(obj.id)
+        object_dir = report_roots["qc_reports_dir"] / object_id
+        changed_path = object_dir / "changed.html"
+        stable_path = object_dir / "stable.html"
+        changed_path.parent.mkdir(parents=True, exist_ok=True)
+        changed_path.write_bytes(b"original")
+        stable_path.write_bytes(b"stable")
+
+        real_collect = export_service.collect_report_artifacts
+
+        def collect_then_change_bytes(objects):
+            artifacts = real_collect(objects)
+            changed_path.write_bytes(replacement)
+            return artifacts
+
+        monkeypatch.setattr(
+            export_service, "collect_report_artifacts", collect_then_change_bytes
+        )
+
+        result = await export_service.export_project(
+            project.id, owner=TEST_OWNER, threshold_bytes=1_000
+        )
+
+        changed_archive_path = f"reports/qc/{object_id}/changed.html"
+        stable_archive_path = f"reports/qc/{object_id}/stable.html"
+        with tarfile.open(result.path) as tar:
+            names = set(tar.getnames())
+            assert changed_archive_path not in names
+            assert tar.extractfile(stable_archive_path).read() == b"stable"
+            assert tar.extractfile("manifest.json").read()
+        rows = _manifest_rows_from_tar(result.path)
+        assert rows[f"qc:{object_id}:changed.html"][-1] == "error"
+        assert rows[f"qc:{object_id}:stable.html"][-1] == "included"
 
     async def test_objectids_are_preserved_for_a_future_importer(self):
         project = await make_project("export-archive-objectids")

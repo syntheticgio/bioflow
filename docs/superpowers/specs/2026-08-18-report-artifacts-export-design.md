@@ -66,10 +66,14 @@ owner-scoped export bundle. Missing directories are normal and produce no
 rows. Directories for objects outside the bundle are ignored, including
 objects belonging to another owner.
 
-The collector recursively discovers regular files and ignores symlinks. Every
-resolved regular-file path must remain within the expected object directory;
-files that fail that containment check are rejected. This prevents archive
-traversal and prevents a report symlink from escaping the report root.
+The collector recursively discovers regular files and ignores symlinks,
+including symlinked `<root>/<object_id>/` directories. Every resolved object
+directory must remain within its configured root, and every resolved
+regular-file path must remain within both the configured root and expected
+object directory. Packing repeats those checks immediately before reading a
+report file. Files that fail any containment check are rejected. This prevents
+archive traversal and prevents a report symlink or path replacement from
+escaping the report root after discovery.
 
 ### A common export-artifact abstraction
 
@@ -97,16 +101,19 @@ The archive layout and manifest schema change materially, so
 artifact manifest with columns equivalent to:
 
 ```text
-artifact_type  artifact_id  object_id  category  source_path  archive_path  size  sha256  status
+artifact_type  artifact_id  object_id  category  source_path  archive_path  size  sha256  state  status
 ```
 
-Blob rows retain their existing identity, state, and digest information. Report
-rows use a stable path-based identity of
+`state` preserves the storage state for blob rows and is empty for report rows;
+`status` independently records the export decision or pack result. Blob rows
+retain their existing identity and digest information. Report rows use a stable path-based identity of
 `<category>:<object_id>:<relative_path>` and include the report file's digest
 in `sha256`. This keeps identities readable and collision-resistant across
 report roots while retaining content verification. All rows use `included`,
 `excluded`, or an explicit `unavailable`/`error` status rather than silently
-disappearing.
+disappearing. The manifest is emitted with standards-compatible tab-delimited
+CSV quoting so tabs and newlines in filesystem-derived fields remain inside
+their original row and field.
 
 ## Data flow
 
@@ -119,8 +126,10 @@ disappearing.
    `ExportArtifact`.
 4. The manifest builder combines blob and report artifacts, sorts them
    deterministically, and applies the per-file threshold.
-5. `_write_archive()` packs included blobs under `blobs/` and included report
-   files under `reports/<category>/<object_id>/`.
+5. `_write_archive()` revalidates included report paths, reads each report into
+   one byte snapshot, and checks its recorded size, SHA-256, and threshold
+   before starting a tar member. Valid snapshots are packed under
+   `reports/<category>/<object_id>/`; blobs remain under `blobs/`.
 6. `manifest.json` records separate blob/report counts and total artifact
    counts, along with the version-2 format marker and threshold.
 7. The README and report remove the deferral note and describe the `reports/`
@@ -135,6 +144,10 @@ If a discovered report file disappears or becomes unreadable between
 collection and archive writing, its manifest row remains with an explicit
 unavailable/error status and the export continues. The exporter must never
 silently omit a file that it reported as discovered.
+
+If report bytes differ in size or SHA-256 from the discovery snapshot, or the
+bytes now exceed the export threshold, the row is marked `error` and no tar
+member is started. Other archive members remain valid and continue packing.
 
 Archive paths are generated from validated category, object ID, and
 object-relative paths; user-controlled absolute paths are never used as tar
@@ -151,9 +164,12 @@ Add focused tests for:
 - missing roots and missing object directories;
 - orphan object IDs being excluded;
 - symlinks and containment/traversal rejection;
+- symlinked object-directory rejection and pack-time containment revalidation;
 - per-file inclusion and exclusion within one directory;
 - report digest and size recording;
-- the version-2 manifest header and mixed blob/report rows;
+- report-byte drift in size, SHA-256, and threshold between discovery and pack;
+- the version-2 manifest header, separate blob state, and mixed blob/report rows;
+- tabs and newlines in manifest fields remaining parseable as one TSV row;
 - archive members under `reports/<category>/<object_id>/`;
 - excluded report files appearing in the manifest but not the tarball;
 - explicit unavailable/error handling when a file cannot be packed;
@@ -172,5 +188,9 @@ archive boundary.
 - [ ] Report bytes are thresholded per file.
 - [ ] Only report directories for exported, owner-scoped objects are read.
 - [ ] Symlink and path-containment checks prevent archive escape.
+- [ ] Packed report bytes match the recorded size and SHA-256 and remain below
+      the threshold.
+- [ ] Blob storage state and export status occupy separate version-2 columns.
+- [ ] Filesystem-derived manifest fields cannot break TSV row structure.
 - [ ] Archive format version is 2 and documentation no longer calls report
       packing a deferred gap.
