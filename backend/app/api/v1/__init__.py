@@ -14,6 +14,7 @@ from app.api.v1 import (
     nodes,
     objects,
     operations,
+    parameter_sets,
     pipelines,
     profiles,
     projects,
@@ -60,5 +61,6 @@ api_router.include_router(settings.router)
 api_router.include_router(version.router)
 api_router.include_router(workflows.router)
 api_router.include_router(nodes.router)
+api_router.include_router(parameter_sets.router)
 
 __all__ = ["api_router"]
