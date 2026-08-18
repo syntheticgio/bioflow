@@ -124,3 +124,160 @@ class TestSerialization:
         groups = {f["group"] for f in schema["fields"]}
         assert "performance" in groups
         assert "biology" in groups
+
+    def test_bowtie2_schema_declares_new_fields(self):
+        schema = aligner_registry.schema_for(Aligner.BOWTIE2)
+        fields = {field["key"]: field for field in schema["fields"]}
+        assert fields["minins"]["kind"] == "int"
+        assert fields["minins"]["default"] == 0
+        assert fields["orientation"]["choices"] == [
+            {"value": "FR", "label": "FR (paired-end)"},
+            {"value": "RF", "label": "RF (mate-pair)"},
+            {"value": "FF", "label": "FF"},
+        ]
+        assert {"dovetail", "no_contain", "no_overlap", "report_all"} <= fields.keys()
+
+    def test_bowtie2_schema_exposes_all_workflow_presets(self):
+        schema = aligner_registry.schema_for(Aligner.BOWTIE2)
+        assert set(schema["presets"]) == {
+            "standard_short_read",
+            "long_insert",
+            "mate_pair",
+            "adapter_partial_reference",
+            "structural_variant",
+            "repeat_multimapping",
+        }
+
+    def test_bowtie2_schema_presets_are_exact_bundles(self):
+        schema = aligner_registry.schema_for(Aligner.BOWTIE2)
+        assert schema["presets"]["standard_short_read"]["id"] == "standard_short_read"
+        assert schema["presets"]["standard_short_read"]["label"] == "Standard short-read DNA"
+        assert schema["presets"]["standard_short_read"]["description"] == (
+            "Conservative paired-end defaults; check insert sizes against the library."
+        )
+        assert schema["presets"]["standard_short_read"]["values"] == {
+            "sensitivity": "--sensitive",
+            "local": False,
+            "minins": 0,
+            "maxins": 500,
+            "orientation": "FR",
+            "no_mixed": False,
+            "no_discordant": False,
+            "dovetail": False,
+            "no_contain": False,
+            "no_overlap": False,
+            "report_k": 0,
+            "report_all": False,
+        }
+        assert schema["presets"]["long_insert"]["id"] == "long_insert"
+        assert schema["presets"]["long_insert"]["label"] == "Long-insert paired-end"
+        assert schema["presets"]["long_insert"]["description"] == (
+            "Broad starting range for long-insert libraries; check the library distribution."
+        )
+        assert schema["presets"]["long_insert"]["values"] == {
+            "sensitivity": "--sensitive",
+            "local": False,
+            "minins": 500,
+            "maxins": 20000,
+            "orientation": "FR",
+            "no_mixed": False,
+            "no_discordant": False,
+            "dovetail": False,
+            "no_contain": False,
+            "no_overlap": False,
+            "report_k": 0,
+            "report_all": False,
+        }
+        assert schema["presets"]["mate_pair"]["id"] == "mate_pair"
+        assert schema["presets"]["mate_pair"]["label"] == "Mate-pair"
+        assert schema["presets"]["mate_pair"]["description"] == (
+            "RF mate-pair starting values; confirm orientation and insert range for the protocol."
+        )
+        assert schema["presets"]["mate_pair"]["values"] == {
+            "sensitivity": "--sensitive",
+            "local": False,
+            "minins": 500,
+            "maxins": 20000,
+            "orientation": "RF",
+            "no_mixed": False,
+            "no_discordant": False,
+            "dovetail": False,
+            "no_contain": False,
+            "no_overlap": False,
+            "report_k": 0,
+            "report_all": False,
+        }
+        assert (
+            schema["presets"]["adapter_partial_reference"]["id"]
+            == "adapter_partial_reference"
+        )
+        assert (
+            schema["presets"]["adapter_partial_reference"]["label"]
+            == "Adapter-contaminated / partial reference"
+        )
+        assert schema["presets"]["adapter_partial_reference"]["description"] == (
+            "Uses local alignment to tolerate unaligned read ends or a partial reference."
+        )
+        assert schema["presets"]["adapter_partial_reference"]["values"] == {
+            "sensitivity": "--sensitive",
+            "local": True,
+            "minins": 0,
+            "maxins": 500,
+            "orientation": "FR",
+            "no_mixed": False,
+            "no_discordant": False,
+            "dovetail": False,
+            "no_contain": False,
+            "no_overlap": False,
+            "report_k": 0,
+            "report_all": False,
+        }
+        assert schema["presets"]["structural_variant"]["id"] == "structural_variant"
+        assert (
+            schema["presets"]["structural_variant"]["label"]
+            == "Structural-variant discovery"
+        )
+        assert schema["presets"]["structural_variant"]["description"] == (
+            "Preserves discordant and mixed evidence and allows dovetailing mates."
+        )
+        assert schema["presets"]["structural_variant"]["values"] == {
+            "sensitivity": "--sensitive",
+            "local": False,
+            "minins": 0,
+            "maxins": 500,
+            "orientation": "FR",
+            "no_mixed": False,
+            "no_discordant": False,
+            "dovetail": True,
+            "no_contain": False,
+            "no_overlap": False,
+            "report_k": 0,
+            "report_all": False,
+        }
+        assert schema["presets"]["repeat_multimapping"]["id"] == "repeat_multimapping"
+        assert (
+            schema["presets"]["repeat_multimapping"]["label"]
+            == "Repeat / multi-mapping analysis"
+        )
+        assert schema["presets"]["repeat_multimapping"]["description"] == (
+            "Reports up to 10 alignments per read; output size can grow substantially."
+        )
+        assert schema["presets"]["repeat_multimapping"]["values"] == {
+            "sensitivity": "--sensitive",
+            "local": False,
+            "minins": 0,
+            "maxins": 500,
+            "orientation": "FR",
+            "no_mixed": False,
+            "no_discordant": False,
+            "dovetail": False,
+            "no_contain": False,
+            "no_overlap": False,
+            "report_k": 10,
+            "report_all": False,
+        }
+
+    def test_every_bowtie2_preset_values_are_validated(self):
+        schema = aligner_registry.schema_for(Aligner.BOWTIE2)
+        for preset in schema["presets"].values():
+            align_params.from_dict({"aligner": "bowtie2", **preset["values"]})
