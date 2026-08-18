@@ -158,11 +158,15 @@ function PredictButton({
 function RecordStructure({
   objectId,
   record,
+  predictionStatus,
+  onPredictionStatusChange,
 }: {
   objectId: string;
   record: ProteinRecordRow;
+  predictionStatus: ProteinPredictionStatus | null;
+  onPredictionStatusChange: (status: ProteinPredictionStatus | null) => void;
 }) {
-  const [predictionStatus, setPredictionStatus] = useState<ProteinPredictionStatus | null>(null);
+  const setPredictionStatus = onPredictionStatusChange;
 
   const { data, isLoading, isError, refetch, isFetching } = useQuery({
     queryKey: ["protein-record-structure", objectId, record.ordinal],
@@ -278,6 +282,7 @@ export function ProteinStructureTab({ objectId }: { objectId: string }) {
   const [page, setPage] = useState(0);
   const [searchInput, setSearchInput] = useState("");
   const [selected, setSelected] = useState<ProteinRecordRow | null>(null);
+  const [selectedPredictionStatus, setSelectedPredictionStatus] = useState<ProteinPredictionStatus | null>(null);
 
   const search = useDebounced(searchInput, 300);
 
@@ -348,7 +353,7 @@ export function ProteinStructureTab({ objectId }: { objectId: string }) {
                     key={row.ordinal}
                     onClick={() => {
                       setSelected(row);
-                      setPredictionStatus(null);
+                      setSelectedPredictionStatus(null);
                     }}
                     style={{
                       cursor: "pointer",
@@ -418,7 +423,12 @@ export function ProteinStructureTab({ objectId }: { objectId: string }) {
 
       <div style={{ flex: 1, minWidth: 0 }}>
         {selected ? (
-          <RecordStructure objectId={objectId} record={selected} />
+          <RecordStructure
+            objectId={objectId}
+            record={selected}
+            predictionStatus={selectedPredictionStatus}
+            onPredictionStatusChange={setSelectedPredictionStatus}
+          />
         ) : (
           <div>
             <div className="chrom-note">

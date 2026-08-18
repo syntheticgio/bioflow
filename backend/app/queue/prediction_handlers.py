@@ -5,6 +5,7 @@ import urllib.request
 from pathlib import Path
 
 from app.config import settings
+from app.db.client import run_from_thread
 from app.errors import PermanentError, RetryableError
 from app.logging import get_logger
 from app.models import IoClass, JobClass, JobResources, ProteinPrediction
@@ -122,10 +123,10 @@ def predict_structure(ctx: JobContext) -> dict:
     except urllib.error.HTTPError as e:
         if e.code == 400:
             body = e.read().decode()
-            raise PermanentError(f"Sidecar rejected sequence: {body}")
-        raise RetryableError(f"Sidecar HTTP {e.code}: {e.reason}")
+            raise PermanentError(f"Sidecar rejected sequence: {body}") from e
+        raise RetryableError(f"Sidecar HTTP {e.code}: {e.reason}") from e
     except (urllib.error.URLError, OSError) as e:
-        raise RetryableError(f"Could not reach prediction sidecar: {e}")
+        raise RetryableError(f"Could not reach prediction sidecar: {e}") from e
 
     if not pdb_bytes:
         raise RetryableError("Sidecar returned empty response")
@@ -145,9 +146,6 @@ def predict_structure(ctx: JobContext) -> dict:
     ctx.progress(pct=80, message="Caching prediction result…")
 
     # Cache the result (in a thread-safe way — use run_from_thread)
-    from app.db.client import run_from_thread
-    from app.models import ProteinPrediction
-
     run_from_thread(
         ProteinPrediction.find_one(
             ProteinPrediction.sequence_hash == sequence_hash
