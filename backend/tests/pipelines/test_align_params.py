@@ -51,6 +51,53 @@ class TestBowtie2:
         p = align_params.from_dict({"aligner": "bowtie2"})
         assert p.sensitivity == "--sensitive"
 
+    def test_new_fields_keep_bowtie2_defaults(self):
+        p = align_params.from_dict({"aligner": "bowtie2"})
+        assert p.minins == 0
+        assert p.maxins == 500
+        assert p.orientation == "FR"
+        assert p.dovetail is False
+        assert p.no_contain is False
+        assert p.no_overlap is False
+        assert p.report_k == 0
+        assert p.report_all is False
+
+    def test_new_fields_round_trip_through_as_dict(self):
+        p = align_params.from_dict(
+            {
+                "aligner": "bowtie2",
+                "minins": 500,
+                "maxins": 20000,
+                "orientation": "RF",
+                "dovetail": True,
+                "no_contain": True,
+                "no_overlap": True,
+                "report_all": True,
+            }
+        )
+        out = p.as_dict()
+        assert out["minins"] == 500
+        assert out["maxins"] == 20000
+        assert out["orientation"] == "RF"
+        assert out["dovetail"] is True
+        assert out["no_contain"] is True
+        assert out["no_overlap"] is True
+        assert out["report_all"] is True
+
+    @pytest.mark.parametrize("orientation", ["FR", "RF", "FF"])
+    def test_orientation_accepts_documented_values(self, orientation):
+        assert (
+            align_params.from_dict(
+                {"aligner": "bowtie2", "orientation": orientation}
+            ).orientation
+            == orientation
+        )
+
+    @pytest.mark.parametrize("minins", [-1])
+    def test_minins_must_not_be_negative(self, minins):
+        with pytest.raises(ValidationError):
+            align_params.from_dict({"aligner": "bowtie2", "minins": minins})
+
     def test_an_unknown_sensitivity_is_rejected(self):
         with pytest.raises(ValidationError):
             align_params.from_dict(
@@ -61,9 +108,38 @@ class TestBowtie2:
         p = align_params.from_dict({"aligner": "bowtie2", "maxins": 800})
         assert p.maxins == 800
 
+    @pytest.mark.parametrize("maxins", [0])
+    def test_maxins_must_be_at_least_one(self, maxins):
+        with pytest.raises(ValidationError):
+            align_params.from_dict({"aligner": "bowtie2", "maxins": maxins})
+
     def test_maxins_must_be_positive(self):
         with pytest.raises(ValidationError):
             align_params.from_dict({"aligner": "bowtie2", "maxins": 0})
+
+    @pytest.mark.parametrize("orientation", ["FRR", "rev", ""])
+    def test_unknown_orientation_is_rejected(self, orientation):
+        with pytest.raises(ValidationError):
+            align_params.from_dict(
+                {"aligner": "bowtie2", "orientation": orientation}
+            )
+
+    @pytest.mark.parametrize("report_k", [-1])
+    def test_report_k_must_not_be_negative(self, report_k):
+        with pytest.raises(ValidationError):
+            align_params.from_dict({"aligner": "bowtie2", "report_k": report_k})
+
+    def test_report_k_and_report_all_are_mutually_exclusive(self):
+        with pytest.raises(ValidationError):
+            align_params.from_dict(
+                {"aligner": "bowtie2", "report_k": 10, "report_all": True}
+            )
+
+    def test_minins_must_not_exceed_maxins(self):
+        with pytest.raises(ValidationError):
+            align_params.from_dict(
+                {"aligner": "bowtie2", "minins": 501, "maxins": 500}
+            )
 
 
 class TestHisat2:

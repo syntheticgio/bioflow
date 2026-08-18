@@ -205,6 +205,7 @@ class Minimap2Params(BaseAlignParams):
 BOWTIE2_SENSITIVITIES: tuple[str, ...] = (
     "--very-fast", "--fast", "--sensitive", "--very-sensitive",
 )
+BOWTIE2_ORIENTATIONS: tuple[str, ...] = ("FR", "RF", "FF")
 
 
 @dataclass
@@ -218,22 +219,34 @@ class Bowtie2Params(BaseAlignParams):
     # The insert-size ceiling. A pair whose implied fragment exceeds this is
     # not called properly-paired, which is why it matters for ChIP-seq, where
     # fragment length is the experimental variable.
+    minins: int = 0
     maxins: int = 500
+    orientation: str = "FR"
+    dovetail: bool = False
+    no_contain: bool = False
+    no_overlap: bool = False
     no_mixed: bool = False
     no_discordant: bool = False
     # Report up to N alignments per read rather than the single best. 0 means
     # "leave the flag off", which is bowtie2's default behavior.
     report_k: int = 0
+    report_all: bool = False
 
     def as_dict(self) -> dict:
         return {
             **super().as_dict(),
             "sensitivity": self.sensitivity,
             "local": self.local,
+            "minins": self.minins,
             "maxins": self.maxins,
+            "orientation": self.orientation,
+            "dovetail": self.dovetail,
+            "no_contain": self.no_contain,
+            "no_overlap": self.no_overlap,
             "no_mixed": self.no_mixed,
             "no_discordant": self.no_discordant,
             "report_k": self.report_k,
+            "report_all": self.report_all,
         }
 
     @classmethod
@@ -245,22 +258,45 @@ class Bowtie2Params(BaseAlignParams):
                 details={"valid": list(BOWTIE2_SENSITIVITIES)},
             )
 
+        minins = int(data.get("minins", 0))
+        if minins < 0:
+            raise ValidationError("minins cannot be negative")
+
         maxins = int(data.get("maxins", 500))
         if maxins < 1:
             raise ValidationError("maxins must be at least 1")
+        if minins > maxins:
+            raise ValidationError("minins cannot exceed maxins")
+
+        orientation = data.get("orientation", "FR")
+        if orientation not in BOWTIE2_ORIENTATIONS:
+            raise ValidationError(
+                f"Unknown bowtie2 orientation {orientation!r}",
+                details={"valid": list(BOWTIE2_ORIENTATIONS)},
+            )
 
         report_k = int(data.get("report_k", 0))
         if report_k < 0:
             raise ValidationError("report_k cannot be negative")
 
+        report_all = bool(data.get("report_all", False))
+        if report_k > 0 and report_all:
+            raise ValidationError("report_k and report_all are mutually exclusive")
+
         return cls(
             aligner=Aligner.BOWTIE2,
             sensitivity=sensitivity,
             local=bool(data.get("local", False)),
+            minins=minins,
             maxins=maxins,
+            orientation=orientation,
+            dovetail=bool(data.get("dovetail", False)),
+            no_contain=bool(data.get("no_contain", False)),
+            no_overlap=bool(data.get("no_overlap", False)),
             no_mixed=bool(data.get("no_mixed", False)),
             no_discordant=bool(data.get("no_discordant", False)),
             report_k=report_k,
+            report_all=report_all,
             **cls._shared(data),
         )
 
