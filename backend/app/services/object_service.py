@@ -18,6 +18,7 @@ from app.models import (
     IoClass,
     JobClass,
     JobResources,
+    Locality,
     ObjectRole,
     ObjectStatus,
     RunJobRole,
@@ -974,3 +975,30 @@ async def object_with_blob(
     obj = await get_object(object_id, owner=owner)
     blob = await Blob.get(obj.blob_sha256) if obj.blob_sha256 else None
     return obj, blob
+
+
+def check_local(obj: DataObject, *, verb: str) -> None:
+    """Refuse an offloaded object before a caller reaches for its bytes.
+
+    A separate helper rather than a check inside `object_with_blob`, because
+    that function is also how the plain detail endpoint loads an object -- and
+    a remote object must still be *viewable*, listed, and suggested. Only the
+    paths that actually read bytes refuse.
+
+    Without this, every such path falls through to its own "no stored content"
+    message, which is written for an upload still in flight and reads as a bug
+    on a file the user offloaded on purpose. `verb` names what was being
+    attempted so the message is about their action, not our storage.
+    """
+    if obj.locality is not Locality.REMOTE:
+        return
+    accession = obj.remote_source.accession if obj.remote_source else None
+    where = f" from {accession}" if accession else ""
+    raise ValidationError(
+        f"{obj.name!r} is stored remotely -- fetch it{where} before you can {verb} it",
+        details={
+            "object_id": str(obj.id),
+            "locality": obj.locality.value,
+            "accession": accession,
+        },
+    )
