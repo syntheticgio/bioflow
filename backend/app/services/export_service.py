@@ -422,7 +422,7 @@ async def export_project(
     report = await render_report(bundle, owner=owner)
 
     stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
-    dest = settings.exports_dir / f"{bundle.root.slug}-{stamp}.tar.gz"
+    dest = settings.exports_dir / f"{owner}__{bundle.root.slug}-{stamp}.tar.gz"
 
     manifest_json = {
         "bioflow_export_version": BIOFLOW_EXPORT_VERSION,
