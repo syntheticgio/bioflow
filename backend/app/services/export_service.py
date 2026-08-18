@@ -95,10 +95,18 @@ async def collect(project_id: PydanticObjectId, *, owner: str) -> ExportBundle:
     blob_ids = sorted({o.blob_sha256 for o in objects if o.blob_sha256 is not None})
     blobs = await Blob.find({"_id": {"$in": blob_ids}}).to_list() if blob_ids else []
 
+    # Timings are keyed by object *or* by project: `executor.py` records
+    # `object_id` only for a job that attached to a single object, so
+    # project-level work (and any job whose object link was never recorded)
+    # carries a null `object_id` and only `project_id`. Querying on
+    # `object_id` alone silently drops those, and the archive has no way to
+    # say a run happened but its timing was left out -- the gap reads as
+    # "this project ran nothing".
     object_ids = [str(o.id) for o in objects]
-    timings = (
-        await JobRunTiming.find({"object_id": {"$in": object_ids}}).to_list() if object_ids else []
-    )
+    timing_keys: list[dict] = [{"project_id": {"$in": [str(p) for p in project_ids]}}]
+    if object_ids:
+        timing_keys.append({"object_id": {"$in": object_ids}})
+    timings = await JobRunTiming.find({"$or": timing_keys}).to_list()
 
     return ExportBundle(
         root=root,

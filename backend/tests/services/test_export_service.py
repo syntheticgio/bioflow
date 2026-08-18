@@ -39,6 +39,76 @@ class TestCollect:
 
         assert {p.id for p in bundle.projects} == {target.id}
 
+    async def test_includes_project_scoped_timing_with_no_object(self):
+        """A job that never attached to one object still ran.
+
+        executor.py records object_id only when the job has one, so
+        project-level work carries project_id alone. Keying the query on
+        object_id dropped it from every archive, and nothing in the
+        manifest could say so -- the absence read as "this project ran
+        nothing".
+        """
+        project = await make_project("export-collect-project-timing")
+        await JobRunTiming(
+            job_type="export",
+            input_bytes=1_000,
+            job_id="j-project-scoped",
+            duration_ms=5_000,
+            object_id=None,
+            project_id=str(project.id),
+        ).insert()
+
+        bundle = await export_service.collect(project.id, owner=TEST_OWNER)
+
+        assert [t.job_id for t in bundle.timings] == ["j-project-scoped"]
+
+    async def test_includes_project_scoped_timing_from_a_descendant(self):
+        parent = await make_project("export-collect-timing-parent")
+        child = await make_project("export-collect-timing-child", parent)
+        await JobRunTiming(
+            job_type="export",
+            input_bytes=1_000,
+            job_id="j-child-scoped",
+            duration_ms=5_000,
+            project_id=str(child.id),
+        ).insert()
+
+        bundle = await export_service.collect(parent.id, owner=TEST_OWNER)
+
+        assert [t.job_id for t in bundle.timings] == ["j-child-scoped"]
+
+    async def test_a_timing_matching_both_keys_appears_once(self):
+        """The $or must not turn one run into two rows in the archive."""
+        project = await make_project("export-collect-timing-both")
+        obj = await make_object(project, "reads.fastq")
+        await JobRunTiming(
+            job_type="align",
+            input_bytes=1_000,
+            job_id="j-both-keys",
+            duration_ms=5_000,
+            object_id=str(obj.id),
+            project_id=str(project.id),
+        ).insert()
+
+        bundle = await export_service.collect(project.id, owner=TEST_OWNER)
+
+        assert [t.job_id for t in bundle.timings] == ["j-both-keys"]
+
+    async def test_excludes_another_projects_timing(self):
+        project = await make_project("export-collect-timing-mine")
+        other = await make_project("export-collect-timing-theirs")
+        await JobRunTiming(
+            job_type="export",
+            input_bytes=1_000,
+            job_id="j-not-mine",
+            duration_ms=5_000,
+            project_id=str(other.id),
+        ).insert()
+
+        bundle = await export_service.collect(project.id, owner=TEST_OWNER)
+
+        assert bundle.timings == []
+
 
 def test_redact_strips_external_path():
     bundle = export_service.ExportBundle(
@@ -256,6 +326,29 @@ class TestExportProject:
         with tarfile.open(result.path) as tar:
             docs = json.loads(tar.extractfile("metadata/projects.json").read())
         assert docs[0]["_id"] == str(project.id)
+
+    async def test_a_project_scoped_timing_reaches_job_timings_json(self):
+        """End-to-end form of the collect() fix, at the archive boundary.
+
+        A project-level run has no object_id to key off; before #538 it was
+        absent from the archive with nothing saying it had been left out.
+        """
+        project = await make_project("export-archive-project-timing")
+        await JobRunTiming(
+            job_type="export",
+            input_bytes=1_000,
+            job_id="j-archive-project-scoped",
+            duration_ms=7_000,
+            object_id=None,
+            project_id=str(project.id),
+        ).insert()
+
+        result = await export_service.export_project(project.id, owner=TEST_OWNER)
+
+        with tarfile.open(result.path) as tar:
+            docs = json.loads(tar.extractfile("metadata/job_timings.json").read())
+        assert [d["job_id"] for d in docs] == ["j-archive-project-scoped"]
+        assert docs[0]["duration_ms"] == 7_000
 
     async def test_archive_contains_no_secrets_no_paths_no_machine_names(self):
         """The assertion that outlives whoever wrote the exporter.
