@@ -2134,6 +2134,7 @@ async def get_de_results(
     obj, blob = await object_service.object_with_blob(object_id, owner=owner)
     if obj.role is not ObjectRole.DE_RESULTS:
         raise NotFoundError("This file is not a differential expression result")
+    object_service.check_local(obj, verb="read")
     if blob is None or not obj.blob_sha256:
         raise NotFoundError("Object has no stored content")
 

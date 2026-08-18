@@ -25,6 +25,7 @@ from app.models import (
     Job,
     JobClass,
     JobResources,
+    Locality,
     ObjectRole,
     ObjectStatus,
     RunInput,
@@ -166,7 +167,26 @@ async def _resolve_readable(obj: DataObject) -> tuple[str | None, str | None]:
 
     Registered-in-place files have no managed blob to address by hash, so the
     external path is the only way to reach them.
+
+    The remote check comes first deliberately. An offloaded object has no
+    `blob_sha256`, so the not-yet-ingested branch below would claim it "has no
+    stored content yet (status=ready)" -- a sentence that describes an upload
+    in flight, contradicts itself, and sends the user looking for a job that
+    does not exist. Answering the remote case first is what makes the message
+    name the action they can actually take.
     """
+    if obj.locality is Locality.REMOTE:
+        accession = obj.remote_source.accession if obj.remote_source else None
+        where = f" from {accession}" if accession else ""
+        raise ValidationError(
+            f"{obj.name!r} is stored remotely -- fetch it{where} before using it",
+            details={
+                "object_id": str(obj.id),
+                "locality": obj.locality.value,
+                "accession": accession,
+            },
+        )
+
     if obj.blob_sha256 is None:
         raise ValidationError(
             f"{obj.name!r} has no stored content yet (status={obj.status.value})"

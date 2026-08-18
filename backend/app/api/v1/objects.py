@@ -408,6 +408,7 @@ async def download_object(
     there is no user-supplied path segment to contain.
     """
     obj, blob = await object_service.object_with_blob(object_id, owner=owner)
+    object_service.check_local(obj, verb="download")
     if blob is None or not obj.blob_sha256:
         raise NotFoundError("Object has no stored content to download yet")
 
@@ -444,6 +445,7 @@ async def reingest_object(object_id: PydanticObjectId, owner: OwnerDep) -> dict:
     someone clicked a button and is waiting.
     """
     obj, blob = await object_service.object_with_blob(object_id, owner=owner)
+    object_service.check_local(obj, verb="re-ingest")
     if blob is None or not obj.blob_sha256:
         raise ValidationError("Object has no stored content to re-ingest yet")
 
@@ -479,6 +481,7 @@ async def infer_molecule_type_endpoint(
             f"{obj.name!r} is {obj.format.kind.value}, not FASTQ reads to sample",
             details={"object_id": str(object_id), "kind": obj.format.kind.value},
         )
+    object_service.check_local(obj, verb="sample")
     if blob is None or not obj.blob_sha256:
         raise NotFoundError("Object has no stored content to sample yet")
 
