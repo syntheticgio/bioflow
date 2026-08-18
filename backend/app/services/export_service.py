@@ -128,7 +128,7 @@ def collect_report_artifacts(objects: list[DataObject]) -> list[ExportArtifact]:
                 artifacts.append(
                     ExportArtifact(
                         artifact_type="report",
-                        artifact_id=f"{object_id}:{source_path}",
+                        artifact_id=f"{category}:{object_id}:{source_path}",
                         object_id=object_id,
                         category=category,
                         source_path=source_path,

@@ -143,7 +143,7 @@ class TestCollectReportArtifacts:
         payload: bytes,
     ) -> None:
         assert artifact.artifact_type == "report"
-        assert artifact.artifact_id == f"{object_id}:{source_path}"
+        assert artifact.artifact_id == f"{category}:{object_id}:{source_path}"
         assert artifact.object_id == object_id
         assert artifact.category == category
         assert artifact.source_path == source_path
@@ -241,19 +241,23 @@ class TestCollectReportArtifacts:
         obj = await make_object(project, "sample.gff")
         object_id = str(obj.id)
 
-        escaped_root = report_roots["qc_reports_dir"]
-        escaped_target = report_roots["qc_reports_dir"].parent / "qc-target"
-        escaped_target.mkdir(parents=True, exist_ok=True)
-        escaped_root.symlink_to(escaped_target, target_is_directory=True)
-
-        object_dir = escaped_target / object_id
-        nested_target = escaped_target.parent / "escaped-target"
-        nested_target.mkdir(parents=True, exist_ok=True)
-        (nested_target / "escaped.html").write_bytes(b"escaped")
+        object_dir = report_roots["qc_reports_dir"] / object_id
         object_dir.mkdir(parents=True, exist_ok=True)
-        (object_dir / "nested").symlink_to(nested_target, target_is_directory=True)
+        escaped_file = object_dir / "nested" / "escaped.html"
+        escaped_file.parent.mkdir(parents=True, exist_ok=True)
+        escaped_file.write_bytes(b"escaped")
 
-        artifacts = export_service.collect_report_artifacts([obj])
+        real_resolve = Path.resolve
+        escaped_target = report_roots["qc_reports_dir"].parent / "escaped-target" / "escaped.html"
+
+        def fake_resolve(self, *args, **kwargs):
+            if self == escaped_file:
+                return escaped_target
+            return real_resolve(self, *args, **kwargs)
+
+        with pytest.MonkeyPatch.context() as mp:
+            mp.setattr(Path, "resolve", fake_resolve)
+            artifacts = export_service.collect_report_artifacts([obj])
 
         assert artifacts == []
 
