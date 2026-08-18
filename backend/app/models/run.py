@@ -57,6 +57,10 @@ class RunKind(StrEnum):
     # Genome annotation: gene finding, functional annotation, and feature
     # coordinate extraction on a bacterial or archaeal assembly.
     ANNOTATION = "annotation"
+    # Protein structure prediction via ESMFold or similar model. Distinct from
+    # the structure-lookup path (which finds deposited PDB entries) — this
+    # generates a new structure prediction for a protein with no deposited one.
+    PREDICTION = "prediction"
 
 
 class RunStatus(StrEnum):

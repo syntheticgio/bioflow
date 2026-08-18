@@ -190,6 +190,9 @@ _NO_NARRATIVE_STEP: frozenset[str] = frozenset(
         # Read-only drift report; touches nothing, so it is never a step in
         # any object's lineage.
         "sweep_storage_drift",
+        # Predicts a structure for a protein record; stores the PDB as an
+        # artifact on the existing object, not as a new DataObject.
+        "predict_structure",
         # Chunked alignment orchestrator and merge are internal dispatch
         # steps; the BAM they produce is the narrative object.
         "align_reads_chunked",

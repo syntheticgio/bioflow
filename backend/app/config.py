@@ -292,6 +292,11 @@ class Settings(BaseSettings):
     feedback_enabled: bool = True
     feedback_webhook_url: str = ""
 
+    # --- Prediction ---
+    # URL of the ESMFold prediction sidecar. Empty string means prediction
+    # is unavailable — the UI shows "Service not configured."
+    PREDICTION_SIDECAR_URL: str = ""
+
     log_level: str = "INFO"
     owner: str = "local"
 

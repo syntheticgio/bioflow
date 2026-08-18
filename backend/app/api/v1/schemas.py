@@ -342,6 +342,32 @@ class ProteinStructureOut(BaseModel):
     pdb_ids: list[str] = []
 
 
+class PredictionState(StrEnum):
+    NOT_STARTED = "not_started"
+    RUNNING = "running"
+    COMPLETED = "completed"
+    FAILED = "failed"
+
+
+class PredictionProgress(BaseModel):
+    pct: float = Field(ge=0, le=100)
+    message: str = ""
+
+
+class PredictionResult(BaseModel):
+    model_name: str
+    model_version: str
+    mean_plddt: float
+    pdb_url: str
+
+
+class ProteinPredictionStatus(BaseModel):
+    state: PredictionState
+    job_id: str | None = None
+    progress: PredictionProgress | None = None
+    prediction: PredictionResult | None = None
+
+
 # --- Provenance narratives ---
 class ProvenanceStepOut(BaseModel):
     """One numbered row of "How this file was made".

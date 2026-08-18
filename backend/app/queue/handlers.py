@@ -1041,6 +1041,7 @@ from app.queue import (  # noqa: E402, F401
     lineage_handlers,
     ncbi_assembly_handlers,
     pipeline_handlers,
+    prediction_handlers,
     reference_assembly_handlers,
     sra_handlers,
     summary_handlers,

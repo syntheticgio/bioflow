@@ -39,3 +39,24 @@ export interface ProteinStructure {
   protein_name: string | null;
   pdb_ids: string[];
 }
+
+export type PredictionState = "not_started" | "running" | "completed" | "failed";
+
+export interface PredictionProgress {
+  pct: number;
+  message: string;
+}
+
+export interface PredictionResult {
+  model_name: string;
+  model_version: string;
+  mean_plddt: number;
+  pdb_url: string;
+}
+
+export interface ProteinPredictionStatus {
+  state: PredictionState;
+  job_id: string | null;
+  progress: PredictionProgress | null;
+  prediction: PredictionResult | null;
+}

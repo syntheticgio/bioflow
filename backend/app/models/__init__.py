@@ -51,6 +51,7 @@ from app.models.organism import OrganismBlurb, normalize_organism
 from app.models.parameter_set import ParameterSet, ParamSpecFamily
 from app.models.profile import Profile, ProfileDisplay
 from app.models.project import Project, ProjectCounters
+from app.models.protein_prediction import ProteinPrediction
 from app.models.protein_record import ProteinRecord
 from app.models.protein_structure_lookup import ProteinStructureLookup
 from app.models.resource_limits import ResourceLimits
@@ -95,6 +96,7 @@ ALL_MODELS = [
     OrganismBlurb,
     FailureExplanation,
     Profile,
+    ProteinPrediction,
     ProteinRecord,
     ProteinStructureLookup,
     StructureLookup,
@@ -163,6 +165,7 @@ __all__ = [
     "ProfileDisplay",
     "Project",
     "ProjectCounters",
+    "ProteinPrediction",
     "ProteinRecord",
     "ProteinStructureLookup",
     "ProviderKind",

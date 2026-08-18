@@ -1,29 +1,150 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { api } from "../api/client";
-import type { ProteinRecordRow, ProteinStructureState } from "../api/types";
+import type {
+  PredictionState,
+  ProteinPredictionStatus,
+  ProteinRecordRow,
+  ProteinStructureState,
+} from "../api/types";
 import { useDebounced } from "../lib/useDebounced";
 import { Icn3dFrame } from "./Icn3dFrame";
 
 const PAGE_SIZE = 50;
+const POLL_INTERVAL_MS = 5_000;
 
 function uniprotUrl(accession: string): string {
   return `https://www.uniprot.org/uniprotkb/${encodeURIComponent(accession)}`;
 }
 
-/** Always rendered, always disabled -- prediction is not implemented in any
- *  of the four states, and a control that only sometimes appears would read
- *  as though it worked in the states where it's missing. */
-function PredictButton() {
+/** Confidence key rendered below predicted structures. */
+function PlddtLegend() {
   return (
-    <button
-      type="button"
-      className="btn"
-      disabled
-      title="Structure prediction isn't available yet."
-    >
-      Predict structure
-    </button>
+    <div style={{ fontSize: 11, color: "var(--text-faint)", marginTop: 4 }}>
+      Confidence:{" "}
+      <span style={{ color: "#0055ff" }}>██ Very high (90+)</span>{" "}
+      <span style={{ color: "#66ccff" }}>██ Confident (70-90)</span>{" "}
+      <span style={{ color: "#ffff00" }}>██ Low (50-70)</span>{" "}
+      <span style={{ color: "#ff6600" }}>██ Very low ({'<'}50)</span>
+    </div>
+  );
+}
+
+/**
+ * Stateful Predict button that checks prediction status, starts predictions,
+ * polls for progress, and shows results.
+ */
+function PredictButton({
+  objectId,
+  record,
+  onPredictionComplete,
+}: {
+  objectId: string;
+  record: ProteinRecordRow;
+  onPredictionComplete: (status: ProteinPredictionStatus) => void;
+}) {
+  const [predictionState, setPredictionState] = useState<PredictionState | "loading">("loading");
+  const [progress, setProgress] = useState<{ pct: number; message: string } | null>(null);
+  const [isStarting, setIsStarting] = useState(false);
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const mountedRef = useRef(true);
+
+  // Check prediction status on mount
+  useEffect(() => {
+    mountedRef.current = true;
+    api
+      .proteinRecordPrediction(objectId, record.ordinal)
+      .then((status) => {
+        if (!mountedRef.current) return;
+        setPredictionState(status.state);
+        setProgress(status.progress);
+        if (status.state === "completed" && status.prediction) {
+          onPredictionComplete(status);
+        }
+      })
+      .catch(() => {
+        if (mountedRef.current) {
+          setPredictionState("failed");
+        }
+      });
+
+    return () => {
+      mountedRef.current = false;
+      if (pollRef.current) clearInterval(pollRef.current);
+    };
+  }, [objectId, record.ordinal, onPredictionComplete]);
+
+  const startPolling = () => {
+    if (pollRef.current) clearInterval(pollRef.current);
+    pollRef.current = setInterval(async () => {
+      try {
+        const status = await api.proteinRecordPrediction(objectId, record.ordinal);
+        if (!mountedRef.current) return;
+        setPredictionState(status.state);
+        setProgress(status.progress);
+        if (status.state === "completed") {
+          if (status.prediction) onPredictionComplete(status);
+          if (pollRef.current) clearInterval(pollRef.current);
+          pollRef.current = null;
+        }
+        if (status.state === "failed") {
+          if (pollRef.current) clearInterval(pollRef.current);
+          pollRef.current = null;
+        }
+      } catch {
+        if (!mountedRef.current) return;
+        // Keep polling on transient errors
+      }
+    }, POLL_INTERVAL_MS);
+  };
+
+  const handleClick = async () => {
+    setIsStarting(true);
+    try {
+      await api.startProteinPrediction(objectId, record.ordinal);
+      setPredictionState("running");
+      setProgress({ pct: 0, message: "Starting prediction…" });
+      startPolling();
+    } catch {
+      setPredictionState("failed");
+    } finally {
+      setIsStarting(false);
+    }
+  };
+
+  const isRunning = predictionState === "running";
+  const isDisabled = isRunning || isStarting || predictionState === "loading";
+
+  let buttonText = "Predict structure";
+  if (predictionState === "loading") buttonText = "Checking…";
+  if (isRunning && progress) buttonText = `Predicting… (${Math.round(progress.pct)}%)`;
+  if (isRunning && !progress) buttonText = "Predicting…";
+  if (predictionState === "failed") buttonText = "Retry prediction";
+  if (predictionState === "completed") buttonText = "View prediction";
+
+  return (
+    <div>
+      <button
+        type="button"
+        className="btn"
+        disabled={isDisabled}
+        onClick={handleClick}
+        title={
+          isRunning
+            ? "Prediction in progress"
+            : predictionState === "completed"
+              ? "View the predicted structure"
+              : "Predict the 3D structure of this protein"
+        }
+      >
+        {buttonText}
+      </button>
+      {isRunning && progress && (
+        <div style={{ fontSize: 11, color: "var(--text-faint)", marginTop: 4 }}>
+          {progress.message}
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -37,10 +158,16 @@ function PredictButton() {
 function RecordStructure({
   objectId,
   record,
+  predictionStatus,
+  onPredictionStatusChange,
 }: {
   objectId: string;
   record: ProteinRecordRow;
+  predictionStatus: ProteinPredictionStatus | null;
+  onPredictionStatusChange: (status: ProteinPredictionStatus | null) => void;
 }) {
+  const setPredictionStatus = onPredictionStatusChange;
+
   const { data, isLoading, isError, refetch, isFetching } = useQuery({
     queryKey: ["protein-record-structure", objectId, record.ordinal],
     queryFn: () => api.proteinRecordStructure(objectId, record.ordinal),
@@ -64,9 +191,6 @@ function RecordStructure({
         </div>
       )}
 
-      {/* lookup_failed is a UniProt outage, distinct from the request itself
-          failing above -- both read the same to the user, but only this one
-          is worth a retry rather than a reload. */}
       {state === "lookup_failed" && (
         <div className="error-box">
           Couldn't reach UniProt to look this up.{" "}
@@ -89,8 +213,6 @@ function RecordStructure({
         </div>
       )}
 
-      {/* The common case, and written to read as ordinary: most proteins
-          have no experimentally solved structure. */}
       {state === "no_structure" && (
         <div className="chrom-note">
           No experimental structure has been deposited for{" "}
@@ -99,7 +221,25 @@ function RecordStructure({
         </div>
       )}
 
-      {state === "resolved" && data && (
+      {/* Predicted structure takes priority over experimental */}
+      {predictionStatus?.prediction && (
+        <>
+          <div className="chrom-note">
+            Predicted structure · {predictionStatus.prediction.model_name} v
+            {predictionStatus.prediction.model_version} · Mean pLDDT:{" "}
+            {(predictionStatus.prediction.mean_plddt * 100).toFixed(0)}
+          </div>
+          <Icn3dFrame
+            pdbId={undefined}
+            pdbUrl={predictionStatus.prediction.pdb_url}
+            title={`Predicted structure for ${record.identifier}`}
+          />
+          <PlddtLegend />
+        </>
+      )}
+
+      {/* Fall back to experimental if no prediction */}
+      {!predictionStatus?.prediction && state === "resolved" && data && (
         <>
           <div className="chrom-note">
             {data.protein_name && <>{data.protein_name} · </>}
@@ -124,7 +264,11 @@ function RecordStructure({
       )}
 
       <div style={{ marginTop: 8 }}>
-        <PredictButton />
+        <PredictButton
+          objectId={objectId}
+          record={record}
+          onPredictionComplete={setPredictionStatus}
+        />
       </div>
     </div>
   );
@@ -138,6 +282,7 @@ export function ProteinStructureTab({ objectId }: { objectId: string }) {
   const [page, setPage] = useState(0);
   const [searchInput, setSearchInput] = useState("");
   const [selected, setSelected] = useState<ProteinRecordRow | null>(null);
+  const [selectedPredictionStatus, setSelectedPredictionStatus] = useState<ProteinPredictionStatus | null>(null);
 
   const search = useDebounced(searchInput, 300);
 
@@ -185,13 +330,6 @@ export function ProteinStructureTab({ objectId }: { objectId: string }) {
             Loading…
           </div>
         ) : rows.length === 0 && data?.indexed === false ? (
-          // Distinct from "no records match your search" below: this object
-          // has never had protein indexing run at all, most likely because
-          // its role was set to Protein after ingest rather than before --
-          // ingest_headers is the only place indexing runs, and there is no
-          // automatic re-index to catch a role changed later. Re-ingesting
-          // is the actual fix, so say that instead of leaving the user to
-          // guess why an apparently-valid protein FASTA shows nothing.
           <div className="chrom-note">
             This file's proteins haven't been indexed yet. Re-ingest the file
             to enable this view.
@@ -213,21 +351,16 @@ export function ProteinStructureTab({ objectId }: { objectId: string }) {
                 {rows.map((row) => (
                   <tr
                     key={row.ordinal}
-                    onClick={() => setSelected(row)}
+                    onClick={() => {
+                      setSelected(row);
+                      setSelectedPredictionStatus(null);
+                    }}
                     style={{
                       cursor: "pointer",
                       background:
                         selected?.ordinal === row.ordinal
                           ? "var(--bg-elevated)"
                           : undefined,
-                      // has_reference is false when the header names no
-                      // accession the app can resolve -- true for every
-                      // record of a de-novo-annotated proteome (Prokka/Bakta
-                      // locus tags, for instance). Muting those rows lets a
-                      // user tell at a glance which will resolve to
-                      // something before clicking each one, same as the
-                      // reduced-emphasis treatment other tables in this repo
-                      // use for a row that is in a lesser state.
                       color: row.has_reference
                         ? undefined
                         : "var(--text-faint)",
@@ -290,14 +423,31 @@ export function ProteinStructureTab({ objectId }: { objectId: string }) {
 
       <div style={{ flex: 1, minWidth: 0 }}>
         {selected ? (
-          <RecordStructure objectId={objectId} record={selected} />
+          <RecordStructure
+            objectId={objectId}
+            record={selected}
+            predictionStatus={selectedPredictionStatus}
+            onPredictionStatusChange={setSelectedPredictionStatus}
+          />
         ) : (
           <div>
             <div className="chrom-note">
               Select a protein on the left to look up its structure.
             </div>
             <div style={{ marginTop: 8 }}>
-              <PredictButton />
+              <PredictButton
+                objectId={objectId}
+                record={
+                  {
+                    ordinal: 0,
+                    identifier: "",
+                    description: "",
+                    length: 0,
+                    has_reference: false,
+                  } as ProteinRecordRow
+                }
+                onPredictionComplete={() => {}}
+              />
             </div>
           </div>
         )}

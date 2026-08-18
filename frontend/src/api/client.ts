@@ -65,6 +65,7 @@ import type {
   Profile,
   Project,
   ProjectDetail,
+  ProteinPredictionStatus,
   ProteinRecords,
   ProteinStructure,
   ProvenanceNarrative,
@@ -1252,6 +1253,19 @@ export const api = {
   proteinRecordStructure: (objectId: string, ordinal: number) =>
     request<ProteinStructure>(
       `/objects/${objectId}/protein-records/${ordinal}/structure`,
+    ),
+
+  /** Check prediction status for a protein record. */
+  proteinRecordPrediction: (objectId: string, ordinal: number) =>
+    request<ProteinPredictionStatus>(
+      `/objects/${objectId}/protein-records/${ordinal}/prediction`,
+    ),
+
+  /** Start a structure prediction for a protein record. */
+  startProteinPrediction: (objectId: string, ordinal: number) =>
+    request<JobSummary>(
+      `/objects/${objectId}/protein-records/${ordinal}/predict`,
+      { method: "POST" },
     ),
 
   /** Queue the Results computation for a GFF/GTF/BED. Read-only: produces

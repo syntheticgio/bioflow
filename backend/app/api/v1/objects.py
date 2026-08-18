@@ -12,6 +12,7 @@ from fastapi.exceptions import HTTPException
 from fastapi.responses import FileResponse, StreamingResponse
 
 from app.api.deps import LinkableOwnerDep, OwnerDep
+from app.api.v1.jobs import JobOut
 from app.api.v1.schemas import (
     BlobOut,
     ComputationRecord,
@@ -22,6 +23,10 @@ from app.api.v1.schemas import (
     ObjectOut,
     ObjectUpdate,
     PairRequest,
+    PredictionProgress,
+    PredictionResult,
+    PredictionState,
+    ProteinPredictionStatus,
     ProteinRecordOut,
     ProteinRecordsOut,
     ProteinStructureOut,
@@ -36,8 +41,18 @@ from app.errors import NotFoundError, ValidationError
 from app.logging import get_logger
 from app.metadata import infer_molecule
 from app.metadata.protein_headers import ProteinRef
-from app.models import BlobStorage, FormatKind, JobClass, JobRunTiming, ProteinRecord
+from app.models import (
+    BlobStorage,
+    FormatKind,
+    Job,
+    JobClass,
+    JobRunTiming,
+    JobState,
+    ProteinPrediction,
+    ProteinRecord,
+)
 from app.models.ai import FailureReason, TaskSlot
+from app.queue import queue
 from app.services import (
     ai,
     expected_gc,
@@ -52,6 +67,7 @@ from app.services import (
 )
 from app.services.ai import Completion
 from app.storage.paths import blob_path, validate_sha256
+from app.storage.sequence_reader import read_protein_sequence
 
 router = APIRouter(prefix="/objects", tags=["objects"])
 log = get_logger(__name__)
@@ -223,6 +239,181 @@ async def get_protein_record_structure(
         accession=hit.accession,
         protein_name=hit.protein_name,
         pdb_ids=hit.pdb_ids,
+    )
+
+
+@router.post(
+    "/{object_id}/protein-records/{ordinal}/predict",
+    response_model=JobOut,
+    status_code=status.HTTP_201_CREATED,
+)
+async def start_protein_prediction(
+    object_id: PydanticObjectId,
+    ordinal: int,
+    owner: OwnerDep,
+) -> JobOut:
+    """Start a structure prediction for one protein record.
+
+    Reads the sequence from the file via byte_offset, checks for a cached
+    prediction by sequence hash, and either returns the cached result or
+    creates a predict_structure job.
+    """
+    obj = await object_service.get_object(object_id, owner=owner)
+    record = await ProteinRecord.find_one(
+        ProteinRecord.object_id == obj.id, ProteinRecord.ordinal == ordinal
+    )
+    if record is None:
+        raise NotFoundError(f"No protein record {ordinal} for this file.")
+
+    # Read the sequence
+    seq = read_protein_sequence(
+        Path(blob_path(obj.id)) / obj.filename, record.byte_offset, record.length
+    )
+    seq_hash = hashlib.md5(seq.encode()).hexdigest()
+
+    # Check cache
+    cached = await ProteinPrediction.find_one(
+        ProteinPrediction.sequence_hash == seq_hash
+    )
+    if cached is not None:
+        return _prediction_job_summary(cached, obj.id)
+
+    # No cache — create a job
+    if not settings.PREDICTION_SIDECAR_URL:
+        raise ValidationError("Structure prediction is not configured.")
+
+    job = await queue.enqueue(
+        "predict_structure",
+        owner=owner,
+        payload={
+            "object_id": str(obj.id),
+            "ordinal": ordinal,
+            "sequence": seq,
+            "sequence_hash": seq_hash,
+        },
+        object_id=obj.id,
+    )
+    if job is None:
+        # Deduplicated — a job with the same payload is already running
+        raise ValidationError("A prediction job for this record is already running.")
+    return JobOut.of(job)
+
+
+@router.get(
+    "/{object_id}/protein-records/{ordinal}/prediction",
+    response_model=ProteinPredictionStatus,
+)
+async def get_protein_prediction_status(
+    object_id: PydanticObjectId,
+    ordinal: int,
+    owner: OwnerDep,
+) -> ProteinPredictionStatus:
+    """Check prediction status for one protein record."""
+    obj = await object_service.get_object(object_id, owner=owner)
+    record = await ProteinRecord.find_one(
+        ProteinRecord.object_id == obj.id, ProteinRecord.ordinal == ordinal
+    )
+    if record is None:
+        raise NotFoundError(f"No protein record {ordinal} for this file.")
+
+    # Read sequence to compute hash
+    seq = read_protein_sequence(
+        Path(blob_path(obj.id)) / obj.filename, record.byte_offset, record.length
+    )
+    seq_hash = hashlib.md5(seq.encode()).hexdigest()
+
+    # Check cache
+    cached = await ProteinPrediction.find_one(
+        ProteinPrediction.sequence_hash == seq_hash
+    )
+    if cached is not None:
+        return ProteinPredictionStatus(
+            state=PredictionState.COMPLETED,
+            prediction=PredictionResult(
+                model_name=cached.model_name,
+                model_version=cached.model_version,
+                mean_plddt=cached.mean_plddt,
+                pdb_url=f"/objects/{obj.id}/protein-records/{ordinal}/prediction.pdb",
+            ),
+        )
+
+    # Check for running job
+    job = await Job.find_one(
+        Job.object_id == obj.id,
+        Job.job_type == "predict_structure",
+        Job.state == JobState.RUNNING,
+        {"payload.ordinal": ordinal},
+    )
+    if job is not None:
+        return ProteinPredictionStatus(
+            state=PredictionState.RUNNING,
+            job_id=str(job.id),
+            progress=PredictionProgress(
+                pct=job.progress.pct if job.progress else 0,
+                message=job.progress.message if job.progress else "Starting prediction…",
+            ),
+        )
+
+    return ProteinPredictionStatus(state=PredictionState.NOT_STARTED)
+
+
+@router.get(
+    "/{object_id}/protein-records/{ordinal}/prediction.pdb",
+)
+async def get_protein_prediction_pdb(
+    object_id: PydanticObjectId,
+    ordinal: int,
+    owner: OwnerDep,
+):
+    """Serve the predicted PDB file for a protein record."""
+    obj = await object_service.get_object(object_id, owner=owner)
+    record = await ProteinRecord.find_one(
+        ProteinRecord.object_id == obj.id, ProteinRecord.ordinal == ordinal
+    )
+    if record is None:
+        raise NotFoundError(f"No protein record {ordinal} for this file.")
+
+    # Read sequence to compute hash
+    seq = read_protein_sequence(
+        Path(blob_path(obj.id)) / obj.filename, record.byte_offset, record.length
+    )
+    seq_hash = hashlib.md5(seq.encode()).hexdigest()
+
+    cached = await ProteinPrediction.find_one(
+        ProteinPrediction.sequence_hash == seq_hash
+    )
+    if cached is None:
+        raise NotFoundError("No prediction for this record.")
+
+    return FileResponse(cached.pdb_path, media_type="chemical/x-pdb")
+
+
+def _prediction_job_summary(
+    cached: ProteinPrediction, object_id: PydanticObjectId
+) -> JobOut:
+    """Build a fake JobOut for a cached prediction."""
+    from app.models.job import JobProgress, JobTiming
+
+    return JobOut(
+        id=str(cached.source_object_id),
+        type="predict_structure",
+        job_class="compute",
+        state="succeeded",
+        payload={},
+        attempts=1,
+        max_attempts=1,
+        progress=JobProgress(pct=100, message="Prediction cached").model_dump(mode="json"),
+        last_attempt_progress=None,
+        result={"pdb_path": cached.pdb_path, "mean_plddt": cached.mean_plddt},
+        error=None,
+        timing=JobTiming().model_dump(mode="json"),
+        resources={},
+        cancel_requested=False,
+        project_id=None,
+        object_id=str(object_id),
+        parent_job_id=None,
+        created_at=cached.created_at,
+        updated_at=cached.created_at,
     )
 
 
