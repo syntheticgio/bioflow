@@ -72,6 +72,14 @@ class TestGoldenMatrix:
             "trimmomatic": {"short": "compatible"},
             "fastqc": {"short": "recommended"},
             "nanoplot": {"long": "recommended"},
+            # Added by 6e595a21, which tagged aligners by read chemistry
+            # without re-pinning this matrix -- it left two tests in this
+            # file red on main until #588 picked them up.
+            "bwa-mem2": {"short": "recommended", "long": "incompatible"},
+            "bowtie2": {"short": "compatible", "long": "incompatible"},
+            "hisat2": {"short": "compatible", "long": "incompatible"},
+            "star": {"short": "compatible", "long": "incompatible"},
+            "minimap2": {"short": "compatible", "long": "recommended"},
         }
         actual = {
             name: dict(meta.recommendations)
@@ -83,21 +91,32 @@ class TestGoldenMatrix:
             "it here so the change is reviewable on its own."
         )
 
-    def test_no_aligner_carries_a_badge_today(self):
-        """The align picker's default comes from
-        `pipeline_service.default_align_params` (host arch + read chemistry),
-        not from this matrix -- no aligner sets `recommendations`, so the
-        align dialog renders no badge and auto-selects nothing through this
-        path. If a badge is ever added to an aligner, this test is the
-        reminder that two mechanisms would then both claim to pick the
-        default, and they can disagree."""
-        for name, meta in TOOL_META.items():
-            kinds = {p.value for p in meta.pipelines}
-            if "align" in kinds:
-                assert not meta.recommendations, (
-                    f"{name} now carries a recommendation badge; reconcile it "
-                    "with default_align_params before shipping both"
-                )
+    def test_aligner_badges_agree_with_default_align_params(self):
+        """Two mechanisms pick the align dialog's default, and they must not
+        disagree.
+
+        This test used to assert that *no* aligner carried a badge at all.
+        6e595a21 added badges to all five and did not update it, so it sat
+        red on main. The premise it was protecting is still the real one --
+        `pipeline_service.default_align_params` chooses by host arch and read
+        chemistry, and the badge matrix now chooses too -- so it asserts the
+        agreement rather than the absence: bwa-mem2 for short reads and
+        minimap2 for long, exactly what default_align_params falls through
+        to when both binaries are available."""
+        expected_default = {"short": "bwa-mem2", "long": "minimap2"}
+        for bucket, tool in expected_default.items():
+            recommended = [
+                name
+                for name, meta in TOOL_META.items()
+                if any(p.value == "align" for p in meta.pipelines)
+                and meta.recommendations.get(bucket)
+                == RecommendationLevel.RECOMMENDED.value
+            ]
+            assert recommended == [tool], (
+                f"align/{bucket} recommends {recommended}, but "
+                f"default_align_params picks {tool!r} -- the picker's badge "
+                "and the server-side default would disagree"
+            )
 
 
 class TestPerPipelineBuckets:
