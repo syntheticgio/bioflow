@@ -14,6 +14,7 @@ from app.errors import NotFoundError
 from app.logging import get_logger
 from app.models import (
     OPTIONAL_ROLES,
+    AppliedParameterSet,
     Job,
     JobState,
     PipelineRun,
@@ -79,6 +80,7 @@ async def create_run(
     params: dict,
     owner: str,
     tool: str | None = None,
+    from_parameter_set: AppliedParameterSet | None = None,
 ) -> PipelineRun:
     """Record what a user asked for, before any of it is enqueued."""
     run = PipelineRun(
@@ -89,6 +91,7 @@ async def create_run(
         inputs=inputs,
         params=params,
         tool=tool,
+        from_parameter_set=from_parameter_set,
     )
     await run.insert()
     log.info("run_created", run_id=str(run.id), kind=kind.value, label=label)

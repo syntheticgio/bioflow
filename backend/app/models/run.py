@@ -114,6 +114,26 @@ class RunInput(BaseModel):
     role: RunInputRole
 
 
+class AppliedParameterSet(BaseModel):
+    """Which saved parameter set configured this run, as it read at apply time.
+
+    Denormalized for the same reason `params` and the input names are: a set
+    can be renamed or deleted, and a run described only by a dangling id stops
+    being describable exactly when the question -- "which of these thirty runs
+    used the old settings?" -- is worth asking.
+
+    `revision` and `edited_after_apply` are what make that question answerable
+    rather than merely groupable. Thirty runs sharing `(set_id, revision)` with
+    `edited_after_apply` false were genuinely configured identically; without
+    both fields the grouping would look authoritative while meaning nothing.
+    """
+
+    set_id: PydanticObjectId
+    name: str
+    revision: int
+    edited_after_apply: bool = False
+
+
 class PipelineRun(TimestampedDocument):
     kind: RunKind
     project_id: PydanticObjectId
@@ -130,6 +150,8 @@ class PipelineRun(TimestampedDocument):
     # already names its tool via `params["aligner"]`, so this would be
     # redundant there rather than merely unset).
     tool: str | None = None
+    # None means the run was configured by hand, which stays the common case.
+    from_parameter_set: AppliedParameterSet | None = None
     outputs: list[PydanticObjectId] = Field(default_factory=list)
 
     class Settings:
