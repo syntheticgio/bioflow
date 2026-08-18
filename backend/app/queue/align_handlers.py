@@ -155,13 +155,19 @@ def _is_gzip(path: Path) -> bool:
 
 
 def _ensure_uncompressed(path: Path, dest_dir: Path) -> Path:
-    """STAR's `genomeGenerate` reads FASTA/GTF as plain text, unlike every
-    other aligner here, which accepts gzip transparently. `materialize`
-    symlinks blobs under their stored name with no format conversion, so a
-    gzip-compressed reference or annotation -- the normal case for anything
-    downloaded from NCBI -- reaches STAR unusable and it fails with an
-    "is not fasta" or GTF-parsing error thousands of reads into what looks
-    like a routine index build.
+    """Decompress a gzipped input for a builder that cannot read one.
+
+    `materialize` symlinks blobs under their stored name with no format
+    conversion, so a gzip-compressed reference or annotation -- the normal
+    case for anything downloaded from NCBI -- reaches the builder as-is.
+    Which builders can cope is declared per aligner by
+    `aligner_registry.AlignerSpec.builder_accepts_gzip`, not decided here.
+
+    Two builders cannot: STAR's `genomeGenerate` reads FASTA/GTF as plain
+    text and fails with an "is not fasta" or GTF-parsing error, and
+    `hisat2-build` exits 1 partway through, deleting the `.ht2` files it had
+    already written. Both surface minutes into what looks like a routine
+    index build.
     """
     if not _is_gzip(path):
         return path
@@ -317,6 +323,13 @@ def build_index(ctx: JobContext) -> dict:
     ctx.progress(phase="indexing", pct=0.1, message=f"building {aligner.value} index")
 
     index_tool = _index_tool(aligner, tool)
+    # Done once here rather than per branch: a builder that cannot read gzip
+    # is a property of the aligner, and deciding it at each call site is what
+    # let hisat2-build reach a gzipped reference and fail (#560).
+    build_reference = ref.reference
+    if not aligner_registry.spec_for(aligner).builder_accepts_gzip:
+        build_reference = _ensure_uncompressed(ref.reference, work / "build-input")
+
     if aligner is Aligner.STAR:
         if not fai.exists():
             # Unreachable in practice -- faidx above either produced it or the
@@ -330,13 +343,12 @@ def build_index(ctx: JobContext) -> dict:
         ).directory_name(ref.reference.name)
         genome_length, contigs = _fai_geometry(fai)
         star_scratch = _star_scratch(work, "index")
-        star_reference = _ensure_uncompressed(ref.reference, work / "star-input")
         star_gtf = (
-            _ensure_uncompressed(gtf, work / "star-input") if gtf is not None else None
+            _ensure_uncompressed(gtf, work / "build-input") if gtf is not None else None
         )
         cmd = align_runner.build_star_index_command(
             tool_path=index_tool.path,
-            reference=star_reference,
+            reference=build_reference,
             genome_dir=genome_dir,
             threads=ctx.payload.get("threads") or 4,
             genome_length=genome_length,
@@ -380,7 +392,13 @@ def build_index(ctx: JobContext) -> dict:
         cmd = None
     else:
         cmd = align_runner.build_index_command(
-            aligner=aligner, tool_path=index_tool.path, reference=ref.reference
+            aligner=aligner,
+            tool_path=index_tool.path,
+            reference=build_reference,
+            # The basename stays the stored path even when the builder reads a
+            # decompressed copy, so the index files land where the layout below
+            # looks for them rather than in the scratch directory.
+            output=ref.reference,
         )
 
     if cmd is not None:
