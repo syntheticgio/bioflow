@@ -4334,6 +4334,26 @@ table.software-matrix thead th.software-matrix-corner {
   color: var(--text-faint);
 }
 
+/* Launch and, where the kind has a settings dialog, Adjust.
+
+   Wraps rather than shrinking: the grid's columns go down to 200px, and two
+   buttons side by side below that width would either clip their labels or
+   squeeze Launch to an unreadable stub. A wrapped second row is the better
+   failure. `flex: 1 1 auto` on the children lets them share a row when there
+   is space and take a full one each when there is not.
+
+   Cards with a single button are unaffected -- one flex child in a row is
+   the same rendering as no row at all. */
+.suggestion-card-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.suggestion-card-actions > .btn {
+  flex: 1 1 auto;
+}
+
 .suggestion-none {
   font-size: 12px;
   color: var(--text-faint);

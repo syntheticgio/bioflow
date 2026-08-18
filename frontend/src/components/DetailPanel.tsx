@@ -443,10 +443,83 @@ function ObjectDetail({ id }: { id: string }) {
   const [completenessOpen, setCompletenessOpen] = useState(false);
   const [scaffoldOpen, setScaffoldOpen] = useState(false);
   const [deOpen, setDeOpen] = useState(false);
+  // The suggestion card's launch body, when a dialog was opened by "Adjust…"
+  // rather than from the Computations row. One piece of state for every
+  // dialog, because only one is ever open: the flow type above already makes
+  // "two dialogs at once" unrepresentable, and a prefill per dialog would
+  // reintroduce exactly the combination it rules out.
+  //
+  // Cleared by every close path below. A stale body outliving its dialog
+  // would silently seed the *next* run from a card the user has moved on
+  // from -- the align dialog opening on a reference nobody picked this time.
+  const [prefill, setPrefill] = useState<Record<string, unknown> | null>(null);
 
   const startFlow = (pipeline: "trim" | "align" | "variant") => {
     setPendingTool(null);
+    setPrefill(null);
     setFlow({ pipeline, tool: null });
+  };
+
+  /**
+   * Open a settings dialog seeded from a suggestion card.
+   *
+   * The card names the dialog; this switch is the only place that name is
+   * turned into a component, which is what lets `PipelineSuggestions` hand
+   * over the body without knowing any launch request shape.
+   *
+   * The three tool-selector pipelines skip their selector: the card has
+   * already chosen a tool (its body carries one), so re-asking would discard
+   * that choice and add a step to the shorter route. `tool` comes from the
+   * body where the endpoint takes one, and falls back to the flow's own
+   * default where it does not -- `/pipelines/align` keys the aligner inside
+   * `params`, not at the top level.
+   *
+   * An unknown name opens nothing rather than throwing: the server can name a
+   * dialog this build does not have (an older frontend against a newer API),
+   * and a dead Adjust button is a better failure than a blank panel.
+   */
+  const openConfigure = (dialog: string, body: Record<string, unknown>) => {
+    setPrefill(body);
+    switch (dialog) {
+      case "trim":
+        setFlow({ pipeline: "trim", tool: (body.tool as string) ?? "fastp" });
+        break;
+      case "align":
+        setFlow({
+          pipeline: "align",
+          tool:
+            ((body.params as Record<string, unknown> | undefined)
+              ?.aligner as string) ?? "minimap2",
+        });
+        break;
+      case "variant":
+        setFlow({
+          pipeline: "variant",
+          // Both places: `VariantRequest` accepts `caller` at the top level,
+          // but the variants card nests it under `params` -- checking only
+          // the model's own field would miss every card this reads from.
+          tool:
+            (body.caller as string) ??
+            ((body.params as Record<string, unknown> | undefined)
+              ?.caller as string) ??
+            "bcftools",
+        });
+        break;
+      case "quantify":
+        setQuantifyOpen(true);
+        break;
+      case "assemble":
+        setAssembleOpen(true);
+        break;
+      case "scaffold":
+        setScaffoldOpen(true);
+        break;
+      case "completeness":
+        setCompletenessOpen(true);
+        break;
+      default:
+        setPrefill(null);
+    }
   };
 
   const clearSelection = () => {
@@ -914,6 +987,7 @@ function ObjectDetail({ id }: { id: string }) {
                   reingestDisabled={!obj.blob_sha256}
                 />
               }
+              onConfigure={openConfigure}
               confirmingDelete={confirmingDelete}
               setConfirmingDelete={setConfirmingDelete}
               remove={remove}
@@ -939,53 +1013,99 @@ function ObjectDetail({ id }: { id: string }) {
       {flow?.pipeline === "trim" && flow.tool != null && (
         <TrimDialog
           object={obj}
+          prefill={prefill}
           selectedTool={flow.tool}
           onBack={() => {
             // Reopens on the previously chosen card rather than nothing
             // highlighted -- "change your mind" should not look like
             // "start over".
             setPendingTool(flow.tool);
+            // Going back to pick a different tool discards the card's
+            // settings: they described the tool being left behind.
+            setPrefill(null);
             setFlow({ pipeline: "trim", tool: null });
           }}
-          onClose={() => setFlow(null)}
+          onClose={() => {
+            setFlow(null);
+            setPrefill(null);
+          }}
         />
       )}
       {flow?.pipeline === "align" && flow.tool != null && (
         <AlignDialog
           object={obj}
+          prefill={prefill}
           selectedTool={flow.tool as AlignerName}
           onBack={() => {
             setPendingTool(flow.tool);
+            // Going back to pick a different tool discards the card's
+            // settings: they described the tool being left behind.
+            setPrefill(null);
             setFlow({ pipeline: "align", tool: null });
           }}
-          onClose={() => setFlow(null)}
+          onClose={() => {
+            setFlow(null);
+            setPrefill(null);
+          }}
         />
       )}
       {flow?.pipeline === "variant" && flow.tool != null && (
         <VariantDialog
           object={obj}
+          prefill={prefill}
           selectedTool={flow.tool as VariantCallerName}
           onBack={() => {
             setPendingTool(flow.tool);
+            // Going back to pick a different tool discards the card's
+            // settings: they described the tool being left behind.
+            setPrefill(null);
             setFlow({ pipeline: "variant", tool: null });
           }}
-          onClose={() => setFlow(null)}
+          onClose={() => {
+            setFlow(null);
+            setPrefill(null);
+          }}
         />
       )}
       {quantifyOpen && (
-        <QuantifyDialog object={obj} onClose={() => setQuantifyOpen(false)} />
+        <QuantifyDialog
+          object={obj}
+          prefill={prefill}
+          onClose={() => {
+            setQuantifyOpen(false);
+            setPrefill(null);
+          }}
+        />
       )}
       {assembleOpen && (
-        <AssembleDialog object={obj} onClose={() => setAssembleOpen(false)} />
+        <AssembleDialog
+          object={obj}
+          prefill={prefill}
+          onClose={() => {
+            setAssembleOpen(false);
+            setPrefill(null);
+          }}
+        />
       )}
       {completenessOpen && (
         <CompletenessDialog
           object={obj}
-          onClose={() => setCompletenessOpen(false)}
+          prefill={prefill}
+          onClose={() => {
+            setCompletenessOpen(false);
+            setPrefill(null);
+          }}
         />
       )}
       {scaffoldOpen && (
-        <ScaffoldDialog object={obj} onClose={() => setScaffoldOpen(false)} />
+        <ScaffoldDialog
+          object={obj}
+          prefill={prefill}
+          onClose={() => {
+            setScaffoldOpen(false);
+            setPrefill(null);
+          }}
+        />
       )}
       {deOpen && (
         <DifferentialExpressionDialog
@@ -1440,6 +1560,7 @@ function MetadataTab({
 function ActionsTab({
   obj,
   computations,
+  onConfigure,
   confirmingDelete,
   setConfirmingDelete,
   remove,
@@ -1448,6 +1569,10 @@ function ActionsTab({
 }: {
   obj: ObjectDetailData;
   computations: React.ReactNode;
+  /** Opens a card's settings dialog. Owned by `ObjectDetail`, which holds
+   *  every dialog's state -- the same reason `computations` arrives as a
+   *  prebuilt node rather than being assembled here. */
+  onConfigure: (dialog: string, body: Record<string, unknown>) => void;
   confirmingDelete: boolean;
   setConfirmingDelete: (v: boolean) => void;
   remove: { mutate: () => void; isPending: boolean };
@@ -1467,7 +1592,11 @@ function ActionsTab({
             component already has, is simpler than a prop that would only
             restate what the caller knows. */}
         {obj.status === "ready" ? (
-          <PipelineSuggestions objectId={obj.id} projectId={obj.project_id} />
+          <PipelineSuggestions
+            objectId={obj.id}
+            projectId={obj.project_id}
+            onConfigure={onConfigure}
+          />
         ) : (
           <p className="suggestion-none">
             Suggestions appear once this file has finished ingesting.

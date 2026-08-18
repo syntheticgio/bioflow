@@ -38,12 +38,21 @@ export function VariantDialog({
   selectedTool,
   onBack,
   onClose,
+  prefill,
 }: {
   object: DataObject;
   /** The caller chosen in `PipelineToolSelector`, if the user came via one. */
   selectedTool?: VariantCallerName;
   onBack?: () => void;
   onClose: () => void;
+  /**
+   * A suggestion card's launch body, when the dialog was opened by "Adjust…".
+   *
+   * Seeds the fields the card had already decided, so the dialog opens on
+   * that card's run rather than on the generic defaults. Null when opened
+   * from the Computations row, which is the unchanged path.
+   */
+  prefill?: Record<string, unknown> | null;
 }) {
   const qc = useQueryClient();
   const navigate = useNavigate();
@@ -61,8 +70,18 @@ export function VariantDialog({
     enabled: defaults?.needs_reference === true,
   });
 
-  const [referenceId, setReferenceId] = useState<string | null>(null);
-  const [overrides, setOverrides] = useState<Partial<VariantParams>>({});
+  const [referenceId, setReferenceId] = useState<string | null>(
+    () => (prefill?.reference_id as string) ?? null,
+  );
+  // Seeded from the card, not merged after the fact: `params` below layers
+  // overrides onto the server's defaults, so putting the card's values in
+  // as the initial overrides makes the card's run the one the dialog opens
+  // on, with every field still editable. A lazy initializer rather than an
+  // effect -- an effect would repaint the dialog a frame after it mounted,
+  // and several derived values here read `params` synchronously.
+  const [overrides, setOverrides] = useState<Partial<VariantParams>>(
+    () => (prefill?.params as Partial<VariantParams>) ?? {},
+  );
   const [advanced, setAdvanced] = useState(false);
   // Set from the server's refusal, not chosen up front: the backend is what
   // knows the tool is on-demand and not yet pulled (details.needs ===

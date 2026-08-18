@@ -30,6 +30,7 @@ export function AlignDialog({
   selectedTool,
   onBack,
   onClose,
+  prefill,
 }: {
   object: DataObject;
   /**
@@ -42,6 +43,14 @@ export function AlignDialog({
   /** Returns to the tool selector, keeping the chosen aligner highlighted. */
   onBack?: () => void;
   onClose: () => void;
+  /**
+   * A suggestion card's launch body, when the dialog was opened by "Adjust…".
+   *
+   * Seeds the fields the card had already decided, so the dialog opens on
+   * that card's run rather than on the generic defaults. Null when opened
+   * from the Computations row, which is the unchanged path.
+   */
+  prefill?: Record<string, unknown> | null;
 }) {
   const qc = useQueryClient();
   const navigate = useNavigate();
@@ -69,9 +78,21 @@ export function AlignDialog({
     queryFn: () => api.detectMate(object.id),
   });
 
-  const [referenceId, setReferenceId] = useState<string | null>(null);
-  const [paired, setPaired] = useState(true);
-  const [overrides, setOverrides] = useState<Partial<AlignParams>>({});
+  const [referenceId, setReferenceId] = useState<string | null>(
+    () => (prefill?.reference_id as string) ?? null,
+  );
+  const [paired, setPaired] = useState(
+    () => (prefill?.paired as boolean) ?? true,
+  );
+  // Seeded from the card, not merged after the fact: `params` below layers
+  // overrides onto the server's defaults, so putting the card's values in
+  // as the initial overrides makes the card's run the one the dialog opens
+  // on, with every field still editable. A lazy initializer rather than an
+  // effect -- an effect would repaint the dialog a frame after it mounted,
+  // and several derived values here read `params` synchronously.
+  const [overrides, setOverrides] = useState<Partial<AlignParams>>(
+    () => (prefill?.params as Partial<AlignParams>) ?? {},
+  );
   const [rgOverrides, setRgOverrides] = useState<Partial<ReadGroup>>({});
   const [advanced, setAdvanced] = useState(false);
   const [chunked, setChunked] = useState(false);
