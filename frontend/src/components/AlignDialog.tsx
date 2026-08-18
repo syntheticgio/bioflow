@@ -9,8 +9,11 @@ import {
   BOWTIE2_DEFAULT_PRESET_ID,
   hasInsertRangeError,
   hasReportingError,
+  INSERT_RANGE_ERROR_MESSAGE,
   initialPresetSelection,
   isBowtie2PairOnlyField,
+  launchValidationMessage,
+  REPORTING_ERROR_MESSAGE,
   shouldClearPresetOnFieldEdit,
 } from "./alignDialogPresets";
 import { ModalBackdrop } from "./ModalBackdrop";
@@ -252,6 +255,7 @@ export function AlignDialog({
     presetSelection && schema?.presets?.[presetSelection] ? presetSelection : null;
   const insertRangeError = hasInsertRangeError(params);
   const reportingError = hasReportingError(params);
+  const launchValidationError = launchValidationMessage(params);
   const biologyFields = schema?.fields.filter((f) => {
     if (f.group !== "biology") return false;
     if (aligner === "bowtie2" && !usePair && isBowtie2PairOnlyField(f.key)) {
@@ -323,14 +327,6 @@ export function AlignDialog({
   useEffect(() => {
     setPresetOverride(null);
   }, [aligner]);
-
-  useEffect(() => {
-    if (!schema?.presets) {
-      setPresetOverride(null);
-      return;
-    }
-    setPresetOverride((current) => current ?? presetSeed);
-  }, [presetSeed, schema?.presets]);
 
   useEffect(() => {
     if (
@@ -550,8 +546,7 @@ export function AlignDialog({
     rgComplete &&
     alignerInfo?.available === true &&
     band !== "block" &&
-    !insertRangeError &&
-    !reportingError &&
+    launchValidationError == null &&
     !setPairingBlocked;
 
   return (
@@ -856,12 +851,12 @@ export function AlignDialog({
             />
             {insertRangeError && (
               <div className="error-box" style={{ fontSize: 12 }}>
-                Minimum insert size must be less than or equal to maximum insert size.
+                {INSERT_RANGE_ERROR_MESSAGE}
               </div>
             )}
             {reportingError && (
               <div className="error-box" style={{ fontSize: 12 }}>
-                Choose either &ldquo;Report all alignments&rdquo; or a positive report limit, not both.
+                {REPORTING_ERROR_MESSAGE}
               </div>
             )}
           </div>
@@ -922,7 +917,13 @@ export function AlignDialog({
             replan={replan ?? null}
             onCancel={onClose}
             onEdit={() => setCardDismissed(true)}
-            onLaunchAnyway={() => launchAnyway.mutate()}
+            onLaunchAnyway={() => {
+              if (launchValidationError != null) {
+                notify.error(launchValidationError);
+                return;
+              }
+              launchAnyway.mutate();
+            }}
             launchAnywayPending={launchAnyway.isPending}
             onAcceptReplan={(p) => {
               setOverrides((o) => ({ ...o, ...p }));

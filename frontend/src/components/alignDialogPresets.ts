@@ -3,6 +3,10 @@ import type { AlignParams, AlignerName, AlignerPreset } from "../api/types";
 export const ADVANCED_PRESET_VALUE = "advanced";
 export const BOWTIE2_CUSTOM_PRESET_VALUE = "custom";
 export const BOWTIE2_DEFAULT_PRESET_ID = "standard_short_read";
+export const INSERT_RANGE_ERROR_MESSAGE =
+  "Minimum insert size must be less than or equal to maximum insert size.";
+export const REPORTING_ERROR_MESSAGE =
+  'Choose either "Report all alignments" or a positive report limit, not both.';
 
 const BOWTIE2_PAIR_ONLY_KEYS = new Set([
   "minins",
@@ -78,6 +82,12 @@ export function hasInsertRangeError(params: Partial<AlignParams>): boolean {
 
 export function hasReportingError(params: Partial<AlignParams>): boolean {
   return Boolean(params.report_all) && Number(params.report_k ?? 0) > 0;
+}
+
+export function launchValidationMessage(params: Partial<AlignParams>): string | null {
+  if (hasInsertRangeError(params)) return INSERT_RANGE_ERROR_MESSAGE;
+  if (hasReportingError(params)) return REPORTING_ERROR_MESSAGE;
+  return null;
 }
 
 export function isBowtie2PairOnlyField(key: string): boolean {
