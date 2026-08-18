@@ -34,10 +34,16 @@ export interface AlignParams {
   preset?: AlignPreset | string;
   sensitivity?: string;
   local?: boolean;
+  minins?: number;
   maxins?: number;
+  orientation?: "FR" | "RF" | "FF";
+  dovetail?: boolean;
+  no_contain?: boolean;
+  no_overlap?: boolean;
   no_mixed?: boolean;
   no_discordant?: boolean;
   report_k?: number;
+  report_all?: boolean;
   rna_strandness?: string;
   max_intronlen?: number;
   no_spliced_alignment?: boolean;

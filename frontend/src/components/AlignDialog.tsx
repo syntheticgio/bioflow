@@ -3,6 +3,16 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import { api } from "../api/client";
 import { AlignerParamFields } from "./AlignerParamFields";
+import {
+  ADVANCED_PRESET_VALUE,
+  BOWTIE2_CUSTOM_PRESET_VALUE,
+  BOWTIE2_DEFAULT_PRESET_ID,
+  hasInsertRangeError,
+  hasReportingError,
+  initialPresetSelection,
+  isBowtie2PairOnlyField,
+  shouldClearPresetOnFieldEdit,
+} from "./alignDialogPresets";
 import { ModalBackdrop } from "./ModalBackdrop";
 import { NodeSelector } from "./NodeSelector";
 import { ParameterSetPicker } from "./ParameterSetPicker";
@@ -99,9 +109,10 @@ export function AlignDialog({
   const [rgOverrides, setRgOverrides] = useState<Partial<ReadGroup>>({});
   const [advanced, setAdvanced] = useState(false);
   const [chunked, setChunked] = useState(false);
-  // Which bwa-mem2 preset is selected. null means use the server default;
-  // "advanced" means show all individual fields. Only meaningful when the
-  // schema has presets (currently bwa-mem2 only).
+  // Which schema preset is selected in the UI. Null means "not initialized
+  // yet" rather than "use no preset": Bowtie2 needs an explicit default once
+  // its schema arrives, while other aligners keep their existing advanced
+  // behavior.
   const [presetOverride, setPresetOverride] = useState<string | null>(null);
   // Dismissed by "Edit parameters": the band is still "block", but the user
   // has asked to go back to the fields rather than be shown the card again.
@@ -231,6 +242,26 @@ export function AlignDialog({
     enabled: chosenId != null,
   });
 
+  const presetSeed = initialPresetSelection({
+    aligner,
+    params,
+    presets: schema?.presets,
+  });
+  const presetSelection = presetOverride ?? presetSeed;
+  const activePresetId =
+    presetSelection && schema?.presets?.[presetSelection] ? presetSelection : null;
+  const insertRangeError = hasInsertRangeError(params);
+  const reportingError = hasReportingError(params);
+  const biologyFields = schema?.fields.filter((f) => {
+    if (f.group !== "biology") return false;
+    if (aligner === "bowtie2" && !usePair && isBowtie2PairOnlyField(f.key)) {
+      return false;
+    }
+    if (!schema.presets) return true;
+    if (aligner === "bowtie2") return true;
+    return presetSelection === ADVANCED_PRESET_VALUE;
+  });
+
   // The same arithmetic the backend runs at launch. Local so the numbers move
   // with the sliders; the backend re-checks authoritatively, so a drift here
   // costs a wrong preview rather than a bad run.
@@ -288,6 +319,39 @@ export function AlignDialog({
   useEffect(() => {
     if (band !== "block") setCardDismissed(false);
   }, [band]);
+
+  useEffect(() => {
+    setPresetOverride(null);
+  }, [aligner]);
+
+  useEffect(() => {
+    if (!schema?.presets) {
+      setPresetOverride(null);
+      return;
+    }
+    setPresetOverride((current) => current ?? presetSeed);
+  }, [presetSeed, schema?.presets]);
+
+  useEffect(() => {
+    if (
+      aligner !== "bowtie2" ||
+      !schema?.presets?.[BOWTIE2_DEFAULT_PRESET_ID] ||
+      presetSelection !== BOWTIE2_DEFAULT_PRESET_ID ||
+      (typeof params.preset === "string" && params.preset.length > 0)
+    ) {
+      return;
+    }
+    const preset = schema.presets[BOWTIE2_DEFAULT_PRESET_ID];
+    setOverrides((current) =>
+      current.preset === BOWTIE2_DEFAULT_PRESET_ID
+        ? current
+        : {
+            ...current,
+            ...preset.values,
+            preset: BOWTIE2_DEFAULT_PRESET_ID,
+          },
+    );
+  }, [aligner, params.preset, presetSelection, schema?.presets]);
 
   // A single-end run must not send mates: the backend rejects a set that
   // declares a mate in a single-end alignment. Stripping them on the toggle
@@ -414,7 +478,20 @@ export function AlignDialog({
   });
 
   const set = <K extends keyof AlignParams>(key: K, value: AlignParams[K]) =>
-    setOverrides((o) => ({ ...o, [key]: value }));
+    setOverrides((o) => {
+      const clearPreset = shouldClearPresetOnFieldEdit({
+        aligner,
+        activeSelection: presetSelection,
+        presets: schema?.presets,
+        key: String(key),
+      });
+      if (clearPreset) setPresetOverride(BOWTIE2_CUSTOM_PRESET_VALUE);
+      return {
+        ...o,
+        [key]: value,
+        ...(clearPreset ? { preset: "" } : {}),
+      };
+    });
 
   const setRg = <K extends keyof ReadGroup>(key: K, value: ReadGroup[K]) =>
     setRgOverrides((o) => ({ ...o, [key]: value }));
@@ -473,6 +550,8 @@ export function AlignDialog({
     rgComplete &&
     alignerInfo?.available === true &&
     band !== "block" &&
+    !insertRangeError &&
+    !reportingError &&
     !setPairingBlocked;
 
   return (
@@ -669,13 +748,15 @@ export function AlignDialog({
           </label>
         </fieldset>
 
-        {/* Preset selector for bwa-mem2 (and any future aligner with presets) */}
+        {/* Schema-defined presets stay in the main dialog flow. Bowtie2 keeps
+            its fields editable under a named preset; other aligners keep the
+            existing advanced-only override path. */}
         {schema?.presets && (
           <div className="trim-fields">
             <label>
-              <span>Organism preset</span>
+              <span>Alignment preset</span>
               <select
-                value={presetOverride ?? params.preset ?? ""}
+                value={presetSelection ?? ""}
                 onChange={(e) => {
                   // `schema?.presets` narrows the JSX above but not a nested
                   // closure -- TypeScript can't carry that narrowing across a
@@ -684,12 +765,18 @@ export function AlignDialog({
                   if (!presets) return;
                   const value = e.target.value;
                   setPresetOverride(value);
-                  if (value && value !== "advanced" && presets[value]) {
-                    // Apply preset values as overrides
+                  if (
+                    value &&
+                    value !== ADVANCED_PRESET_VALUE &&
+                    value !== BOWTIE2_CUSTOM_PRESET_VALUE &&
+                    presets[value]
+                  ) {
                     const preset = presets[value];
                     setOverrides((o) => ({ ...o, ...preset.values, preset: value }));
-                  } else if (value === "advanced") {
-                    // Advanced mode: clear preset, keep existing field values
+                  } else if (
+                    value === ADVANCED_PRESET_VALUE ||
+                    value === BOWTIE2_CUSTOM_PRESET_VALUE
+                  ) {
                     setOverrides((o) => ({ ...o, preset: "" }));
                   }
                 }}
@@ -699,12 +786,23 @@ export function AlignDialog({
                     {preset.label}
                   </option>
                 ))}
-                <option value="advanced">Advanced / fine-grained</option>
+                <option
+                  value={
+                    aligner === "bowtie2"
+                      ? BOWTIE2_CUSTOM_PRESET_VALUE
+                      : ADVANCED_PRESET_VALUE
+                  }
+                >
+                  {aligner === "bowtie2" ? "Custom" : "Advanced / fine-grained"}
+                </option>
               </select>
-              {presetOverride && presetOverride !== "advanced" && schema.presets[presetOverride] && (
-                <small>{schema.presets[presetOverride].description}</small>
+              {activePresetId && schema.presets[activePresetId] && (
+                <small>{schema.presets[activePresetId].description}</small>
               )}
-              {presetOverride === "advanced" && (
+              {presetSelection === BOWTIE2_CUSTOM_PRESET_VALUE && (
+                <small>Editing the fields below uses a custom Bowtie2 setup.</small>
+              )}
+              {presetSelection === ADVANCED_PRESET_VALUE && (
                 <small>Show all individual parameters for full control.</small>
               )}
             </label>
@@ -717,11 +815,19 @@ export function AlignDialog({
             family="aligner"
             currentParams={params as unknown as Record<string, unknown>}
             onApply={(values) => {
+              const nextParams = { ...params, ...values } as Partial<AlignParams>;
               Object.entries(values).forEach(([k, v]) =>
                 setOverrides((o) => ({
                   ...o,
                   [k]: v as AlignParams[keyof AlignParams],
                 })),
+              );
+              setPresetOverride(
+                initialPresetSelection({
+                  aligner,
+                  params: nextParams,
+                  presets: schema?.presets,
+                }),
               );
               setAppliedValues(values);
             }}
@@ -734,13 +840,8 @@ export function AlignDialog({
 
         {schema && (
           <div className="trim-fields">
-            {/* When a preset is active (not advanced), hide individual biology
-                fields -- the preset sets them. Only show them in advanced mode
-                or when the schema has no presets at all. */}
             <AlignerParamFields
-              fields={schema.fields.filter(
-                (f) => f.group === "biology" && (presetOverride === "advanced" || !schema.presets)
-              )}
+              fields={biologyFields ?? []}
               params={params}
               onChange={(k, v) =>
                 // The registry's field metadata is validated server-side (see
@@ -753,6 +854,16 @@ export function AlignDialog({
                 set(k as keyof AlignParams, v as AlignParams[keyof AlignParams])
               }
             />
+            {insertRangeError && (
+              <div className="error-box" style={{ fontSize: 12 }}>
+                Minimum insert size must be less than or equal to maximum insert size.
+              </div>
+            )}
+            {reportingError && (
+              <div className="error-box" style={{ fontSize: 12 }}>
+                Choose either &ldquo;Report all alignments&rdquo; or a positive report limit, not both.
+              </div>
+            )}
           </div>
         )}
 
