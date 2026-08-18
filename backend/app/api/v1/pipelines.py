@@ -1710,6 +1710,9 @@ class AssemblyErrorRequest(BaseModel):
     ngs_bam_id: PydanticObjectId | None = None
     sms_bam_id: PydanticObjectId | None = None
     break_chimera: bool = False
+    # "Launch anyway" from the refusal card. Skips the declared-budget refusal
+    # and persists on the job, where claim.lua admits it as sole occupant.
+    resource_override: bool = False
 
 
 @router.post("/assembly-errors", response_model=JobOut, status_code=status.HTTP_201_CREATED)
@@ -1726,6 +1729,7 @@ async def launch_assembly_error_qc_route(
         ngs_bam_id=body.ngs_bam_id,
         sms_bam_id=body.sms_bam_id,
         break_chimera=body.break_chimera,
+        resource_override=body.resource_override,
     )
     return JobOut.of(job)
 

@@ -1402,6 +1402,8 @@ MISASSEMBLY_QC_MEM_MB = 8192
 
 SYNTENY_MEM_MB = 8192
 
+ASSEMBLY_ERROR_QC_MEM_MB = 8192
+
 
 def refuse_if_over_budget(
     *, declared_mb: int, budget_mb: int, resource_override: bool
@@ -5922,6 +5924,7 @@ async def launch_assembly_error_qc(
     ngs_bam_id: PydanticObjectId | None = None,
     sms_bam_id: PydanticObjectId | None = None,
     break_chimera: bool = False,
+    resource_override: bool = False,
 ) -> Job:
     """Queue a CRAQ run: reference-free assembly error detection.
 
@@ -5935,6 +5938,15 @@ async def launch_assembly_error_qc(
     """
     from app.queue import queue
     from app.services import object_service, reference_assembly
+
+    # Hoisted above the enqueue for the same reason as launch_assembly: a
+    # declaration the budget can never satisfy is unclaimable, and claim.lua
+    # has no starvation escape (#478, #527).
+    refuse_if_over_budget(
+        declared_mb=ASSEMBLY_ERROR_QC_MEM_MB,
+        budget_mb=await current_admission_budget_mb(),
+        resource_override=resource_override,
+    )
 
     tool = tools.require(tools.craq())
 
@@ -6028,11 +6040,12 @@ async def launch_assembly_error_qc(
         owner=owner,
         payload=payload,
         job_class=JobClass.COMPUTE,
-        resources=JobResources(cpu=4, mem_mb=8192, io=IoClass.HEAVY),
+        resources=JobResources(cpu=4, mem_mb=ASSEMBLY_ERROR_QC_MEM_MB, io=IoClass.HEAVY),
         max_attempts=1,
         dedup_key=dedup,
         project_id=assembly.project_id,
         object_id=assembly.id,
+        resource_override=resource_override,
     )
     if job is None:
         raise ConflictError("This assembly error QC job is already queued")
