@@ -173,6 +173,21 @@ jobs:
       - name: Ops script tests
         run: pytest ops/tests/ -v
 
+      # Static analysis of the shell scripts, added in #492. Worth stating
+      # what this does NOT do: it does not catch the locale-dependent
+      # unbraced-expansion bug that issue was filed about. shellcheck reports
+      # `log "$dir…"` clean, because it is valid syntax whose meaning depends
+      # on the runtime LC_CTYPE. The tests in ops/tests/test_backup_restore.py
+      # are what cover that. This step guards a different class -- quoting,
+      # globbing, unused variables -- and the tree was already clean when it
+      # was added, so a failure here is a regression, not a backlog.
+      - name: Lint shell scripts with shellcheck
+        run: |
+          sudo apt-get update && sudo apt-get install -y shellcheck
+          # ops/hooks/commit-msg is named explicitly: it is a bash script
+          # with no extension, so a *.sh glob skips it silently.
+          shellcheck ops/*.sh ops/hooks/*.sh ops/hooks/commit-msg
+
   # ------------------------------------------------------------------
   # FUTURE: Full backend test suite with Mongo replica-set service.
   #
