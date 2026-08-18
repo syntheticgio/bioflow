@@ -192,6 +192,37 @@ class SequenceType(StrEnum):
     RNA = "RNA"
 
 
+class SequencingPlatform(StrEnum):
+    """SRA PLATFORM tag vocabulary, verbatim from NCBI's specification.
+
+    Source: https://www.ncbi.nlm.nih.gov/books/NBK56913/#SRA_Technical_Report.SRA_Format_Standards
+    (Table 20: PLATFORM tag values).
+
+    These are the canonical platform identifiers that NCBI stamps on every
+    run. They are the single source of truth for `facts.sra_platform` and
+    `qc_stats.LONG_READ_PLATFORMS`/`SHORT_READ_PLATFORMS`.
+
+    Note that this is a *different* closed vocabulary from SAM's `PL` field
+    (SamPlatform in pipeline_service.py): OXFORD_NANOPORE vs ONT,
+    PACBIO_SMRT vs PACBIO, etc. One enum cannot serve both without an
+    arbitrary choice of which standard to betray.
+    """
+
+    ILLUMINA = "ILLUMINA"
+    PACBIO_SMRT = "PACBIO_SMRT"
+    OXFORD_NANOPORE = "OXFORD_NANOPORE"
+    BGISEQ = "BGISEQ"
+    DNBSEQ = "DNBSEQ"
+    ELEMENT = "ELEMENT"
+    ULTIMA = "ULTIMA"
+    SINGULAR = "SINGULAR"
+    ION_TORRENT = "ION_TORRENT"
+    LS454 = "LS454"
+    SOLID = "SOLID"
+    HELICOS = "HELICOS"
+    CAPILLARY = "CAPILLARY"
+
+
 class FormatConfidence(StrEnum):
     MAGIC = "magic"  # identified from file contents
     EXTENSION = "extension"  # guessed from the filename only

@@ -20,3 +20,15 @@ def test_sra_platform_filters_are_the_three_ncbi_tags():
     assert SRA_PLATFORM_FILTERS == frozenset(
         {"ILLUMINA", "PACBIO_SMRT", "OXFORD_NANOPORE"}
     )
+
+
+def test_every_filter_is_a_sequencing_platform_member():
+    """Every SRA_PLATFORM_FILTERS tag is a valid SequencingPlatform value.
+
+    Adding a new filter for a platform NCBI supports means it must also
+    exist in the SequencingPlatform enum, or the enum is incomplete.
+    """
+    from app.models.object import SequencingPlatform
+
+    for tag in SRA_PLATFORM_FILTERS:
+        assert tag in SequencingPlatform._value2member_map_, tag
