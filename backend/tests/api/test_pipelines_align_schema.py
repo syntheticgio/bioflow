@@ -98,6 +98,7 @@ class TestSchemaEndpoint:
         assert fields["batch_size"]["kind"] == "int"
         assert fields["batch_size"]["group"] == "performance"
         assert fields["batch_size"]["min"] == 1
+        assert "bases-per-batch" in fields["batch_size"]["help"]
         assert fields["soft_clip_supplementary"]["kind"] == "bool"
         assert fields["soft_clip_supplementary"]["group"] == "performance"
         assert fields["cs_mode"]["kind"] == "select"

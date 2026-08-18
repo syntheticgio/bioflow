@@ -486,7 +486,7 @@ REGISTRY: dict[Aligner, AlignerSpec] = {
                 min=1,
                 group="performance",
                 help=(
-                    "Leave blank to keep the selected preset's reads-per-"
+                    "Leave blank to keep the selected preset's bases-per-"
                     "batch setting. Larger batches can improve throughput at "
                     "the cost of more memory."
                 ),

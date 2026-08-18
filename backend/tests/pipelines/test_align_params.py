@@ -313,6 +313,16 @@ class TestMinimap2:
         with pytest.raises(ValidationError):
             align_params.from_dict({"aligner": "minimap2", "secondary_ratio": 1.1})
 
+    @pytest.mark.parametrize("value", [float("nan"), float("inf"), float("-inf")])
+    def test_secondary_ratio_rejects_non_finite_numbers(self, value):
+        with pytest.raises(ValidationError):
+            align_params.from_dict({"aligner": "minimap2", "secondary_ratio": value})
+
+    @pytest.mark.parametrize("value", [True, False])
+    def test_secondary_ratio_rejects_booleans(self, value):
+        with pytest.raises(ValidationError):
+            align_params.from_dict({"aligner": "minimap2", "secondary_ratio": value})
+
     def test_invalid_numeric_text_raises_validation_error(self):
         with pytest.raises(ValidationError):
             align_params.from_dict({"aligner": "minimap2", "kmer_size": "default"})
