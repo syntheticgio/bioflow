@@ -1392,7 +1392,11 @@ def refuse_if_over_budget(
         resource_estimator.explain_declared_refusal(
             declared_mb=declared_mb, budget_mb=budget_mb
         ),
-        details={"declared_mb": declared_mb, "budget_mb": budget_mb},
+        details={
+            "refusal": "declared",
+            "declared_mb": declared_mb,
+            "budget_mb": budget_mb,
+        },
     )
 
 
@@ -2045,6 +2049,7 @@ async def launch_alignment(
                     provenance=resolved.detail,
                 ),
                 details={
+                    "refusal": "estimate",
                     "estimate_mb": estimate,
                     "budget_mb": mem_budget_mb,
                     "estimate_source": resolved.source.value,
@@ -4489,6 +4494,7 @@ async def launch_assembly(
                 f"{mem_budget_mb:,} MB available. Assembling a genome this "
                 "size needs a bigger machine.",
                 details={
+                    "refusal": "estimate",
                     "estimate_mb": estimate,
                     "budget_mb": mem_budget_mb,
                     "estimate_source": resolved.source.value,
