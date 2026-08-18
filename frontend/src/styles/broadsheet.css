@@ -1238,10 +1238,17 @@
 /* Grid children default to min-width:auto and refuse to shrink below their
    longest word -- a run label is one unbroken filename, so without this the
    columns push the page wider instead of narrowing. */
+.theme-broadsheet .activity-lead-column,
 .theme-broadsheet .activity-lead,
 .theme-broadsheet .activity-ledger,
 .theme-broadsheet .activity-desk {
   min-width: 0;
+}
+
+.theme-broadsheet .activity-lead-column {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
 }
 
 /* The narrow-window rules live at the end of this section, after every
