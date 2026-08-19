@@ -20,16 +20,24 @@
 # The database for either tool is not installed here -- both are probed as
 # binaries only (see tools.kraken2()/tools.bracken()), with the multi-GB
 # reference database delivered on demand at launch time instead.
+#
+# rsync is a *runtime* dependency, not a build one: Kraken2's own bundled
+# download_taxonomy.sh/rsync_from_ncbi.pl scripts shell out to it when a job
+# actually pulls a taxonomy database later. It must not go in BUILD_DEPS
+# below -- that whole set is apt-get purge'd once the build finishes, which
+# would remove rsync from the image right after installing it, leaving it
+# missing at the exact moment a database download needs it.
 
 set -eu
 
 KRAKEN2_VERSION="${KRAKEN2_VERSION:-2.1.3}"
 BRACKEN_VERSION="${BRACKEN_VERSION:-2.9}"
 
-BUILD_DEPS="git make g++ zlib1g-dev rsync"
+BUILD_DEPS="git make g++ zlib1g-dev"
+RUNTIME_DEPS="rsync"
 
 apt-get update
-apt-get install -y --no-install-recommends ${BUILD_DEPS}
+apt-get install -y --no-install-recommends ${BUILD_DEPS} ${RUNTIME_DEPS}
 
 echo "Building Kraken2 ${KRAKEN2_VERSION}..."
 git clone --depth 1 --branch "v${KRAKEN2_VERSION}" \
