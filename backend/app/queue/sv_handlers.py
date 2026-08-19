@@ -156,7 +156,15 @@ def call_structural_variants(ctx: JobContext) -> dict:
     tbi = _index_vcf(ctx, vcf, log_path)
 
     ctx.progress(phase="db", pct=0.9, message="building the SV index")
-    db_path = _build_sv_index(ctx, vcf)
+    # Keyed by the BAM's object id, not the VCF's -- the VCF does not have an
+    # object id yet at this point in a SUBPROCESS handler; ingest happens
+    # later, in `_apply_call_structural_variants`, which is what assigns one.
+    # That applier moves this file to its permanent, VCF-keyed home (matching
+    # every sibling report directory's convention: vcf_stats_dir, bam_stats_dir,
+    # etc. are all keyed by the object the report is *about*) once the VCF's
+    # real id is known. This path is therefore transient, not the database's
+    # final location.
+    db_path = _build_sv_index(ctx, vcf, out_dir)
 
     ctx.progress(phase="done", pct=1.0, message="structural variant calling complete")
     log.info(
@@ -174,7 +182,9 @@ def call_structural_variants(ctx: JobContext) -> dict:
         "index": {"tmp_path": str(tbi), "name": tbi.name, "role": "tbi"},
         "tool_version": tool.version,
         "params": ctx.payload.get("params") or {},
-        "sv_db": str(db_path),
+        # Transient, BAM-keyed path. `_apply_call_structural_variants` moves
+        # it to `sv_stats_dir/<vcf_object_id>/sv.db` once the VCF is ingested.
+        "sv_db_path": str(db_path),
         "workdir": str(work),
     }
 
@@ -203,32 +213,31 @@ def _index_vcf(ctx: JobContext, vcf: Path, log_path: Path) -> Path:
     return tbi
 
 
-def _build_sv_index(ctx: JobContext, vcf: Path) -> Path:
+def _build_sv_index(ctx: JobContext, vcf: Path, out_dir: Path) -> Path:
     """Build the SQLite table the SV Results view queries, from the VCF's own
     data lines.
 
-    bcftools view -H streams the data lines (no header) straight from the
-    bgzipped VCF, the same shape `sv_db.build_sv_db` expects -- one VCF data
-    line per row.
+    `bcftools view -H` writes the data lines (no header) to `log_path` via
+    `run_subprocess`, the same way `variant_handlers.run_vcf_stats` writes
+    `bcftools query` to a file rather than piping it: the kernel copies the
+    bytes and the job stays cancellable mid-stream, which a hand-rolled
+    `subprocess.Popen` pipe would not be. The file is then read back as an
+    iterator of lines, the shape `sv_db.build_sv_db` expects -- one VCF data
+    line per row -- without materializing them in memory.
     """
-    import subprocess
-
     bcftools = tools.require(tools.bcftools())
 
-    db_path = settings.sv_stats_dir / str(ctx.payload.get("bam_object_id")) / "sv.db"
-
-    proc = subprocess.Popen(
+    rows_path = out_dir / "sv_rows.txt"
+    code = run_subprocess(
+        ctx,
         [bcftools.path, "view", "-H", str(vcf)],
-        stdout=subprocess.PIPE,
-        text=True,
+        log_path=str(rows_path),
     )
-    assert proc.stdout is not None
-    try:
-        sv_db.build_sv_db(rows=proc.stdout, db_path=db_path)
-    finally:
-        proc.stdout.close()
-        code = proc.wait()
     if code != 0:
         raise RetryableError("bcftools view exited nonzero while building the SV index")
+
+    db_path = settings.sv_stats_dir / str(ctx.payload.get("bam_object_id")) / "sv.db"
+    with open(rows_path, errors="replace") as fh:
+        sv_db.build_sv_db(rows=fh, db_path=db_path)
 
     return db_path
