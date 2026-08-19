@@ -418,6 +418,37 @@ def parse_abyss_stats(text: str) -> dict:
     return {}
 
 
+def gfa_to_fasta(text: str) -> str:
+    """hifiasm's primary contigs, as FASTA.
+
+    hifiasm writes no FASTA at all -- its contigs are GFA `S` lines
+    (`S <name> <seq> [tags...]`, layout confirmed against a real 0.25.0
+    run). Everything downstream of assembly consumes FASTA, so this is
+    the bridge, called by HIFIASM_SPEC's postprocess hook before
+    `harvest()` looks for assembly.fasta.
+
+    Raises rather than returning an empty string when there are no `S`
+    records: an exit-0 run that assembled nothing must surface as the
+    missing-contigs failure `harvest()` knows how to report, not as a
+    valid, empty REFERENCE object that every later align silently
+    accepts.
+    """
+    records: list[str] = []
+    for line in text.splitlines():
+        if not line.startswith("S\t"):
+            continue
+        fields = line.split("\t")
+        if len(fields) < 3 or not fields[2]:
+            continue
+        records.append(f">{fields[1]}\n{fields[2]}\n")
+    if not records:
+        raise ValueError(
+            "The assembly graph contains no sequences. The assembler "
+            "exited successfully but produced no contigs."
+        )
+    return "".join(records)
+
+
 # ABySS runs as a Make pipeline whose recipes echo the binary they invoke.
 # There is no `>>>STAGE:` equivalent and no count knowable in advance, so this
 # reports a phase name and no step counter -- which the snapshot contract
