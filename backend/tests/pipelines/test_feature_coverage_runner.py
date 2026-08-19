@@ -1,5 +1,3 @@
-from pathlib import Path
-
 from app.pipelines import feature_coverage_runner as fcr
 
 
