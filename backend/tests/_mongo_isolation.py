@@ -9,7 +9,6 @@ they can be tested without a database.
 """
 
 import os
-import re
 import socket
 import uuid
 
@@ -70,11 +69,22 @@ def direct_mongo_url(base_url: str, *, host_reachable: bool | None = None) -> st
         host_reachable = _compose_host_resolves()
     if "://mongo:" in url and not host_reachable:
         url = url.replace("://mongo:", "://127.0.0.1:")
-    url = re.sub(r"replicaSet=[^&]*&?", "", url)
-    if "directConnection=" not in url:
-        sep = "&" if "?" in url else "?"
-        url += f"{sep}directConnection=true"
-    return url
+
+    # Rebuild the query rather than deleting `replicaSet=...` out of the
+    # string. The substring approach this replaces left a bare `?` behind
+    # whenever replicaSet was the only option -- `?replicaSet=rs0` became
+    # `?&directConnection=true`, which pymongo rejects outright with
+    # "URI options are key=value pairs". It went unnoticed because the main
+    # stack's URL carries a second option, so the `&` it left behind had
+    # something in front of it; run-worktree-tests.sh's URL does not.
+    head, _, query = url.partition("?")
+    options = [
+        opt
+        for opt in query.split("&")
+        if opt and not opt.startswith("replicaSet=") and not opt.startswith("directConnection=")
+    ]
+    options.append("directConnection=true")
+    return f"{head}?{'&'.join(options)}"
 
 
 def stale_test_dbs(db_names, started_at_by_db, now, active_prefix):
