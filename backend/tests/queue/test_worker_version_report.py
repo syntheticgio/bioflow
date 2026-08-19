@@ -17,8 +17,14 @@ from app.queue.worker import _own_image_digest, _own_image_id
 
 
 def test_own_image_id_reads_docker_inspect():
+    # `shutil.which` is patched alongside subprocess.run because
+    # `_own_image_id` returns None before running anything when no docker
+    # client is on PATH. Unpatched, this asserted the *host's* PATH: green in
+    # an image that happens to ship docker-cli, red anywhere else, and either
+    # way not a test of the parsing it names.
     completed = type("R", (), {"returncode": 0, "stdout": "sha256:localid\n"})()
-    with patch("app.queue.worker.subprocess.run", return_value=completed):
+    with patch("app.queue.worker.shutil.which", return_value="/usr/bin/docker"), \
+         patch("app.queue.worker.subprocess.run", return_value=completed):
         assert _own_image_id() == "sha256:localid"
 
 
@@ -33,6 +39,7 @@ def test_own_image_digest_resolves_through_own_image_id():
         "stdout": "ghcr.io/syntheticgio/bioflow-backend@sha256:deadbeef\n",
     })()
     with patch("app.queue.worker._own_image_id", return_value="sha256:localid"), \
+         patch("app.queue.worker.shutil.which", return_value="/usr/bin/docker"), \
          patch("app.queue.worker.subprocess.run", return_value=completed) as run:
         assert _own_image_digest() == "sha256:deadbeef"
     # The id from the first call is what gets inspected in the second.

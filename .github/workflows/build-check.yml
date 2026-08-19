@@ -144,55 +144,14 @@ jobs:
     # full 15. If this timeout is what ends a run, the apt options did not
     # catch it and the stall is something else.
     timeout-minutes: 15
+    # Same prebuilt image as backend-full-test. It already ships
+    # build-essential and zlib1g-dev (the two packages the removed apt step
+    # installed) plus shellcheck, so this job now starts at checkout instead
+    # of at an apt mirror -- the stall #577 documents.
+    container:
+      image: ghcr.io/syntheticgio/bioflow-ci-runner:latest
     steps:
       - uses: actions/checkout@v7
-
-      - name: Setup Python
-        uses: actions/setup-python@v7
-        with:
-          python-version: '3.12'
-          cache: 'pip'
-          cache-dependency-path: backend/pyproject.toml
-
-      # pysam (C extension against htslib) and cryptography (Rust) need
-      # toolchain headers that aren't in the base ubuntu-latest image.
-      #
-      # The -o options bound how long a bad mirror can stall this step
-      # (#577). ubuntu-latest resolves apt sources through a mirrorlist
-      # (file:/etc/apt/apt-mirrors.txt) that lists Azure's internal
-      # azure.archive.ubuntu.com first and public archive.ubuntu.com as
-      # fallback, so a fetch can fail two different ways:
-      #
-      #   - Connect never completes. apt gives up per its own timeout and
-      #     falls through to the next mirror. Visible as `Ign:` lines.
-      #   - Connect succeeds, then the transfer stalls mid-stream. This is
-      #     the one that hurt: the socket stays open, so nothing declares it
-      #     dead, and apt waits indefinitely. On PR #609 the last log line
-      #     was a `Get:` for a 126 kB InRelease that never arrived, and the
-      #     job sat there until the 15-minute job timeout killed it.
-      #
-      # Timeout is what bounds the second case: it is an inactivity deadline
-      # on the transfer, not just a connect deadline, so it fires on a mirror
-      # that accepts the connection and then goes quiet. Retries covers a
-      # mirror that is briefly down rather than slow. Both http and https are
-      # set because the mirrorlist mixes schemes — the Azure entry is http,
-      # the public fallback https — and each scheme reads its own key.
-      #
-      # Retries multiplies the timeout rather than replacing it: the budget
-      # per source is (1 + Retries) x Timeout, so 15s here means a dead
-      # source costs ~60s, not 15s. Measured against a server that accepts
-      # the connection and then stops sending, elapsed tracks that formula
-      # closely — Timeout=5 -> 27s, 15 -> 67s, 30 -> 127s. 15s is chosen to
-      # stay well inside the 15-minute job timeout even if several sources
-      # fail in sequence, while leaving enough headroom that a merely slow
-      # (not dead) mirror still succeeds.
-      - name: Install system build dependencies
-        run: |
-          sudo apt-get -o Acquire::Retries=3 \
-                       -o Acquire::http::Timeout=15 \
-                       -o Acquire::https::Timeout=15 \
-                       update
-          sudo apt-get install -y build-essential zlib1g-dev
 
       - name: Install backend dev dependencies
         run: pip install -e 'backend/.[dev]'
@@ -207,6 +166,20 @@ jobs:
       # no backend imports) and validate the release-version guard and
       # version-bump scripts that release.yml and release-launcher.yml
       # depend on.
+      - name: Ensure npm
+        # ops/tests/test_release_preflight.py drives release.sh for real, and
+        # it bumps the launcher's package.json with `npm version`. A GitHub
+        # runner ships npm; this container did not until 2026-08-19, and
+        # ci-runner.yml only rebuilds the image on push to main -- so install
+        # it here when absent. A no-op once the rebuilt image is published.
+        run: |
+          if ! command -v npm >/dev/null 2>&1; then
+            echo "npm absent from the image; installing"
+            apt-get update -qq
+            apt-get install -y --no-install-recommends npm
+          fi
+          npm --version
+
       - name: Ops script tests
         run: pytest ops/tests/ -v
 
@@ -220,13 +193,10 @@ jobs:
       # was added, so a failure here is a regression, not a backlog.
       - name: Lint shell scripts with shellcheck
         run: |
-          # Same mirror-stall exposure as the build-dependencies step above;
-          # see the note there for why these options are set (#577).
-          sudo apt-get -o Acquire::Retries=3 \
-                       -o Acquire::http::Timeout=15 \
-                       -o Acquire::https::Timeout=15 \
-                       update
-          sudo apt-get install -y shellcheck
+          # shellcheck comes from the CI image; the apt-get that used to
+          # install it here is gone along with the mirror stall it risked
+          # (#577).
+          #
           # ops/hooks/commit-msg is named explicitly: it is a bash script
           # with no extension, so a *.sh glob skips it silently.
           shellcheck ops/*.sh ops/hooks/*.sh ops/hooks/commit-msg
@@ -259,18 +229,33 @@ jobs:
       - name: Install backend dev dependencies
         run: pip install -e 'backend/.[dev]'
 
-      - name: Create data directory
-        # Mirrors what initialize_home() lays out at API startup. The
-        # .biopipe/VERSION sentinel is what require_home() checks before every
-        # write path; without it the storage layer refuses to run and dozens
-        # of ingest/share/results tests fail with StorageUnavailableError.
-        #
-        # No sudo: the job container runs as root, and the image has no sudo
-        # installed to call anyway.
+      - name: Verify the data home
+        # `.github/Dockerfile.ci` already lays /data out with the
+        # .biopipe/VERSION sentinel require_home() checks before every write
+        # path, so this asserts rather than creates -- if a future image drops
+        # it, this fails with one clear line instead of dozens of
+        # StorageUnavailableError test failures.
         run: |
-          mkdir -p /data/.biopipe /data/objects /data/staging /data/tmp
-          echo "biopipe-home-v1" > /data/.biopipe/VERSION
+          test -f /data/.biopipe/VERSION || {
+            echo "::error::/data/.biopipe/VERSION missing from the CI image"
+            exit 1
+          }
           chmod -R 777 /data
+          echo "data home OK: $(cat /data/.biopipe/VERSION)"
+
+      - name: Ensure a Docker client
+        # The image gained `docker-cli` on 2026-08-19, but ci-runner.yml only
+        # rebuilds it on push to main -- so a PR that needs the client before
+        # that rebuild lands would fail with "docker: command not found".
+        # Once the rebuilt image is published this is a no-op that prints the
+        # version and exits.
+        run: |
+          if ! command -v docker >/dev/null 2>&1; then
+            echo "docker client absent from the image; installing"
+            apt-get update -qq
+            apt-get install -y --no-install-recommends docker-cli
+          fi
+          docker --version
 
       - name: Start MongoDB with a replica set
         # `docker run` against the mounted socket, so this is a *sibling* of
@@ -304,6 +289,17 @@ jobs:
           done
 
       - name: Run full test suite
-        run: pytest backend/tests/ -q --tb=no
+        # Parallel, which is what this workflow's own PR (#679/#693) made
+        # safe: every worker gets its own Mongo database, so xdist workers
+        # cannot truncate each other's data. `--dist loadgroup` is required,
+        # not optional -- test_object_deletion is pinned to one worker with
+        # an xdist_group mark and scatters without it.
+        #
+        # Heavy-marked tests run afterwards, sequentially, with nothing else
+        # alive. The marker is currently empty, so that phase collects
+        # nothing and exits 5; `|| [ $? -eq 5 ]` is what keeps that green.
+        run: |
+          pytest backend/tests/ -q --tb=no -m "not heavy" -n auto --dist loadgroup
+          pytest backend/tests/ -q --tb=no -m heavy || [ $? -eq 5 ]
         env:
           MONGO_URL: "mongodb://mongo:27017/biopipe_test?replicaSet=rs0&directConnection=true"

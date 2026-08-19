@@ -22,6 +22,19 @@ RUN apt-get update \
         git \
         bzip2 \
         shellcheck \
+        # The Docker *client* only -- no daemon. backend-full-test mounts the
+        # host's socket and starts its Mongo replica set with `docker run`,
+        # which it must do rather than using `services:` because a service
+        # container takes no `command:` and so cannot be given --replSet.
+        # Without this the job fails instantly with "docker: command not
+        # found" (2026-08-19). `docker-cli`, not `docker.io`: the latter is
+        # the full engine and ships no /usr/bin/docker on this base.
+        docker-cli \
+        # npm, for ops/tests/test_release_preflight.py: release.sh bumps the
+        # launcher's package.json through `npm version`, and seven of those
+        # tests drive it for real. A GitHub runner has npm preinstalled, so
+        # this only became a requirement once the job moved into a container.
+        npm \
         minimap2 \
         samtools \
         tabix \
