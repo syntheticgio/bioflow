@@ -15,8 +15,8 @@ exactly the silent under-application the drift notice exists to prevent. See
 the spec's decision 6.
 """
 
-from enum import StrEnum
 import math
+from enum import StrEnum
 from typing import Any
 
 from pydantic import BaseModel
