@@ -1,15 +1,15 @@
 # Verifies code quality and build integrity on every PR into main.
 #
-# Three jobs (plus a commented-out full-suite template):
-#   frontend-check — lint + unit tests + prod image build (ubuntu-latest)
-#   launcher-check — unit tests + the tsc/vite build tauri runs (ubuntu-latest)
-#   backend-smoke  — ruff + import smoke test + ops script tests
+# Four jobs:
+#   frontend-check    — lint + unit tests + prod image build (ubuntu-latest)
+#   launcher-check    — unit tests + the tsc/vite build tauri runs (ubuntu-latest)
+#   backend-smoke     — ruff + import smoke test + ops script tests
+#   backend-full-test — full pytest suite against a Mongo replica set (#601)
 #
 # Backend Docker images are NOT built on PRs: they compile bwa-mem2, Clair3,
-# and compleasm from source and are expensive. The backend is instead
-# smoke-tested here (ruff + import + ops tests). The full pytest suite is
-# deferred to the commented-out backend-full-test job, which needs a Mongo
-# replica-set service — available on ubuntu-latest as a service container.
+# and compleasm from source and are expensive. backend-full-test does not need
+# them: the suite runs against pip-installed deps, fakes Redis with fakeredis,
+# and the only tool-dependent tests are gated behind BIOFLOW_TEST_LIVE_DATA.
 
 name: Build check
 
@@ -195,67 +195,66 @@ jobs:
           # with no extension, so a *.sh glob skips it silently.
           shellcheck ops/*.sh ops/hooks/*.sh ops/hooks/commit-msg
 
-  # ------------------------------------------------------------------
-  # FUTURE: Full backend test suite with Mongo replica-set service.
+  # Full pytest suite (#601). The smoke test above covers ruff + imports;
+  # this runs everything else — ~5,700 tests, ~5.5 min measured locally.
   #
-  # The smoke test above covers ruff + imports; this job adds the
-  # full pytest suite (312 test files) that need a real Mongo replica set —
-  # the conftest hardcodes database "biopipe_test" and the
-  # beanie_models fixture (scope="module") drops all collections on entry.
-  #
-  # Run order: install deps → init replica set → pytest.
-  # ------------------------------------------------------------------
-  #
-  # backend-full-test:
-  #   name: Backend tests (full pytest suite)
-  #   runs-on: ubuntu-latest
-  #   services:
-  #     # A single-node replica set is required for MongoDB transactions
-  #     # (used by blob refcount updates, share cascades, etc.). The
-  #     # conftest hardcodes mongo_url pointing at "rs0".
-  #     mongo:
-  #       image: mongo:7
-  #       ports: ['27017:27017']
-  #       env:
-  #         MONGO_INITDB_ROOT_USERNAME: root
-  #         MONGO_INITDB_ROOT_PASSWORD: example
-  #       options: --replSet rs0 --bind_ip_all
-  #   steps:
-  #     - uses: actions/checkout@v7
-  #
-  #     - uses: actions/setup-python@v7
-  #       with:
-  #         python-version: '3.12'
-  #         cache: 'pip'
-  #         cache-dependency-path: backend/pyproject.toml
-  #
-  #     - name: Install build dependencies
-  #       run: |
-  #         sudo apt-get update
-  #         sudo apt-get install -y build-essential zlib1g-dev libhts-dev curl
-  #
-  #     - name: Install backend dev dependencies
-  #       run: pip install -e 'backend/.[dev]'
-  #
-  #     - name: Install mongosh
-  #       # No Mongo shell on the base image; needed to init the replica set.
-  #       run: |
-  #         curl -fsSL https://www.mongodb.com/serversh/scripts/mongodb-shell.sh | bash
-  #
-  #     - name: Initialize replica set
-  #       run: |
-  #         # Wait for the primary to accept connections, then initiate.
-  #         until mongosh "mongodb://root:example@localhost:27017/admin?directConnection=true" \
-  #           --quiet --eval 'db.adminCommand("ping")' >/dev/null 2>&1; do
-  #           sleep 1
-  #         done
-  #         mongosh "mongodb://root:example@localhost:27017/admin?directConnection=true" \
-  #           --quiet \
-  #           --eval 'rs.initiate({_id: "rs0", members: [{_id: 0, host: "localhost:27017"}]})'
-  #         sleep 3
-  #
-  #     - name: Run full test suite
-  #       run: pytest backend/tests/ -v
-  #       env:
-  #         MONGO_URL: "mongodb://root:example@localhost:27017/biopipe_test?replicaSet=rs0&directConnection=true"
-  #         REDIS_URL: "redis://localhost:6379/0"
+  # No Redis service and no REDIS_URL: the suite fakes Redis end to end
+  # (fakeredis.aioredis, wired up in tests/queue/conftest.py and elsewhere),
+  # and the queue tests run the real Lua scripts against the fake. A REDIS_URL
+  # here would only invite debugging a connection that is never made.
+  backend-full-test:
+    name: Backend tests (full pytest suite)
+    if: ${{ !inputs.skip_backend }}
+    runs-on: ubuntu-latest
+    # ~5.5 min for the suite plus ~3 min of setup; same stalled-apt-mirror
+    # margin reasoning as backend-smoke (#494).
+    timeout-minutes: 20
+    services:
+      # A single-node replica set is required for MongoDB transactions
+      # (blob refcount updates, share cascades) — conftest.py hardcodes the
+      # "biopipe_test" database and the URL must name replicaSet=rs0.
+      #
+      # Deliberately no MONGO_INITDB_ROOT_USERNAME/PASSWORD: mongod refuses
+      # to start with auth + --replSet and no keyfile, and a throwaway CI
+      # container has nothing to protect. Same pattern as the throwaway
+      # Mongo in backend/run-worktree-tests.sh.
+      mongo:
+        image: mongo:7
+        ports: ['27017:27017']
+        options: --replSet rs0 --bind_ip_all
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Setup Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+          cache-dependency-path: backend/pyproject.toml
+
+      # Same toolchain headers backend-smoke needs for pysam/cryptography.
+      - name: Install system build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential zlib1g-dev
+
+      - name: Install backend dev dependencies
+        run: pip install -e 'backend/.[dev]'
+
+      # The mongo:7 image ships mongosh, so the replica set is initiated by
+      # exec-ing into the service container rather than installing a shell on
+      # the runner. The loop covers both mongod not accepting connections yet
+      # and the window between rs.initiate() and the node electing itself
+      # primary — rs.status().ok only reports 1 once the set is usable.
+      - name: Initialize replica set
+        run: |
+          until docker exec ${{ job.services.mongo.id }} mongosh --quiet --eval \
+                'try { rs.status().ok } catch (e) { rs.initiate({_id:"rs0",members:[{_id:0,host:"localhost:27017"}]}).ok }' \
+                2>/dev/null | grep -q 1; do
+            sleep 1
+          done
+
+      - name: Run full test suite
+        run: pytest backend/tests/ -q
+        env:
+          MONGO_URL: "mongodb://localhost:27017/biopipe_test?replicaSet=rs0&directConnection=true"
