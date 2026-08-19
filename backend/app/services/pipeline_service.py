@@ -5292,6 +5292,36 @@ async def launch_lineage_download(
     )
 
 
+async def launch_kraken_db_download(*, db_key: str, owner: str) -> Job:
+    """Queue fetching one Kraken2 classification database.
+
+    A dependency of `launch_classify_reads`, not something it fetches
+    inline -- a classification job must not depend on the network partway
+    through, the same reasoning `launch_lineage_download` records.
+    """
+    from app.pipelines.kraken_db_registry import KRAKEN_DBS
+    from app.queue import queue
+
+    if db_key not in KRAKEN_DBS:
+        raise ValidationError(
+            f"Unknown Kraken2 database {db_key!r}",
+            details={"db_key": db_key},
+        )
+
+    return await queue.enqueue(
+        "download_kraken_db",
+        owner=owner,
+        payload={"db_key": db_key},
+        job_class=JobClass.USER_INTERACTIVE,
+        resources=JobResources(cpu=1, mem_mb=512, io=IoClass.HEAVY),
+        max_attempts=3,
+        # One download per database at a time, project-agnostic: the store
+        # is shared, so two projects requesting the same database collapse
+        # into one job rather than downloading 7.5 GB twice concurrently.
+        dedup_key=f"download_kraken_db:{db_key}",
+    )
+
+
 async def launch_completeness(
     *,
     object_id: PydanticObjectId,

@@ -225,6 +225,12 @@ _NO_NARRATIVE_STEP: frozenset[str] = frozenset(
         # object with provenance of its own, and it runs against a project
         # rather than any single object a chain could walk through.
         "project_export",
+        # Kraken2 database download: same shape as download_lineage's own
+        # reasoning would suggest, but it produces no DataObject at all
+        # (node_types.py's "download_kraken_db" has outputs=()) -- the
+        # dataset lands under settings.kraken_dbs_dir, outside the object
+        # model, so there is nothing for a chain to walk through here.
+        "download_kraken_db",
     }
 )
 
