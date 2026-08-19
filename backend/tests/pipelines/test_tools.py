@@ -287,6 +287,8 @@ class TestSerialization:
             "merqury",
             "gci",
             "winnowmap",
+            "bedtools",
+            "seqkit",
             # Not a binary at all -- a Python library, probed by import rather
             # than by shutil.which. It is in `all_tools` deliberately: the
             # version that ran a differential expression test is half that
@@ -1142,3 +1144,19 @@ def test_abyss_is_declared_and_documented():
     assert meta.citation
     assert meta.license
     assert meta.usage
+
+
+def test_bedtools_probe_reports_missing_binary(monkeypatch):
+    monkeypatch.setattr(tools.settings, "bedtools_path", "/nonexistent/bedtools")
+    tools.bedtools.cache_clear()
+    tool = tools.bedtools()
+    assert tool.name == "bedtools"
+    assert tool.available is False
+
+
+def test_seqkit_probe_reports_missing_binary(monkeypatch):
+    monkeypatch.setattr(tools.settings, "seqkit_path", "/nonexistent/seqkit")
+    tools.seqkit.cache_clear()
+    tool = tools.seqkit()
+    assert tool.name == "seqkit"
+    assert tool.available is False
