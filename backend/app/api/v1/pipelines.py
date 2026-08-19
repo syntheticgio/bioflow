@@ -1942,6 +1942,48 @@ async def launch_annotate_genome_route(
     return JobOut.of(job)
 
 
+class ClassifyReadsRequest(BaseModel):
+    object_id: PydanticObjectId
+    db_key: str
+    mate_object_id: PydanticObjectId | None = None
+
+
+@router.post("/classify-reads", response_model=JobOut, status_code=status.HTTP_201_CREATED)
+async def launch_classify_reads_route(
+    body: ClassifyReadsRequest, owner: OwnerDep
+) -> JobOut:
+    """Queue Kraken2 classification for one FASTQ read set.
+
+    Facts-only, like /annotate-genome -- no derived object. When the chosen
+    database isn't on disk, a download job is enqueued and this job chains
+    behind it (spec K2-C2)."""
+    job = await pipeline_service.launch_classify_reads(
+        object_id=body.object_id,
+        db_key=body.db_key,
+        owner=owner,
+        mate_object_id=body.mate_object_id,
+    )
+    return JobOut.of(job)
+
+
+@router.get("/kraken-dbs")
+async def list_kraken_dbs() -> list[dict]:
+    """The database choices for the classify dialog, with disk presence --
+    presence is what flips the dialog's download warning (spec K2-F1)."""
+    from app.pipelines.kraken_db_registry import KRAKEN_DBS, db_present
+
+    return [
+        {
+            "key": spec.key,
+            "label": spec.label,
+            "description": spec.description,
+            "download_bytes": spec.download_bytes,
+            "present": db_present(spec.key),
+        }
+        for spec in KRAKEN_DBS.values()
+    ]
+
+
 @router.get("/align-envelope")
 async def align_envelope(
     object_id: PydanticObjectId, reference_id: PydanticObjectId, owner: OwnerDep,
