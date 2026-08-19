@@ -2239,6 +2239,42 @@ async def _apply_annotate_genome(result: dict, *, owner: str) -> None:
     )
 
 
+async def _apply_classify_reads(result: dict, *, owner: str) -> None:
+    """Record classification facts on the reads object they describe.
+
+    Near-copy of ``_apply_annotate_genome``: read-only, no files to
+    ingest.  A prior ``taxonomy_mismatch`` is cleared when the new run has
+    none -- reclassifying against a better database must be able to
+    retract the accusation, not merely restate it.
+    """
+    object_id = result.get("object_id")
+    facts = result.get("facts") or {}
+    if not object_id or not facts:
+        return
+
+    obj = await DataObject.get(PydanticObjectId(object_id))
+    if obj is None:
+        log.warning("classification_object_missing", object_id=object_id)
+        return
+
+    merged = {**obj.facts, **facts}
+    if "taxonomy_mismatch" not in facts:
+        merged.pop("taxonomy_mismatch", None)
+
+    await obj.set(
+        {
+            DataObject.facts: merged,
+            DataObject.updated_at: datetime.now(UTC),
+        }
+    )
+    log.info(
+        "classification_applied",
+        object_id=object_id,
+        taxa=len((facts.get("taxonomy") or {}).get("taxa") or []),
+        mismatch="taxonomy_mismatch" in facts,
+    )
+
+
 async def _apply_assess_assembly_continuity(result: dict, *, owner: str) -> None:
     """Record GCI's continuity facts on the assembly they describe.
 
@@ -3341,6 +3377,7 @@ _APPLIERS = {
     "analyze_meryl_tracks": _apply_analyze_meryl_tracks,
     "analyze_synteny": _apply_analyze_synteny,
     "annotate_genome": _apply_annotate_genome,
+    "classify_reads": _apply_classify_reads,
     "assess_assembly_errors": _apply_assess_assembly_errors,
     "assess_assembly_qv": _apply_assess_assembly_qv,
     "assess_assembly_continuity": _apply_assess_assembly_continuity,

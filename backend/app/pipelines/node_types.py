@@ -300,6 +300,12 @@ async def _launch_lineage_download(*, inputs: dict, params: dict, owner: str):
     )
 
 
+async def _launch_kraken_db_download(*, inputs: dict, params: dict, owner: str):
+    return await pipeline_service.launch_kraken_db_download(
+        db_key=params["db_key"], owner=owner
+    )
+
+
 async def _launch_completeness(*, inputs: dict, params: dict, owner: str):
     return await pipeline_service.launch_completeness(
         object_id=inputs["assembly"],
@@ -850,6 +856,21 @@ NODE_TYPES: dict[str, NodeTypeSpec] = {
         # wiring an output object.
         outputs=(),
     ),
+    "download_kraken_db": NodeTypeSpec(
+        label="Download Kraken2 database",
+        launch_name="pipeline_service.launch_kraken_db_download",
+        launch=_launch_kraken_db_download,
+        # No PipelineRun: fetches a project-agnostic, shared reference
+        # dataset from the network, not something derived from an object in
+        # a project -- the download_lineage shape exactly.
+        run_kind=None,
+        # No object inputs: `db_key` is a string chosen in a dialog.
+        inputs=(),
+        # No DataObject either -- the dataset lands under
+        # settings.kraken_dbs_dir, outside the object model, and is consumed
+        # by launch_classify_reads checking db_present().
+        outputs=(),
+    ),
     "completeness": NodeTypeSpec(
         label="Completeness (compleasm)",
         launch_name="pipeline_service.launch_completeness",
@@ -1158,6 +1179,10 @@ EXCLUDED_LAUNCHES: frozenset[str] = frozenset(
         # Read-only genome annotation — gene density facts on an existing
         # assembly, same class as gc_tracks and meryl.
         "pipeline_service.launch_annotate_genome",
+        # Read-only classification -- taxonomy facts on an existing reads
+        # object, same class as gc_tracks and annotate_genome.  The db
+        # download it may chain is the download_kraken_db node type.
+        "pipeline_service.launch_classify_reads",
         # On-demand Results computation over an existing GFF/GTF/BED/GenBank
         # annotation -- feature summary + searchable table as facts and a
         # SQLite sidecar, no output object. Triggered automatically at

@@ -23,6 +23,7 @@ export * from "./qc";
 export * from "./run";
 export * from "./share";
 export * from "./system";
+export * from "./taxonomy";
 export * from "./variant";
 export * from "./workflow";
 
