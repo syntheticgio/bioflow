@@ -2551,7 +2551,7 @@ async def _apply_consensus_from_alignment(result: dict, *, owner: str) -> None:
 
 
 async def _apply_polish_assembly(result: dict, *, owner: str) -> None:
-    """Turn a finished Polypolish run into a new assembly object.
+    """Turn a finished polish run -- Polypolish or Medaka -- into a new assembly object.
 
     The polished assembly sits *beside* the draft rather than replacing it.
     That is deliberate: the comparison between draft and polished is the
