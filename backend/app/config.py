@@ -467,6 +467,16 @@ class Settings(BaseSettings):
         return self.bioinfo_home / "lineages"
 
     @property
+    def kraken_dbs_dir(self) -> Path:
+        """Kraken2 classification databases, shared across every project.
+
+        Reference data fetched by `download_kraken_db`, the same class of
+        thing as `lineages_dir`: a classification job must not depend on
+        the network, so what it reads here must already exist.
+        """
+        return self.bioinfo_home / "kraken_dbs"
+
+    @property
     def meta_dir(self) -> Path:
         return self.bioinfo_home / ".biopipe"
 
