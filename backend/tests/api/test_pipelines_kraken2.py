@@ -17,14 +17,27 @@ pytestmark = [
 ]
 
 
-async def test_kraken_dbs_lists_registry_with_presence(client):
+async def test_kraken_dbs_lists_registry_with_presence(client, tmp_path, monkeypatch):
+    """`kraken_dbs_dir` is `BIOINFO_HOME`-relative shared storage, not test-
+    scoped -- it's the same directory the main and every worktree preview
+    stack write real, multi-GB downloads into (deliberately shared, see
+    CLAUDE.md). A real download landing there between test runs makes
+    `present` genuinely True, which is not what this test means to assert;
+    it means to assert the registry's *shape*. Point `bioinfo_home` at an
+    empty tmp_path, the same isolation `test_kraken_db_registry.py`'s own
+    `db_present` test uses, so this test's meaning doesn't depend on
+    whether anyone has downloaded a database on this machine."""
+    from app.config import settings
+
+    monkeypatch.setattr(settings, "bioinfo_home", tmp_path / "home")
+
     resp = await client.get("/api/v1/pipelines/kraken-dbs")
     assert resp.status_code == 200
     rows = resp.json()
     assert {r["key"] for r in rows} == {"standard-8", "pluspf-8", "viral"}
     for r in rows:
         assert set(r) >= {"key", "label", "description", "download_bytes", "present"}
-        assert r["present"] is False  # nothing downloaded in the test env
+        assert r["present"] is False  # isolated tmp_path, never downloaded into
 
 
 async def test_classify_reads_rejects_unknown_db(client, two_profiles):
