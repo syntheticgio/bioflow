@@ -71,3 +71,60 @@ def build_bracken_command(
         "-r", str(read_len),
         "-l", "S",
     ]
+
+
+def parse_kraken_report(text: str) -> list[dict]:
+    """Rows of Kraken2's six-column report.
+
+    Columns: percentage of reads in the clade, clade read count, reads
+    assigned directly to this taxon, rank code, NCBI taxid, and the name
+    indented two spaces per tree level (stripped here -- the report is a
+    flat fact source, not a tree render).
+
+    Returns ``[]`` for anything unparseable rather than raising, the
+    posture ``quast_runner.parse_report_tsv`` documents: a report that
+    cannot be read must not fail a run that already produced real output.
+    """
+    rows: list[dict] = []
+    for line in text.splitlines():
+        fields = line.split("\t")
+        if len(fields) != 6:
+            continue
+        try:
+            rows.append(
+                {
+                    "pct": float(fields[0]),
+                    "clade_reads": int(fields[1]),
+                    "direct_reads": int(fields[2]),
+                    "rank": fields[3].strip(),
+                    "taxid": int(fields[4]),
+                    "name": fields[5].strip(),
+                }
+            )
+        except ValueError:
+            continue
+    return rows
+
+
+def parse_bracken_output(text: str) -> list[dict]:
+    """Rows of Bracken's species table: name, taxid, abundance fraction.
+
+    Same empty-on-garbage posture as ``parse_kraken_report``.
+    """
+    rows: list[dict] = []
+    lines = text.splitlines()
+    for line in lines[1:]:  # skip header
+        fields = line.split("\t")
+        if len(fields) != 7:
+            continue
+        try:
+            rows.append(
+                {
+                    "name": fields[0].strip(),
+                    "taxid": int(fields[1]),
+                    "fraction": float(fields[6]),
+                }
+            )
+        except ValueError:
+            continue
+    return rows
