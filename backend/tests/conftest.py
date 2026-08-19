@@ -6,14 +6,20 @@ never touches real data.
 """
 
 import importlib
+import os
 
 import pytest
 import pytest_asyncio
 from beanie import init_beanie
+from hypothesis import settings as hypothesis_settings
 from pymongo import AsyncMongoClient
 
 from app.config import settings
 from app.models import ALL_MODELS
+
+hypothesis_settings.register_profile("dev", max_examples=10)
+hypothesis_settings.register_profile("ci", max_examples=100)
+hypothesis_settings.load_profile(os.getenv("HYPOTHESIS_PROFILE", "dev"))
 
 
 @pytest_asyncio.fixture(scope="module", loop_scope="module")
@@ -50,8 +56,6 @@ async def beanie_models():
     but failed once the full suite's collection order changed which module
     imported first).
     """
-    from app.db.index_reconcile import reconcile_indexes
-
     mongo_url = settings.mongo_url
     if "://mongo:" in mongo_url:
         mongo_url = mongo_url.replace("://mongo:", "://127.0.0.1:")
@@ -66,13 +70,9 @@ async def beanie_models():
     client = AsyncMongoClient(mongo_url, tz_aware=True)
     db = client["biopipe_test"]
 
-    for model in ALL_MODELS:
-        model_settings = model.Settings
-        coll_name = getattr(model_settings, "name", model.__name__.lower())
-        await db[coll_name].drop()
-        indexes = getattr(model_settings, "indexes", [])
-        if indexes:
-            await reconcile_indexes(db[coll_name], indexes)
+    for coll_name in await db.list_collection_names():
+        if not coll_name.startswith("system."):
+            await db[coll_name].delete_many({})
 
     await init_beanie(database=db, document_models=ALL_MODELS)
 

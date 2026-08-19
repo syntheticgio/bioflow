@@ -625,7 +625,10 @@ class TestPipelineLaunchesAreScoped:
         404 and reach no queue, and A must reach the queue with A's own owner
         string -- not `"local"`, and not the reference's or the mate's.
         """
+        from app.pipelines import tools
         from app.queue import queue
+
+        monkeypatch.setattr(tools, "require", lambda tool: tool)
 
         # Returns a real Job rather than a bare AsyncMock: the launch routes
         # serialize whatever comes back through `JobOut.of`, which needs actual

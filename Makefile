@@ -1,4 +1,4 @@
-.PHONY: up down logs ps build containers test test-queue lint shell mongo redis clean check-home release release-launcher backup restore backup-verify
+.PHONY: up down logs ps build containers test test-fast test-queue lint shell mongo redis clean check-home release release-launcher backup restore backup-verify
 
 COMPOSE := docker compose
 
@@ -33,6 +33,9 @@ build:
 
 test: ## Run the backend test suite
 	$(COMPOSE) exec -T api pytest -v
+
+test-fast: ## Run fast unit tests (skipping slow tests)
+	$(COMPOSE) exec -T api pytest -m "not slow" --tb=short
 
 test-queue: ## Run only the queue tests
 	$(COMPOSE) exec -T api pytest tests/queue -v

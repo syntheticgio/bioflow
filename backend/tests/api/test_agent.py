@@ -197,6 +197,7 @@ class TestAsk:
         assert response.status_code == 503
         assert response.json()["code"] == "agent_unavailable"
 
+@pytest.mark.slow
 class TestEvents:
     async def test_reports_status_then_forwards_translations(
         self, two_profiles, spawn, live_server
