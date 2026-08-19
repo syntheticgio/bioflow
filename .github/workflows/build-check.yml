@@ -260,7 +260,14 @@ jobs:
 
       - name: Install build dependencies
         run: |
-          sudo apt-get update
+          # Same mirror-stall exposure as backend-smoke's apt steps; see the
+          # note on its "Install system build dependencies" step (#577). This
+          # job pulls a much larger package set below, so it spends longer in
+          # apt and has correspondingly more chances to hit a bad mirror.
+          sudo apt-get -o Acquire::Retries=3 \
+                       -o Acquire::http::Timeout=15 \
+                       -o Acquire::https::Timeout=15 \
+                       update
           sudo apt-get install -y build-essential zlib1g-dev libhts-dev curl
 
       - name: Install pipeline tools
@@ -276,7 +283,10 @@ jobs:
           # The NCBI datasets CLI is not packaged; fetch the static binary the
           # same way backend/Dockerfile does. Route tests hit its probe before
           # their own assertions (a missing tool 500s where they expect 404).
-          sudo curl -fsSL \
+          # --retry/--max-time for the same reason apt gets Retries/Timeout
+          # above: -f catches an HTTP error but nothing bounds a transfer that
+          # opens and then stalls, and this one is a third-party host.
+          sudo curl -fsSL --retry 3 --retry-connrefused --max-time 120 \
             "https://ftp.ncbi.nlm.nih.gov/pub/datasets/command-line/v2/linux-amd64/datasets" \
             -o /usr/local/bin/datasets
           sudo chmod +x /usr/local/bin/datasets
@@ -293,7 +303,8 @@ jobs:
           # dispatcher that looks for its SIMD variants next to argv[0], so a
           # symlink in /usr/local/bin sends it hunting for variants that are
           # not there.
-          curl -fsSL https://github.com/bwa-mem2/bwa-mem2/releases/download/v2.2.1/bwa-mem2-2.2.1_x64-linux.tar.bz2 \
+          curl -fsSL --retry 3 --retry-connrefused --max-time 180 \
+            https://github.com/bwa-mem2/bwa-mem2/releases/download/v2.2.1/bwa-mem2-2.2.1_x64-linux.tar.bz2 \
             | sudo tar -xj -C /opt
           printf '#!/bin/sh\nexec "/opt/bwa-mem2-2.2.1_x64-linux/bwa-mem2" "$@"\n' \
             | sudo tee /usr/local/bin/bwa-mem2 >/dev/null
