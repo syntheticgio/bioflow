@@ -38,6 +38,7 @@ from app.errors import PermanentError
 from app.logging import get_logger
 from app.models import IoClass, JobClass, JobResources
 from app.pipelines.kraken_db_registry import KRAKEN_DBS
+from app.queue.executor import run_subprocess
 from app.queue.registry import HandlerMode, JobContext, handler
 
 log = get_logger(__name__)
@@ -152,3 +153,180 @@ def download_kraken_db(ctx: JobContext) -> dict:
     ctx.progress(phase="done", pct=1.0, message=f"{spec.label} ready")
     log.info("kraken_db_download_finished", job_id=ctx.job_id, db_key=key)
     return {"db_key": key, "path": str(settings.kraken_dbs_dir / key)}
+
+
+# ── Read classification (Kraken2 + Bracken) ──────────────────────────
+
+_CLASSIFY_LEASE_SECONDS = 2 * 3600
+
+
+def build_classification_facts(
+    *,
+    kraken_rows: list[dict],
+    bracken_rows: list[dict],
+    metadata_organism: str | None,
+    db_key: str,
+    bracken_note: str | None,
+) -> dict:
+    """The facts payload for one classification run (spec K2-H2).
+
+    `taxonomy` always; `taxonomy_mismatch` only when the check fires --
+    its absence is itself the "metadata agrees or is absent" claim.
+    """
+    from app.pipelines import kraken_runner
+
+    taxonomy = kraken_runner.top_taxa(kraken_rows, bracken_rows)
+    taxonomy["db_key"] = db_key
+    if bracken_note:
+        taxonomy["bracken_skipped"] = bracken_note
+
+    facts: dict = {"taxonomy": taxonomy}
+    mismatch = kraken_runner.organism_mismatch(metadata_organism, kraken_rows)
+    if mismatch is not None:
+        facts["taxonomy_mismatch"] = mismatch
+    return facts
+
+
+@handler(
+    "classify_reads",
+    mode=HandlerMode.SUBPROCESS,
+    job_class=JobClass.COMPUTE,
+    # mem_mb here is the floor; launch_classify_reads overrides per
+    # database from the registry (spec K2-C3).
+    resources=JobResources(cpu=4, mem_mb=9216, io=IoClass.HEAVY),
+    max_attempts=1,
+)
+def classify_reads(ctx: JobContext) -> dict:
+    """Classify one read set against a Kraken2 database, refine with Bracken.
+
+    Kraken2 failure fails the run; Bracken failure or an unusable
+    distribution is recorded in the facts and the run succeeds with
+    Kraken2-only results (spec K2-H1).  Reports are copied to
+    `qc_reports/<object_id>/kraken2/` -- the same shelf the QUAST and fastp
+    reports use -- non-fatally.
+    """
+    from app.pipelines import kraken_runner, tools
+    from app.pipelines.kraken_db_registry import KRAKEN_DBS, db_present
+    from app.queue.pipeline_handlers import _failure, _prepare_workdir, _resolve_input
+
+    kraken_tool = tools.require(tools.kraken2())
+
+    db_key = (ctx.payload.get("db_key") or "").strip()
+    if db_key not in KRAKEN_DBS or not db_present(db_key):
+        raise PermanentError(
+            f"kraken database {db_key!r} is not on disk -- the download "
+            "dependency should have run first"
+        )
+    db_dir = settings.kraken_dbs_dir / db_key
+
+    work = _prepare_workdir(ctx, "classify")
+    log_path = settings.logs_dir / f"{ctx.job_id}.log"
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+
+    reads = _resolve_input(ctx.payload, "reads")
+    mate = None
+    if ctx.payload.get("mate_sha256") or ctx.payload.get("mate_path"):
+        mate = _resolve_input(ctx.payload, "mate")
+
+    report = work / "kraken2_report.txt"
+    bracken_out = work / "bracken_species.tsv"
+
+    ctx.progress(phase="classifying", pct=None, message="running Kraken2")
+    ctx.extend_lease(_CLASSIFY_LEASE_SECONDS)
+
+    cmd = kraken_runner.build_kraken2_command(
+        kraken2_path=kraken_tool.path,
+        db_dir=db_dir,
+        reads=reads,
+        mate=mate,
+        report=report,
+        output=Path("/dev/null"),
+        threads=max(1, int(ctx.payload.get("threads") or 4)),
+        gzipped=reads.suffix == ".gz",
+    )
+    code = run_subprocess(ctx, cmd, log_path=str(log_path))
+    if code != 0:
+        raise _failure(code, log_path, "kraken2")
+
+    kraken_rows = kraken_runner.parse_kraken_report(
+        report.read_text() if report.exists() else ""
+    )
+
+    # -- Bracken: non-fatal refinement --------------------------------
+    bracken_rows: list[dict] = []
+    bracken_note: str | None = None
+    bracken_tool = tools.bracken()
+    if not bracken_tool.available:
+        bracken_note = "bracken is not installed"
+    else:
+        ctx.progress(phase="abundance", pct=None, message="running Bracken")
+        read_len = _nearest_bracken_read_len(ctx.payload.get("mean_read_length"))
+        bcmd = kraken_runner.build_bracken_command(
+            bracken_path=bracken_tool.path,
+            db_dir=db_dir,
+            report=report,
+            output=bracken_out,
+            read_len=read_len,
+        )
+        bcode = run_subprocess(ctx, bcmd, log_path=str(log_path))
+        if bcode != 0:
+            bracken_note = f"bracken exited {bcode}"
+            log.warning("bracken_failed", job_id=ctx.job_id, code=bcode)
+        else:
+            bracken_rows = kraken_runner.parse_bracken_output(
+                bracken_out.read_text() if bracken_out.exists() else ""
+            )
+
+    facts = build_classification_facts(
+        kraken_rows=kraken_rows,
+        bracken_rows=bracken_rows,
+        metadata_organism=ctx.payload.get("organism"),
+        db_key=db_key,
+        bracken_note=bracken_note,
+    )
+
+    _copy_kraken_reports(ctx, report, bracken_out)
+
+    ctx.progress(phase="done", pct=1.0, message="classification complete")
+    log.info(
+        "classification_finished",
+        job_id=ctx.job_id,
+        taxa=len(facts["taxonomy"]["taxa"]),
+        mismatch="taxonomy_mismatch" in facts,
+    )
+    return {
+        "object_id": ctx.payload.get("object_id"),
+        "job_id": ctx.job_id,
+        "facts": facts,
+    }
+
+
+def _nearest_bracken_read_len(mean: object) -> int:
+    """Bracken only accepts lengths its distributions were built for:
+    50..300 in steps of 50 on the pre-built databases.  Default 100
+    (spec K2-R3)."""
+    try:
+        value = float(mean)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return 100
+    return min((50, 100, 150, 200, 250, 300), key=lambda s: abs(s - value))
+
+
+def _copy_kraken_reports(ctx: JobContext, report: Path, bracken_out: Path) -> None:
+    """Copy the raw reports where the QC-report endpoint serves them.
+
+    Non-fatal, the `_copy_report` posture in assembly_qc_handlers: a run
+    that produced real facts must not fail over an artifact copy.
+    """
+    object_id = ctx.payload.get("object_id")
+    if not object_id:
+        return
+    dest = settings.qc_reports_dir / str(object_id) / "kraken2"
+    try:
+        dest.mkdir(parents=True, exist_ok=True)
+        if report.exists():
+            shutil.copyfile(report, dest / "kraken2_report.txt")
+        if bracken_out.exists():
+            shutil.copyfile(bracken_out, dest / "bracken_species.tsv")
+    except OSError:
+        log.warning("kraken_report_copy_failed", job_id=ctx.job_id)

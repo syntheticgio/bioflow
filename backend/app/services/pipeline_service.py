@@ -5426,6 +5426,127 @@ async def launch_completeness(
     return job
 
 
+async def launch_classify_reads(
+    *,
+    object_id: PydanticObjectId,
+    db_key: str,
+    owner: str,
+    mate_object_id: PydanticObjectId | None = None,
+    resource_override: bool = False,
+) -> Job:
+    """Queue Kraken2 classification for one FASTQ read set.
+
+    Facts-only, no PipelineRun -- the launch_annotate_genome shape.  When
+    the chosen database is not on disk, the download job is enqueued
+    (deduped) and this job chains behind it via depends_on, the same shape
+    launch_completeness uses for a missing lineage (spec K2-C2).  Memory is
+    declared from the registry's known load size, never the fitted model
+    (spec K2-C3).
+
+    A concurrent request for the same missing database can race this one:
+    `launch_kraken_db_download` calls `queue.enqueue`, which returns `None`
+    when Mongo's dedup guard finds a non-terminal job already using the same
+    `download_kraken_db:{db_key}` dedup key -- i.e. another caller already
+    launched (or is launching) the same download. There is no cheap
+    lookup-by-dedup-key helper in `queue.py` to fetch that existing job and
+    depend on it instead, so this job's `depends_on` is simply left without
+    the download entry in that case: the classify job races the download
+    rather than waiting for it. `classify_reads` itself still fails cleanly
+    if it loses that race (`db_present` check at the top of the handler), so
+    the failure mode is "retry the job", not a crash.
+    """
+    from app.pipelines.kraken_db_registry import KRAKEN_DBS, db_present
+    from app.queue import queue
+    from app.services import object_service
+
+    spec = KRAKEN_DBS.get(db_key)
+    if spec is None:
+        raise ValidationError(
+            f"Unknown Kraken2 database {db_key!r}", details={"db_key": db_key}
+        )
+
+    refuse_if_over_budget(
+        declared_mb=spec.mem_mb,
+        budget_mb=await current_admission_budget_mb(),
+        resource_override=resource_override,
+    )
+
+    tools.require(tools.kraken2())
+
+    obj = await object_service.get_object(object_id, owner=owner)
+    if obj.format.kind is not FormatKind.FASTQ:
+        raise ValidationError(
+            "Classification runs on FASTQ reads",
+            details={"object_id": str(obj.id), "format": obj.format.kind.value},
+        )
+
+    digest, path = await _resolve_readable(obj)
+    if not digest and not path:
+        raise ValidationError(
+            f"{obj.name!r} has no stored content yet (status={obj.status.value})",
+            details={"object_id": str(obj.id)},
+        )
+
+    payload: dict = {
+        "object_id": str(obj.id),
+        "db_key": db_key,
+        "organism": (obj.metadata or {}).get("organism"),
+        "mean_read_length": (obj.facts or {}).get("qc_mean_read_length"),
+        "threads": 4,
+    }
+    if digest:
+        payload["reads_sha256"] = digest
+    if path:
+        payload["reads_path"] = str(path)
+
+    if mate_object_id is not None:
+        mate = await object_service.get_object(mate_object_id, owner=owner)
+        m_digest, m_path = await _resolve_readable(mate)
+        if m_digest:
+            payload["mate_sha256"] = m_digest
+        if m_path:
+            payload["mate_path"] = str(m_path)
+
+    depends_on: list[PydanticObjectId] = []
+    if not db_present(db_key):
+        download = await launch_kraken_db_download(db_key=db_key, owner=owner)
+        # download is None when a concurrent request already deduped onto an
+        # existing download job -- see the docstring above. Nothing to
+        # depend on in that case; the classify job races the download.
+        if download is not None:
+            depends_on.append(download.id)
+
+    job = await queue.enqueue(
+        "classify_reads",
+        owner=owner,
+        payload=payload,
+        job_class=JobClass.COMPUTE,
+        resources=JobResources(cpu=4, mem_mb=spec.mem_mb, io=IoClass.HEAVY),
+        max_attempts=1,
+        dedup_key=f"classify_reads:{obj.id}:{db_key}",
+        project_id=obj.project_id,
+        object_id=obj.id,
+        resource_override=resource_override,
+        depends_on=depends_on,
+    )
+    if job is None:
+        raise ConflictError(
+            "Classification is already queued or running for this read set "
+            "and database",
+            details={"object_id": str(obj.id), "db_key": db_key},
+        )
+
+    log.info(
+        "classify_reads_launched",
+        job_id=str(job.id),
+        object_id=str(obj.id),
+        db_key=db_key,
+        chained_download=bool(depends_on),
+    )
+    return job
+    return job
+
+
 async def launch_gc_tracks(
     *,
     object_id: PydanticObjectId,

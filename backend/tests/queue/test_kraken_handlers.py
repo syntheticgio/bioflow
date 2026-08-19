@@ -48,3 +48,52 @@ def test_extract_failure_leaves_no_final_dir(tmp_path):
     with pytest.raises(Exception):  # noqa: B017 -- any failure mode is fine here
         kraken_handlers.extract_and_promote(bad, final)
     assert not final.exists()
+
+
+def test_build_classification_facts_with_mismatch():
+    kraken_rows = [
+        {"pct": 5.0, "clade_reads": 500, "direct_reads": 500,
+         "rank": "U", "taxid": 0, "name": "unclassified"},
+        {"pct": 94.0, "clade_reads": 9400, "direct_reads": 9000,
+         "rank": "S", "taxid": 1280, "name": "Staphylococcus aureus"},
+    ]
+    facts = kraken_handlers.build_classification_facts(
+        kraken_rows=kraken_rows,
+        bracken_rows=[],
+        metadata_organism="Escherichia coli",
+        db_key="standard-8",
+        bracken_note=None,
+    )
+    tax = facts["taxonomy"]
+    assert tax["db_key"] == "standard-8"
+    assert tax["bracken_used"] is False
+    assert tax["taxa"][0]["name"] == "Staphylococcus aureus"
+    assert facts["taxonomy_mismatch"]["claimed"] == "Escherichia coli"
+
+
+def test_build_classification_facts_records_bracken_skip():
+    kraken_rows = [
+        {"pct": 1.0, "clade_reads": 100, "direct_reads": 100,
+         "rank": "S", "taxid": 562, "name": "Escherichia coli"},
+    ]
+    facts = kraken_handlers.build_classification_facts(
+        kraken_rows=kraken_rows,
+        bracken_rows=[],
+        metadata_organism=None,
+        db_key="viral",
+        bracken_note="bracken exited 1",
+    )
+    assert facts["taxonomy"]["bracken_skipped"] == "bracken exited 1"
+    assert "taxonomy_mismatch" not in facts
+
+
+@pytest.mark.parametrize(
+    "mean, expected",
+    [
+        (None, 100),
+        (140, 150),
+        (500, 300),
+    ],
+)
+def test_nearest_bracken_read_len(mean, expected):
+    assert kraken_handlers._nearest_bracken_read_len(mean) == expected

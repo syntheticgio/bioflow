@@ -1137,6 +1137,10 @@ EXCLUDED_LAUNCHES: frozenset[str] = frozenset(
         # Read-only genome annotation — gene density facts on an existing
         # assembly, same class as gc_tracks and meryl.
         "pipeline_service.launch_annotate_genome",
+        # Read-only classification -- taxonomy facts on an existing reads
+        # object, same class as gc_tracks and annotate_genome.  The db
+        # download it may chain is the download_kraken_db node type.
+        "pipeline_service.launch_classify_reads",
         # On-demand Results computation over an existing GFF/GTF/BED/GenBank
         # annotation -- feature summary + searchable table as facts and a
         # SQLite sidecar, no output object. Triggered automatically at
