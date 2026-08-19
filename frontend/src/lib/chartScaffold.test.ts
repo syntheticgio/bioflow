@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { plotGeometry, pointerFraction } from "./chartScaffold";
+import { lineThroughGaps, plotGeometry, pointerFraction } from "./chartScaffold";
 
 describe("plotGeometry", () => {
   it("keeps the QualityChart layout", () => {
@@ -21,5 +21,41 @@ describe("pointerFraction", () => {
   it("preserves exact hit-rectangle endpoints", () => {
     expect(pointerFraction(40, 40, 200)).toBe(0);
     expect(pointerFraction(240, 40, 200)).toBe(1);
+  });
+});
+
+describe("lineThroughGaps", () => {
+  it("draws one continuous subpath when nothing is missing", () => {
+    expect(
+      lineThroughGaps([
+        { x: 0, y: 10 },
+        { x: 1, y: 20 },
+        { x: 2, y: 30 },
+      ]),
+    ).toBe("M 0 10 L 1 20 L 2 30");
+  });
+
+  it("ends the line at a trailing gap rather than dropping it to zero", () => {
+    expect(
+      lineThroughGaps([
+        { x: 0, y: 10 },
+        { x: 1, y: 20 },
+        { x: 2, y: null },
+      ]),
+    ).toBe("M 0 10 L 1 20");
+  });
+
+  it("starts a new subpath after an interior gap instead of bridging it", () => {
+    expect(
+      lineThroughGaps([
+        { x: 0, y: 10 },
+        { x: 1, y: null },
+        { x: 2, y: 30 },
+      ]),
+    ).toBe("M 0 10 M 2 30");
+  });
+
+  it("is empty when every point is missing", () => {
+    expect(lineThroughGaps([{ x: 0, y: null }])).toBe("");
   });
 });
