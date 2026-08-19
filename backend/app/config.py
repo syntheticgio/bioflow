@@ -178,6 +178,20 @@ class Settings(BaseSettings):
     # from upstream's musl-static release binary, and absent on arm64 by
     # design -- see backend/scripts/install-polypolish.sh.
     polypolish_path: str = "polypolish"
+    # Two settings rather than one derived from the other. `medaka_path` is
+    # the wrapper script jobs exec; `medaka_binary_path` is the sibling
+    # binary the probe versions, because the wrapper has no --version of its
+    # own and would fall through to its usage block. Deriving one from the
+    # other by string surgery was the first draft and is exactly the kind of
+    # thing that breaks silently when a path changes.
+    #
+    # Absolute rather than bare names: medaka lives in its own conda prefix
+    # so its pinned torch and its vendored minimap2/samtools stay out of the
+    # image's own PATH resolution. The ENV in the Dockerfile puts the prefix
+    # on PATH; these stay absolute so a probe does not depend on that
+    # ordering.
+    medaka_path: str = "/opt/medaka/env/bin/medaka_consensus"
+    medaka_binary_path: str = "/opt/medaka/env/bin/medaka"
     # Reference-guided scaffolding. Not in Debian; installed from PyPI (pure
     # Python, pinned in backend/Dockerfile). The binary is `ragtag.py`, not
     # `ragtag` -- see tools.ragtag()'s own comment.
@@ -215,6 +229,8 @@ class Settings(BaseSettings):
     # gotchas (the top-level Makefile's `-e` discarding the aarch64
     # `-fsigned-char` flag, and the bundled ext/meryl that must not be built).
     winnowmap_path: str = "winnowmap"
+    bedtools_path: str = "bedtools"
+    seqkit_path: str = "seqkit"
     # Model directories, one per Clair3 --platform. The install script
     # normalizes each to hold the checkpoint files directly.
     clair3_models_dir: str = "/opt/clair3/models"
@@ -382,6 +398,18 @@ class Settings(BaseSettings):
         cost a blob record per run.
         """
         return self.bioinfo_home / "bam_stats"
+
+    @property
+    def feature_coverage_dir(self) -> Path:
+        """Generated per-feature coverage reports (the bedtools coverage
+        JSON), keyed by BAM object id.
+
+        Outside objects/ deliberately, same rationale as bam_stats_dir: this
+        is derivative and regenerable from the BAM and annotation, so content-
+        addressing it would buy deduplication of something never shared and
+        cost a blob record per run.
+        """
+        return self.bioinfo_home / "feature_coverage"
 
     @property
     def vcf_stats_dir(self) -> Path:

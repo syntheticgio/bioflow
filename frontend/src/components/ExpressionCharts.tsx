@@ -352,3 +352,198 @@ export function SamplePcaPlot({ points }: { points: PcaPoint[] }) {
     </svg>
   );
 }
+
+export type SampleCorrelation = {
+  method: string;
+  samples: string[];
+  conditions: string[];
+  matrix: number[][];
+};
+
+/**
+ * Sample-to-sample correlation, shaded, with samples grouped by condition.
+ *
+ * The companion to the projection, answering what it cannot. PCA shows
+ * relative position, so two replicates can sit adjacent on PC1/PC2 while
+ * correlating poorly — the first two components may carry only a modest share
+ * of the variance. A batch effect orthogonal to both is invisible in the
+ * scatter and obvious as a block here. And where PCA says a sample is an
+ * outlier, this says what it is and is not similar to.
+ *
+ * Samples are reordered by condition rather than left in matrix order, so
+ * replicate blocks land on the diagonal. Without that the blocks are still
+ * present but scattered across the grid, which is the whole thing the plot
+ * exists to show.
+ */
+export function SampleCorrelationHeatmap({ data }: { data: SampleCorrelation }) {
+  const { samples, conditions, matrix, method } = data;
+  const n = samples?.length ?? 0;
+  if (!n || matrix?.length !== n) return null;
+
+  // Grouped by condition, stable within a group so a sample's position is
+  // reproducible across runs rather than dependent on sort implementation.
+  const conditionOrder = [...new Set(conditions)].sort();
+  const order = samples
+    .map((_, i) => i)
+    .sort(
+      (a, b) =>
+        conditionOrder.indexOf(conditions[a]) -
+          conditionOrder.indexOf(conditions[b]) || a - b
+    );
+
+  const cell = Math.max(14, Math.min(34, Math.round(340 / n)));
+  // Label gutters sized to the longest sample name so nothing is clipped --
+  // this plot is worthless if the user cannot tell which cell is which pair.
+  const longest = Math.max(...samples.map((s) => s.length));
+  const labelW = Math.min(140, Math.max(48, longest * 5.4 + 8));
+  const pad = { top: 8, right: 92, bottom: labelW, left: labelW };
+  const grid = cell * n;
+  const w = pad.left + grid + pad.right;
+  const h = pad.top + grid + pad.bottom;
+
+  // Scale spans the off-diagonal range rather than a fixed [-1, 1]. Real
+  // samples in one experiment correlate somewhere in the 0.9s, and a fixed
+  // scale renders that as one flat block of colour with every difference the
+  // plot exists to show compressed out of it.
+  const off = order.flatMap((i) =>
+    order.filter((j) => j !== i).map((j) => matrix[i][j])
+  );
+  const lo = Math.min(...off);
+  const hi = Math.max(...off);
+  const span = hi - lo || 1e-6;
+
+  // Diverging through a neutral midpoint: blue at the weak end, red at the
+  // strong end, so a poorly agreeing pair reads as different in kind rather
+  // than merely paler.
+  const colorOf = (v: number) => {
+    const t = Math.min(1, Math.max(0, (v - lo) / span));
+    const mix = (a: number[], b: number[], f: number) =>
+      `rgb(${a.map((c, k) => Math.round(c + (b[k] - c) * f)).join(",")})`;
+    const cold = [36, 113, 163];
+    const mid = [242, 242, 240];
+    const warm = [192, 57, 43];
+    return t < 0.5 ? mix(cold, mid, t * 2) : mix(mid, warm, (t - 0.5) * 2);
+  };
+
+  const legendX = pad.left + grid + 20;
+  const legendH = Math.min(grid, 160);
+
+  return (
+    <svg
+      width="100%"
+      viewBox={`0 0 ${w} ${h}`}
+      style={{ maxWidth: w, display: "block" }}
+      role="img"
+      aria-label={`${method} correlation heatmap of ${n} samples, grouped by condition`}
+    >
+      <defs>
+        <linearGradient id="corrScale" x1="0" y1="1" x2="0" y2="0">
+          {[0, 0.25, 0.5, 0.75, 1].map((t) => (
+            <stop key={t} offset={`${t * 100}%`} stopColor={colorOf(lo + t * span)} />
+          ))}
+        </linearGradient>
+      </defs>
+
+      {order.map((ri, r) =>
+        order.map((ci, c) => (
+          <rect
+            key={`${ri}-${ci}`}
+            x={pad.left + c * cell}
+            y={pad.top + r * cell}
+            width={cell}
+            height={cell}
+            fill={ri === ci ? "var(--text-faint, #b6bcc4)" : colorOf(matrix[ri][ci])}
+            opacity={ri === ci ? 0.35 : 1}
+          >
+            <title>
+              {`${samples[ri]} vs ${samples[ci]} — ${method} ${matrix[ri][ci].toFixed(3)}`}
+            </title>
+          </rect>
+        ))
+      )}
+
+      {/* Row labels left, column labels rotated below, both in matrix order
+          so the two axes always name the same sample at the same index. */}
+      {order.map((si, k) => (
+        <text
+          key={`r${si}`}
+          x={pad.left - 6}
+          y={pad.top + k * cell + cell / 2 + 3}
+          fontSize="9"
+          fill="var(--text-faint)"
+          textAnchor="end"
+        >
+          {samples[si]}
+        </text>
+      ))}
+      {order.map((si, k) => {
+        const cx = pad.left + k * cell + cell / 2;
+        const cy = pad.top + grid + 6;
+        return (
+          <text
+            key={`c${si}`}
+            x={cx}
+            y={cy}
+            fontSize="9"
+            fill="var(--text-faint)"
+            textAnchor="end"
+            transform={`rotate(-90 ${cx} ${cy})`}
+          >
+            {samples[si]}
+          </text>
+        );
+      })}
+
+      {/* Condition rules on the diagonal blocks, so where one group ends and
+          the next begins is visible without reading the labels. */}
+      {order.map((si, k) =>
+        k > 0 && conditions[si] !== conditions[order[k - 1]] ? (
+          <g key={`sep${si}`} stroke="var(--text)" strokeWidth={1} opacity={0.5}>
+            <line
+              x1={pad.left}
+              x2={pad.left + grid}
+              y1={pad.top + k * cell}
+              y2={pad.top + k * cell}
+            />
+            <line
+              x1={pad.left + k * cell}
+              x2={pad.left + k * cell}
+              y1={pad.top}
+              y2={pad.top + grid}
+            />
+          </g>
+        ) : null
+      )}
+
+      <rect
+        x={legendX}
+        y={pad.top}
+        width={12}
+        height={legendH}
+        fill="url(#corrScale)"
+      />
+      <text x={legendX + 18} y={pad.top + 8} fontSize="9" fill="var(--text-faint)">
+        {hi.toFixed(3)}
+      </text>
+      <text
+        x={legendX + 18}
+        y={pad.top + legendH}
+        fontSize="9"
+        fill="var(--text-faint)"
+      >
+        {lo.toFixed(3)}
+      </text>
+      {/* The method, on the figure rather than only in the caption: Pearson
+          and Spearman give different numbers, and a reader comparing against
+          another tool needs to know which these are. */}
+      <text
+        x={legendX}
+        y={pad.top + legendH + 22}
+        fontSize="9"
+        fill="var(--text-faint)"
+      >
+        {method === "spearman" ? "Spearman ρ" : method}
+      </text>
+    </svg>
+  );
+}

@@ -264,9 +264,55 @@ export interface BamStatsFacts {
   transcript_qc_annotation?: string;
   gene_body_coverage?: GeneBodyPoint[];
   feature_distribution?: FeatureDistribution;
+  /** Facts produced by run_feature_coverage. See FeatureCoverage.tsx. */
+  feature_coverage_status?: "ok";
+  feature_coverage_tool_version?: string;
+  feature_coverage_computed_at?: string;
+  feature_coverage_feature_count?: number;
+  feature_coverage_zero_features?: number;
+  feature_coverage_median_breadth?: number;
+  feature_coverage_annotation_id?: string;
+  /** Filename of the report on disk, e.g. "coverage.json" -- truthy iff the
+   * job has run. Not a path to fetch from directly; see
+   * api.featureCoverageReport, which hits the report endpoint by object id. */
+  feature_coverage_report?: string;
 }
 
 export interface ContigsPage {
   total: number;
   rows: ContigCoverage[];
+}
+
+/** One row of feature_coverage_runner.parse_coverage's `features` array. */
+export interface FeatureCoverageRow {
+  name: string;
+  type: string;
+  seq_id: string;
+  start: number;
+  end: number;
+  strand: string;
+  read_count: number;
+  bases_covered: number;
+  length: number;
+  /** Fraction of the feature's length covered by at least one read, 0.0-1.0. */
+  breadth: number;
+}
+
+/**
+ * `GET /pipelines/feature-coverage/{object_id}/report`'s full body --
+ * feature_coverage_runner.parse_coverage's return shape verbatim. No
+ * pagination: capped server-side at MAX_FEATURES_IN_REPORT (10,000) with
+ * `truncated` set when the cap was hit. `feature_count` (and
+ * `features_zero_coverage`/`median_breadth`) are computed over ALL features
+ * before the cap is applied, so `feature_count` can exceed `features.length`
+ * when `truncated` is true -- it is the true total, not the included count.
+ */
+export interface FeatureCoverageReport {
+  feature_count: number;
+  features_zero_coverage: number;
+  /** 0.0-1.0 fraction, median across all included features. */
+  median_breadth: number;
+  truncated: boolean;
+  /** Pre-sorted ascending by breadth (worst coverage first), then name. */
+  features: FeatureCoverageRow[];
 }

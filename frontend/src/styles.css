@@ -4150,6 +4150,29 @@ table.software-matrix thead th.software-matrix-corner {
   min-width: 0;
 }
 
+/* The before/after quality overlay sits inside .facts-columns, whose columns
+   are half a narrow detail panel wide -- well under the chart's own 460px.
+   Scaling a 460-wide viewBox into 125px does not produce a small chart, it
+   produces an unreadable one, so the chart keeps a readable floor and the
+   card scrolls it sideways instead. Matches how the workflow diagrams and
+   wide code blocks handle the same problem. */
+.trim-chart {
+  margin-top: 14px;
+  overflow-x: auto;
+}
+
+/* On the svg itself, not the wrapper: the chart is `width: 100%` of its
+   parent, so a min-width one level up leaves it free to collapse inside a
+   block that is merely allowed to be wider. */
+.trim-chart svg {
+  min-width: 320px;
+  /* The chart is `width: 100%` of a parent narrower than its floor, so the
+     browser has no width to derive a height from. Stating the viewBox's own
+     ratio gives it one. */
+  aspect-ratio: 460 / 210;
+  height: auto;
+}
+
 /* Conclusions under the trim comparison: what it cost, and where the result
    went. Sentences rather than more table rows. */
 .trim-outcome {
@@ -4593,6 +4616,64 @@ table.software-matrix thead th.software-matrix-corner {
 .chrom-overflow {
   margin-top: 10px;
   max-width: 100%;
+}
+
+/* Depth-by-chromosome strip (ContigDepthStrip): ChromosomeStrip's geometry
+   with a diverging shade for depth against the genome mean. Direction is the
+   class, magnitude is the rect's opacity -- so the two hues stay themeable
+   here rather than being computed in the component. */
+.depth-bar rect {
+  fill: var(--text-faint);
+}
+
+.depth-bar.is-low rect {
+  fill: var(--warn);
+}
+
+.depth-bar.is-high rect {
+  fill: var(--accent);
+}
+
+/* "Ordinary depth" and "no mean to compare against" must not look alike: the
+   first is a reading, the second is the absence of one. Neutral keeps the
+   solid body colour; unknown is outlined and hollow. */
+.depth-bar.is-neutral rect {
+  fill: var(--text-faint);
+}
+
+.depth-bar.is-unknown rect {
+  fill: none;
+  stroke: var(--text-faint);
+  stroke-width: 1;
+}
+
+.depth-legend {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  margin-top: 8px;
+  font-size: 10px;
+  color: var(--text-faint);
+  flex-wrap: wrap;
+}
+
+.depth-swatch {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+}
+
+.depth-swatch.is-low {
+  background: var(--warn);
+}
+
+.depth-swatch.is-neutral {
+  background: var(--text-faint);
+}
+
+.depth-swatch.is-high {
+  background: var(--accent);
 }
 
 /* The reason this is a modal at all: the viewer is unusable in a column. */

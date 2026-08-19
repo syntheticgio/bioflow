@@ -136,6 +136,7 @@ _STEP_VERBS: dict[str, str] = {
     "assemble_reads": "assembled with",
     "assemble_upload": "assembled with",
     "polish_assembly": "polished with",
+    "polish_long_assembly": "polished with",
     "scaffold_assembly": "scaffolded with",
     "quantify": "quantified with",
     "differential_expression": "tested for differential expression with",
@@ -165,6 +166,7 @@ _NO_NARRATIVE_STEP: frozenset[str] = frozenset(
         # Statistics written back onto an existing object rather than
         # producing one; the numbers already show in the file panel.
         "run_bam_stats",
+        "feature_coverage",
         "run_transcript_qc",
         "run_vcf_stats",
         "run_annotation_stats",

@@ -747,6 +747,54 @@ async def get_bam_stats_report(
     return {"total": total, "rows": rows}
 
 
+class FeatureCoverageRequest(BaseModel):
+    bam_id: PydanticObjectId
+    annotation_id: PydanticObjectId | None = None
+
+
+@router.post(
+    "/feature-coverage", response_model=JobOut, status_code=status.HTTP_201_CREATED
+)
+async def launch_feature_coverage(body: FeatureCoverageRequest, owner: OwnerDep) -> JobOut:
+    """Queue per-feature read coverage for a BAM against a project annotation.
+
+    Read-only, like bam_stats and vcf_stats: no derived object, just a report
+    plus summary facts merged onto the BAM. `annotation_id` is optional --
+    when omitted, `pipeline_service.launch_feature_coverage` resolves the
+    project's annotation itself, the same server-side resolution the
+    `quantify` endpoint does for its own annotation_id.
+    """
+    job = await pipeline_service.launch_feature_coverage(
+        bam_id=body.bam_id, owner=owner, annotation_id=body.annotation_id
+    )
+    return JobOut.of(job)
+
+
+@router.get("/feature-coverage/{object_id}/report")
+async def get_feature_coverage_report(object_id: PydanticObjectId, owner: OwnerDep) -> dict:
+    """Serve the per-feature coverage report for a BAM.
+
+    `OwnerDep`, not `LinkableOwnerDep`: this is fetched by the app's own code
+    with the profile header attached, never opened as a bare link.
+
+    The object read is discarded -- it is there to make the 404 happen.
+    Report directories are named by object id and nothing else, so without it
+    any caller holding an id could read any profile's report.
+    """
+    await object_service.get_object(object_id, owner=owner)
+
+    root = (settings.feature_coverage_dir / str(object_id)).resolve()
+    target = (root / "coverage.json").resolve()
+
+    # The filename is a module constant rather than user input, so traversal
+    # is not reachable through it -- but the resolve-and-recheck costs a stat
+    # and does not depend on that staying true.
+    if not target.is_relative_to(root) or not target.is_file():
+        raise NotFoundError(f"No feature coverage report for object {object_id}")
+
+    return json.loads(target.read_text())
+
+
 class VcfStatsRequest(BaseModel):
     object_id: PydanticObjectId
 
@@ -1606,6 +1654,38 @@ async def launch_polish_route(body: PolishRequest, owner: OwnerDep) -> JobOut:
         draft_object_id=body.draft_object_id,
         reads_object_id=body.reads_object_id,
         mate_object_id=body.mate_object_id,
+        owner=owner,
+        resource_override=body.resource_override,
+    )
+    return JobOut.of(job)
+
+
+class PolishLongRequest(BaseModel):
+    draft_object_id: PydanticObjectId
+    # Optional: omitted, the launch resolves the project's one long-read set
+    # and refuses when there is more than one. No mate slot -- ONT and PacBio
+    # data is unpaired.
+    reads_object_id: PydanticObjectId | None = None
+    # ONT's bacterial-methylation model. A research release by upstream's own
+    # labelling, so it is opt-in rather than inferred from the draft.
+    bacteria: bool = False
+    resource_override: bool = False
+
+
+@router.post(
+    "/polish-long", response_model=JobOut, status_code=status.HTTP_201_CREATED
+)
+async def launch_polish_long_route(
+    body: PolishLongRequest, owner: OwnerDep
+) -> JobOut:
+    """Queue a Medaka run: long reads correcting a draft assembly.
+
+    No alignment is supplied and none is configured. Medaka runs minimap2
+    itself with a preset chosen by the model it resolves."""
+    job = await pipeline_service.launch_polish_long(
+        draft_object_id=body.draft_object_id,
+        reads_object_id=body.reads_object_id,
+        bacteria=body.bacteria,
         owner=owner,
         resource_override=body.resource_override,
     )

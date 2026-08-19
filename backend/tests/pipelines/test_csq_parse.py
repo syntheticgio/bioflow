@@ -55,6 +55,15 @@ class TestSingleConsequence:
         assert c.transcript is None
         assert c.aa_pos is None
 
+    def test_parses_a_structural_variant_overlap_record(self):
+        c = csq_parse.parse_bcsq(
+            "structural_variant_overlap|GENE1,GENE2||protein_coding"
+        )
+        assert c is not None
+        assert c.consequence == "structural_variant_overlap"
+        assert c.gene == "GENE1,GENE2"
+        assert c.transcript is None
+
     # A "*" prefix marks a compound/haplotype-modified prediction.
     def test_strips_the_compound_marker(self):
         c = csq_parse.parse_bcsq(

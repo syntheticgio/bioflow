@@ -1412,6 +1412,7 @@ ANNOTATE_GENOME_MEM_MB = 16384
 # Sized for bwa-mem2's alignment step, not for Polypolish -- see the handler's
 # own note on why peak RSS scales with the draft rather than the reads.
 POLISH_MEM_MB = 16384
+POLISH_LONG_MEM_MB = 16384
 
 # Matches the handler's own @handler(...) registration -- see
 # assess_assembly_qv's docstring for the real-data measurement this figure
@@ -1444,6 +1445,11 @@ ASSEMBLY_ERROR_QC_MEM_MB = 8192
 QUANTIFY_MEM_MB = 4096
 
 DIFFERENTIAL_EXPRESSION_MEM_MB = 4096
+
+# Matches the handler's own @handler(...) registration (see
+# feature_coverage_handlers.run_feature_coverage): a job cannot need less
+# memory to run than it declares to the scheduler.
+FEATURE_COVERAGE_MEM_MB = 1024
 
 
 def refuse_if_over_budget(
@@ -4434,6 +4440,132 @@ async def launch_quantify(
     return job
 
 
+# feature_coverage_handlers.run_feature_coverage only understands these two
+# annotation shapes ("gff" or "bed" -- it raises PermanentError on anything
+# else). GTF maps to the same "gff" string as GFF3: bedtools coverage and
+# feature_coverage_runner's row parser only care about column POSITIONS
+# (seq_id/type/start/end/strand/attributes at 0/2/3/4/6/8), which GTF and
+# GFF3 share -- they differ only in how column 8's attribute string is
+# punctuated (`key "value";` vs `key=value;`), which _gff_name handles for
+# both. This is the opposite of featureCounts (counts_runner
+# .attributes_for_format), which genuinely needs GTF's `-g gene_id`
+# convention and cannot read GFF3's attribute names -- that asymmetry is why
+# annotations_for_project sorts GTF first for quantify while feature_coverage
+# is equally happy with either. BED is kept in the map for a format
+# feature_coverage's own row parser already understands, even though
+# _is_annotation (below) never actually resolves a BED here today -- see
+# launch_feature_coverage for why that entry is harmless rather than reachable
+# dead code.
+_FEATURE_COVERAGE_ANNOTATION_FORMATS = {
+    FormatKind.GFF: "gff",
+    FormatKind.GTF: "gff",
+    FormatKind.BED: "bed",
+}
+
+
+async def launch_feature_coverage(
+    *,
+    bam_id: PydanticObjectId,
+    owner: str,
+    annotation_id: PydanticObjectId | None = None,
+    resource_override: bool = False,
+) -> Job:
+    """Queue per-feature read coverage for one BAM against one annotation.
+
+    Read-only, like bam_stats and vcf_stats: no derived object, just a report
+    plus summary facts merged onto the BAM. Unlike launch_bam_stats, this
+    needs a reference's `.fai` in addition to the BAM's own `.bai` -- and
+    unlike launch_bam_stats's `.bai` (which it builds by chaining into
+    index_bam when missing), there is no chaining precedent here for
+    building a *reference's* index on the fly from a read-only launch path.
+    Refusing with an actionable "index it first" / "build its index first"
+    message, matching launch_variant_calling's precedent exactly, is simpler
+    and keeps both required sidecars refused the same way.
+    """
+    from app.queue import queue
+    from app.services import object_service
+
+    # Hoisted above the enqueue for the same reason as launch_assembly: a
+    # declaration the budget can never satisfy is unclaimable, and claim.lua
+    # has no starvation escape (#478, #527).
+    refuse_if_over_budget(
+        declared_mb=FEATURE_COVERAGE_MEM_MB,
+        budget_mb=await current_admission_budget_mb(),
+        resource_override=resource_override,
+    )
+
+    bam = await object_service.get_object(bam_id, owner=owner)
+    _check_bam_stats_callable(bam)
+
+    reference = await _resolve_variant_reference(bam, None, owner=owner)
+    annotation = await resolve_annotation(bam.project_id, annotation_id, owner=owner)
+
+    bai = await _sidecar_of_role(bam, SidecarRole.BAI)
+    if bai is None:
+        raise ValidationError(
+            f"{bam.name!r} has no BAM index (.bai). Index it first.",
+            details={"bam_id": str(bam.id), "needs": "index_bam"},
+        )
+
+    fai = await _sidecar_of_role(reference, SidecarRole.FAI)
+    if fai is None:
+        raise ValidationError(
+            f"Reference {reference.name!r} has no FASTA index (.fai). "
+            f"Build its index first.",
+            details={"reference_id": str(reference.id), "needs": "build_index"},
+        )
+
+    annotation_format = _FEATURE_COVERAGE_ANNOTATION_FORMATS.get(annotation.format.kind)
+    if annotation_format is None:
+        raise ValidationError(
+            f"{annotation.name!r} is {annotation.format.kind.value}, which "
+            f"feature coverage cannot use -- it reads GFF, GTF, or BED.",
+            details={"object_id": str(annotation.id), "kind": annotation.format.kind.value},
+        )
+
+    payload: dict = {
+        "bam_id": str(bam.id),
+        "bam_name": bam.name,
+        "annotation_id": str(annotation.id),
+        "annotation_name": annotation.name,
+        "annotation_format": annotation_format,
+        "project_id": str(bam.project_id),
+    }
+    for key, obj in (("bam", bam), ("annotation", annotation), ("fai", fai)):
+        digest, path = await _resolve_readable(obj)
+        if digest:
+            payload[f"{key}_sha256"] = digest
+        if path:
+            payload[f"{key}_path"] = path
+
+    job = await queue.enqueue(
+        "feature_coverage",
+        owner=owner,
+        payload=payload,
+        job_class=JobClass.COMPUTE,
+        resources=JobResources(cpu=1, mem_mb=FEATURE_COVERAGE_MEM_MB, io=IoClass.HEAVY),
+        max_attempts=2,
+        dedup_key=f"feature_coverage:{bam.blob_sha256}:{annotation.blob_sha256}",
+        project_id=bam.project_id,
+        object_id=bam.id,
+        resource_override=resource_override,
+    )
+    if job is None:
+        raise ConflictError(
+            "Feature coverage is already queued or running for this BAM "
+            "and annotation",
+            details={"bam_id": str(bam.id), "annotation_id": str(annotation.id)},
+        )
+
+    log.info(
+        "feature_coverage_launched",
+        job_id=str(job.id),
+        bam_id=str(bam.id),
+        annotation_id=str(annotation.id),
+    )
+    return job
+
+
 def sample_name_for(obj: DataObject) -> str:
     """The readable name for a counts object in a matrix or a results table.
 
@@ -5922,6 +6054,154 @@ async def launch_polish(
         draft_id=str(draft.id),
         read_files=len(chosen),
         depth=payload["depth"],
+        tool_version=tool.version,
+    )
+    return job
+
+
+async def launch_polish_long(
+    *,
+    draft_object_id: PydanticObjectId,
+    owner: str,
+    reads_object_id: PydanticObjectId | None = None,
+    bacteria: bool = False,
+    resource_override: bool = False,
+) -> Job:
+    """Queue a Medaka run: long reads correcting a draft assembly.
+
+    Same provenance shape as `launch_polish` -- the handler aligns the reads
+    to the draft itself, so the alignment target is correct by construction
+    rather than by check. Unlike Polypolish, the aligner is not ours to
+    name: Medaka resolves its own minimap2 preset from the model.
+
+    Reads are resolved from the project when not named explicitly, and only
+    when the choice is unambiguous. `reference_assembly.long_read_sets` is
+    what decides which candidates are eligible, and there is no mate slot --
+    ONT and PacBio data is unpaired.
+
+    `bacteria` opts into ONT's bacterial-methylation model. It is a
+    parameter rather than an inference: nothing in the object graph reliably
+    says a draft is a bacterial isolate, and ONT ships that model as a
+    research release.
+    """
+    from app.queue import queue
+    from app.services import object_service, reference_assembly, run_service
+
+    refuse_if_over_budget(
+        declared_mb=POLISH_LONG_MEM_MB,
+        budget_mb=await current_admission_budget_mb(),
+        resource_override=resource_override,
+    )
+
+    tool = tools.require(tools.medaka())
+
+    draft = await object_service.get_object(draft_object_id, owner=owner)
+    reference_assembly.check_draft_assembly(draft)
+
+    if reads_object_id is None:
+        candidates = reference_assembly.long_read_sets(
+            await object_service.list_objects(
+                draft.project_id, owner=owner, status=ObjectStatus.READY
+            )
+        )
+        if not candidates:
+            raise ValidationError(
+                "Polishing with Medaka needs long reads, and this project "
+                "has none",
+                details={"draft_id": str(draft.id)},
+            )
+        if len(candidates) > 1:
+            raise ValidationError(
+                "This project has several long-read sets; name the one to "
+                "polish with",
+                details={
+                    "draft_id": str(draft.id),
+                    "candidates": [
+                        [str(o.id) for o in group] for group in candidates
+                    ],
+                },
+            )
+        chosen = candidates[0][0]
+    else:
+        chosen = await object_service.get_object(reads_object_id, owner=owner)
+        if not reference_assembly.is_long_read(chosen):
+            raise ValidationError(
+                f"{chosen.name!r} is not long-read data; Medaka corrects a "
+                "draft using the long reads it was assembled from, and its "
+                "models are trained on long-read error profiles",
+                details={"object_id": str(chosen.id)},
+            )
+
+    draft_digest, draft_path = await _resolve_readable(draft)
+    payload: dict = {
+        "draft_object_id": str(draft.id),
+        "draft_name": draft.name,
+        "threads": 8,
+        "bacteria": bacteria,
+    }
+    if draft_digest:
+        payload["draft_sha256"] = draft_digest
+    if draft_path:
+        payload["draft_path"] = draft_path
+
+    reads_digest, reads_path = await _resolve_readable(chosen)
+    payload["reads_object_id"] = str(chosen.id)
+    payload["reads_name"] = chosen.name
+    if reads_digest:
+        payload["reads_sha256"] = reads_digest
+    if reads_path:
+        payload["reads_path"] = reads_path
+
+    run = await run_service.create_run(
+        kind=RunKind.REFERENCE_ASSEMBLY,
+        project_id=draft.project_id,
+        label=f"Polish {draft.name} (Medaka)",
+        inputs=[
+            RunInput(
+                object_id=draft.id,
+                name=draft.name,
+                role=RunInputRole.DRAFT_ASSEMBLY,
+            ),
+            RunInput(
+                object_id=chosen.id,
+                name=chosen.name,
+                role=RunInputRole.READS,
+            ),
+        ],
+        params={"threads": payload["threads"], "bacteria": bacteria},
+        owner=owner,
+        tool="medaka",
+    )
+
+    job = await queue.enqueue(
+        "polish_long_assembly",
+        owner=owner,
+        payload=payload,
+        job_class=JobClass.COMPUTE,
+        resources=JobResources(
+            cpu=8, mem_mb=POLISH_LONG_MEM_MB, io=IoClass.HEAVY
+        ),
+        max_attempts=1,
+        dedup_key=f"polish_long:{draft.id}:{chosen.id}",
+        project_id=draft.project_id,
+        object_id=draft.id,
+        resource_override=resource_override,
+    )
+    if job is None:
+        await run_service.discard_run(run.id, owner=run.owner)
+        raise ConflictError(
+            "Medaka polishing is already queued or running for this assembly",
+            details={"object_id": str(draft.id)},
+        )
+
+    await run_service.link_job(run.id, job.id, RunJobRole.POLISH)
+    log.info(
+        "polish_long_launched",
+        job_id=str(job.id),
+        run_id=str(run.id),
+        draft_id=str(draft.id),
+        reads_id=str(chosen.id),
+        bacteria=bacteria,
         tool_version=tool.version,
     )
     return job

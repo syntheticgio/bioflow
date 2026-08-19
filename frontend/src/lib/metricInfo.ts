@@ -390,6 +390,17 @@ export const METRIC_INFO: Record<string, MetricInfo> = {
       "The read length at which half the sequenced bases sit in reads that long or longer. For long-read data this describes the run far better than a mean, which a tail of short reads drags down.",
   },
 
+  "ui.chart_length_bases_histogram": {
+    term: "Bases by read length",
+    description:
+      "Total bases in each read-length bin — not the number of reads. The distinction changes the conclusion: a long-read run's reads are mostly short while its bases are mostly long, and it is the bases that decide whether a repeat gets spanned during assembly. The dashed line marks N50, the length at which half the bases sit in reads that long or longer.",
+  },
+  "ui.chart_length_quality_density": {
+    term: "Length vs quality",
+    description:
+      "How many reads sit at each combination of length and mean quality; darker is denser. Two separate clouds mean two populations — a HiFi run with incomplete consensus shows a second, lower-quality group, and a mass of short poor reads dragging the averages down looks quite different from a run that is uniformly mediocre, though both give the same mean.",
+  },
+
   // ---- Quality-tab charts ------------------------------------------------
   "ui.chart_quality_per_position": {
     term: "Quality per position",
@@ -405,6 +416,13 @@ export const METRIC_INFO: Record<string, MetricInfo> = {
     term: "GC distribution",
     description:
       "The distribution of GC content across individual reads. A single peak at the organism's expected GC is healthy; a second peak generally means a second organism is present.",
+  },
+  "ui.chart_trim_quality_overlay": {
+    term: "Quality per position, before and after trimming",
+    description:
+      "Mean Phred score at each read position, measured on the same reads before and after the trim. Where the two curves separate is where trimming acted: a lifted 3\u2019 tail means quality decay was clipped, a raised start means adapter was removed, and two curves that sit on top of each other mean the trim did almost nothing \u2014 usually a sign the parameters were wrong for this file.",
+    computed:
+      "Both sides come from one fastp pass over the same file, binned onto identical positions and downsampled to at most 100 points. The \u201cafter\u201d line stops where trimming shortened the read rather than dropping to zero.",
   },
   "ui.chart_n_per_position": {
     term: "N content per position",
@@ -564,6 +582,13 @@ export const METRIC_INFO: Record<string, MetricInfo> = {
     description:
       "Mean depth per contig against the genome-wide mean. Contigs far below the line have less material in the sample than the reference expects; far above usually means repeat content or a plasmid present in many copies.",
   },
+  "ui.chart_contig_depth_strip": {
+    term: "Depth by chromosome",
+    description:
+      "Each contig drawn to scale and shaded by its depth against a typical contig. Cool means below typical, warm means above, and a neutral bar is ordinary depth. The readings it exists for are a chromosome at half the depth of its neighbours (aneuploidy, or a sex chromosome at the expected dosage), one at zero (a dropout or a reference/sample mismatch), and one at double depth (a duplication).",
+    computed:
+      "From the same per-contig `samtools coverage` pass as the contig table, so the lengths are the BAM header's own rather than a reference file's. The baseline is the length-weighted median depth, deliberately not the mean reported above: one small very deep sequence moves a mean arbitrarily far, and a yeast mitochondrion at 8,157\u00d7 over 86 kb is enough to pull the genome mean from 26\u00d7 to 80\u00d7 and make all sixteen nuclear chromosomes look like a dropout. The shade saturates at half and double the baseline. Bar height is sequence length, not depth.",
+  },
   "ui.chart_depth_histogram": {
     term: "Depth distribution",
     description:
@@ -582,6 +607,13 @@ export const METRIC_INFO: Record<string, MetricInfo> = {
       "How confidently each read was placed. A large bar at zero is reads the aligner could not place uniquely — repeats and multi-mapping — and those are what most downstream tools discard first.",
     computed:
       "The scale is the aligner's, not a shared one. Under STAR the value encodes the number of loci a read mapped to rather than a phred-scaled probability, so a STAR BAM's bars are not comparable with a BWA BAM's; the chart says so when it detects that scale.",
+  },
+  "ui.feature_coverage_table": {
+    term: "Per-feature coverage",
+    description:
+      "Every feature in the annotation with its read count and breadth of coverage — the fraction of the feature's own length any read touched. Sorted worst first, so a gene with reads but almost no breadth (a handful of reads piling onto one end) surfaces before healthier ones.",
+    computed:
+      "Computed with `bedtools coverage` between the BAM and the project's annotation (GFF or BED). Breadth is bases covered divided by feature length, not depth — a feature can have many reads and still show low breadth if they cluster.",
   },
 
   // ---- Results tab: variants ---------------------------------------------
@@ -705,6 +737,13 @@ export const METRIC_INFO: Record<string, MetricInfo> = {
       "Samples projected onto their first two principal components. This is the plot that can invalidate everything below it: a replicate sitting with the wrong group means the contrast tested a design the samples do not match, and no amount of reading the p-value table reveals that.",
     computed:
       "Computed on log₂(normalised count + 1) over the most variable genes, then projected by SVD. The axis percentages say how much of the total variance each component carries — a low pair means the samples do not separate cleanly in two dimensions, not that the plot is wrong.",
+  },
+  "ui.chart_sample_correlation": {
+    term: "Sample correlation",
+    description:
+      "How strongly every pair of samples agrees, as an N x N shaded matrix with samples grouped by condition. It answers what the projection above cannot: two replicates can sit adjacent on PC1/PC2 while correlating poorly, since those two components may carry only a modest share of the variance, and a batch effect orthogonal to both is invisible in the scatter but obvious as a block here.",
+    computed:
+      "Spearman's rho over the same log-normalised top-variance genes the projection uses, so the two plots always describe the same gene set. Spearman rather than Pearson because even after log\u2082 a handful of very highly expressed genes carry most of the remaining spread, and ranking bounds each gene's contribution. The colour scale spans the observed off-diagonal range rather than a fixed \u22121 to 1 \u2014 real samples in one experiment correlate somewhere in the 0.9s, and a fixed scale flattens exactly the differences worth seeing. Not drawn below three samples, where there is no structure to show.",
   },
   "ui.chart_volcano": {
     term: "Volcano plot",

@@ -288,6 +288,8 @@ class TestSerialization:
             "merqury",
             "gci",
             "winnowmap",
+            "bedtools",
+            "seqkit",
             # Not a binary at all -- a Python library, probed by import rather
             # than by shutil.which. It is in `all_tools` deliberately: the
             # version that ran a differential expression test is half that
@@ -1170,3 +1172,32 @@ def test_sniffles_is_documented_with_a_verified_license():
     assert meta.citation_url == "https://doi.org/10.1038/s41587-023-02024-y"
     assert tools.PipelineType.STRUCTURAL_VARIANT in meta.pipelines
     assert tools.PipelineType.VARIANT not in meta.pipelines
+
+
+def test_bedtools_probe_reports_missing_binary(monkeypatch):
+    monkeypatch.setattr(tools.settings, "bedtools_path", "/nonexistent/bedtools")
+    tools.bedtools.cache_clear()
+    tool = tools.bedtools()
+    assert tool.name == "bedtools"
+    assert tool.available is False
+
+
+def test_seqkit_probe_reports_missing_binary(monkeypatch):
+    monkeypatch.setattr(tools.settings, "seqkit_path", "/nonexistent/seqkit")
+    tools.seqkit.cache_clear()
+    tool = tools.seqkit()
+    assert tool.name == "seqkit"
+    assert tool.available is False
+
+
+def test_bedtools_is_runnable():
+    """The Feature coverage card and launch_feature_coverage handler (#632,
+    stage 1) give bedtools a real dispatch path now, so it reads as an
+    actionable pipeline step like ivar or craq."""
+    assert tools.TOOL_META["bedtools"].runnable is True
+
+
+def test_seqkit_is_not_runnable():
+    """No job handler branches on seqkit yet, so it must not read as an
+    actionable pipeline step."""
+    assert tools.TOOL_META["seqkit"].runnable is False

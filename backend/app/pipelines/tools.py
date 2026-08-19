@@ -692,6 +692,23 @@ def polypolish() -> Tool:
 
 
 @lru_cache(maxsize=1)
+def medaka() -> Tool:
+    """Medaka, ONT's neural-network consensus tool.
+
+    Probes `medaka` rather than `medaka_consensus`: the wrapper script is
+    what jobs invoke, but it takes no `--version` of its own and would fall
+    through to its usage block, which `_clean_version` would then scrape a
+    line of into the version field -- the same trap clair3() documents.
+    `medaka --version` prints "medaka 2.2.2" and exits zero.
+
+    No arm64 special-casing, unlike polypolish(): bioconda ships
+    linux-aarch64 builds, so this is the one polisher that works on Apple
+    Silicon.
+    """
+    return _probe("medaka", settings.medaka_binary_path, ["--version"])
+
+
+@lru_cache(maxsize=1)
 def ragtag() -> Tool:
     # The binary is `ragtag.py`, not `ragtag` -- a probe looking for `ragtag`
     # on PATH finds nothing and reports a working install as missing, the
@@ -789,6 +806,20 @@ def winnowmap() -> Tool:
 
 
 @lru_cache(maxsize=1)
+def bedtools() -> Tool:
+    # `bedtools --version` prints "bedtools v2.x.y" and exits zero.
+    # Installed via apt since the Merqury work (#64); this probe is what
+    # finally makes it visible to /help/software and the Actions tab.
+    return _probe("bedtools", settings.bedtools_path, ["--version"])
+
+
+@lru_cache(maxsize=1)
+def seqkit() -> Tool:
+    # seqkit has no `--version`; `seqkit version` prints "seqkit v2.x.y".
+    return _probe("seqkit", settings.seqkit_path, ["version"])
+
+
+@lru_cache(maxsize=1)
 def featurecounts() -> Tool:
     # Writes its banner to stderr and exits non-zero on `-v` with no input
     # files. `_probe` already reads whichever stream produced something, and
@@ -869,6 +900,8 @@ def all_tools() -> list[Tool]:
         merqury(),
         gci(),
         winnowmap(),
+        bedtools(),
+        seqkit(),
     ]
 
 
@@ -2147,6 +2180,55 @@ TOOL_META: dict[str, ToolMeta] = {
             "Genome Biology 2019, doi:10.1186/s13059-019-1829-6)."
         ),
     ),
+    "medaka": ToolMeta(
+        pipelines=(PipelineType.REFERENCE_ASSEMBLY,),
+        one_liner="Neural-network polishing of long-read assemblies",
+        summary=(
+            "Corrects residual base errors in a long-read assembly using "
+            "the long reads it was built from. A neural network trained on "
+            "ONT basecaller output predicts the true consensus from the "
+            "pileup, which is what makes it effective on the homopolymer "
+            "runs long-read assemblers systematically get wrong -- the "
+            "error class short-read polishers cannot help with when no "
+            "short reads exist."
+        ),
+        strengths=(
+            "The only polishing path for a project with no short reads",
+            "Trained per basecaller model, so it corrects the specific "
+            "error profile of the chemistry that produced the reads",
+            "Performs its own alignment with a model-appropriate minimap2 "
+            "preset, so there is no aligner choice to get wrong",
+        ),
+        homepage="https://github.com/nanoporetech/medaka",
+        repository="https://github.com/nanoporetech/medaka",
+        # Medaka has no accompanying paper. Upstream asks that the software
+        # be cited directly, so this is the repository rather than a
+        # fabricated reference -- citation_url is deliberately left empty
+        # for the same reason.
+        citation=(
+            "Oxford Nanopore Technologies. medaka: sequence correction "
+            "provided by ONT Research. https://github.com/nanoporetech/medaka"
+        ),
+        # From the repository's own LICENCE.md, checked 2026-08-18 rather
+        # than recalled. This is *not* an OSI-standard license -- it is
+        # ONT's own -- and it is recorded verbatim rather than normalized to
+        # something familiar-looking. A page that reads as authoritative
+        # saying "MIT" here would be worse than saying nothing.
+        license="Oxford Nanopore Technologies PLC. Public License Version 1.0",
+        usage=(
+            "BioFlow runs medaka_consensus over a draft assembly and the "
+            "long reads it was built from, storing the polished consensus "
+            "as a new object beside the draft rather than replacing it. "
+            "Medaka performs its own alignment internally using a minimap2 "
+            "preset chosen by the model, so no aligner is configured here. "
+            "The model is normally resolved from basecaller metadata in the "
+            "reads; when that metadata is absent Medaka falls back to a "
+            "default model without erroring, so the resolved model and "
+            "whether it was auto-selected are both recorded as facts on the "
+            "output. ONT's bacterial-methylation model is available as an "
+            "opt-in at launch and is a research release."
+        ),
+    ),
     "polypolish": ToolMeta(
         pipelines=(PipelineType.REFERENCE_ASSEMBLY,),
         one_liner="Short-read polishing of long-read assemblies",
@@ -2351,6 +2433,70 @@ TOOL_META: dict[str, ToolMeta] = {
         # built and tagged -- the database is several GB and should not be in
         # the base image. image and download_bytes must be filled in together.
         delivery=Delivery.BUNDLED,
+    ),
+    "bedtools": ToolMeta(
+        pipelines=(PipelineType.UTILITY,),
+        one_liner="Swiss-army knife for genome coordinate operations",
+        summary=(
+            "BEDtools is a fast, flexible toolkit for investigating genomic "
+            "feature relationships. Performs coordinate intersections, merges, "
+            "overlaps, and arithmetic on genomic intervals in BED, GFF, VCF, "
+            "and SAM formats. The foundation for per-feature coverage analysis "
+            "and structural variant detection."
+        ),
+        strengths=(
+            "Fast interval set operations: intersect, merge, closest, coverage",
+            "Supports multiple input formats: BED, GFF, GVF, VCF, SAM, BAM",
+            "Flexible output: raw results, counts, statistics",
+            "Scripting-friendly TSV output for downstream processing",
+        ),
+        homepage="https://bedtools.readthedocs.io/",
+        repository="https://github.com/arq5x/bedtools2",
+        citation="Quinlan & Hall, Bioinformatics 2010",
+        citation_url="https://doi.org/10.1093/bioinformatics/btq033",
+        license="MIT",
+        usage=(
+            "Backs the Feature coverage card: computes per-feature read "
+            "coverage of an alignment against a project annotation. Also "
+            "called internally by the Merqury k-mer QV scripts."
+        ),
+        # Flipped to True once the Feature coverage card and its
+        # launch_feature_coverage handler shipped (#632, stage 1) -- bedtools
+        # is now dispatched to directly, not just installed alongside Merqury.
+        runnable=True,
+    ),
+    "seqkit": ToolMeta(
+        pipelines=(PipelineType.UTILITY,),
+        one_liner="Fast FASTA/FASTQ manipulation toolkit",
+        summary=(
+            "SeqKit is a fast, cross-platform FASTA/FASTQ sequence toolkit "
+            "written in Go. Provides subcommands for filtering, sampling, "
+            "concatenating, splitting, reformatting, and searching sequences, "
+            "with built-in decompression and streaming for efficient handling "
+            "of large datasets."
+        ),
+        strengths=(
+            "Cross-platform compiled binary: no dependencies",
+            "Streaming processing: handles GBs efficiently",
+            "Auto-detects and handles compressed FASTA/FASTQ",
+            "Subcommand interface for filtering, sampling, splitting, stats",
+            "Written in Go: compiled, no Python or Perl overhead",
+        ),
+        homepage="https://bioinf.shenwei.me/seqkit/",
+        repository="https://github.com/shenwei356/seqkit",
+        # The seqkit README's own "Citation" section points to the SeqKit2
+        # paper, superseding the original 2016 bioRxiv preprint.
+        citation="Shen, Sipos & Zhao, iMeta 2024",
+        citation_url="https://doi.org/10.1002/imt2.191",
+        license="MIT",
+        usage=(
+            "Installed for the planned region/sequence extraction feature; "
+            "nothing dispatches to it yet."
+        ),
+        # No job handler branches on seqkit today -- see the `runnable` field
+        # comment above for why this must be set explicitly rather than left
+        # at the default.
+        runnable=False,
     ),
 }
 

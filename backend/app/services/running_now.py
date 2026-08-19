@@ -54,6 +54,7 @@ ENDPOINT_JOB_TYPES: dict[str, frozenset[str]] = {
     "/pipelines/gc-tracks": frozenset({"analyze_gc_tracks"}),
     "/pipelines/consensus": frozenset({"consensus_from_alignment"}),
     "/pipelines/polish": frozenset({"polish_assembly"}),
+    "/pipelines/polish-long": frozenset({"polish_long_assembly"}),
     "/pipelines/scaffold": frozenset({"scaffold_assembly"}),
     "/pipelines/misassemblies": frozenset({"assess_misassemblies"}),
     "/pipelines/synteny": frozenset({"analyze_synteny"}),
@@ -61,6 +62,7 @@ ENDPOINT_JOB_TYPES: dict[str, frozenset[str]] = {
     "/pipelines/assembly-qv": frozenset({"assess_assembly_qv"}),
     "/pipelines/assembly-continuity": frozenset({"assess_assembly_continuity"}),
     "/pipelines/quantify": frozenset({"quantify"}),
+    "/pipelines/feature-coverage": frozenset({"feature_coverage"}),
     # Offered by the kmer_spectra and repeat_density cards. One route serves
     # both, since the handler runs both analyses in a single job.
     "/pipelines/meryl-analysis": frozenset({"analyze_meryl_tracks"}),

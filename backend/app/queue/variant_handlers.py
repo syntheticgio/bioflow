@@ -15,7 +15,7 @@ from app.config import settings
 from app.errors import PermanentError, RetryableError, ValidationError
 from app.logging import get_logger
 from app.models import IoClass, JobClass, JobResources
-from app.pipelines import aligners, csq_runner, tools, variant_db, variant_runner, vcf_stats_runner
+from app.pipelines import aligners, csq_runner, sv_annotation_runner, tools, variant_db, variant_runner, vcf_stats_runner
 from app.pipelines.align_runner import ReadChemistry
 from app.pipelines.variant_runner import VariantCaller
 from app.queue.align_handlers import _resolve_blob
@@ -617,6 +617,17 @@ def annotate_variants(ctx: JobContext) -> dict:
     )
     if code != 0:
         raise _failure(code, csq_log_path, "bcftools csq")
+
+    # Pass through SV gene overlap annotator to ensure structural variants
+    # (e.g. symbolic ALTs like <DEL>, <INS>, <DUP>) carry gene overlap annotations.
+    sv_out = work / "sv_annotated.vcf.gz"
+    sv_annotation_runner.annotate_sv_vcf(
+        vcf_in=out,
+        vcf_out=sv_out,
+        gff_path=annotation,
+    )
+    if sv_out.exists():
+        out = sv_out
 
     # Not `_rename_output`: it calls `variant_runner.output_name`, which takes
     # `Path(name).stem` on the assumption its input is a BAM. Handed a

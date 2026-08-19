@@ -310,3 +310,132 @@ class TestSampleNaming:
     )
     def test_pipeline_suffixes_are_stripped(self, filename, expected):
         assert de_runner.counts_path_stem(filename) == expected
+
+
+class TestSampleCorrelation:
+    """The heatmap's numbers, computed from the same matrix the projection uses.
+
+    Worth testing where `_sample_pca` is not: the projection is a call into
+    numpy's SVD, but the correlation is hand-rolled ranking and normalisation,
+    and the axis it ranks along is exactly the kind of thing that produces a
+    plausible-looking matrix of wrong numbers.
+
+    Skipped where numpy is absent. `de_runner` imports it lazily inside the
+    functions that need it -- PyDESeq2 and its stack are a worker concern, not
+    something the API image carries -- so these tests, not the production path,
+    are what a slim environment cannot run.
+    """
+
+    @staticmethod
+    def _np():
+        return pytest.importorskip("numpy")
+
+    @staticmethod
+    def _matrix(samples, conditions):
+        return de_runner.CountMatrix(
+            genes=[], samples=samples, conditions=conditions, values=[]
+        )
+
+    def test_it_agrees_with_scipys_spearman(self):
+        """The whole reason to hand-roll this is that it is three lines. If it
+        does not match the reference implementation it is not Spearman."""
+        np = self._np()
+        spearmanr = pytest.importorskip("scipy.stats").spearmanr
+
+        rng = np.random.default_rng(0)
+        selected = rng.normal(size=(5, 40))
+        result = de_runner._sample_correlation(
+            selected, self._matrix(list("abcde"), ["x"] * 5)
+        )
+
+        expected = spearmanr(selected, axis=1).statistic
+        assert np.abs(np.array(result["matrix"]) - expected).max() < 1e-4
+
+    def test_the_diagonal_is_exactly_one(self):
+        """A 0.9999 or a 1.0000001 on the diagonal reads as a bug in the plot
+        rather than floating point in the maths."""
+        np = self._np()
+
+        rng = np.random.default_rng(1)
+        selected = rng.normal(size=(4, 30))
+        result = de_runner._sample_correlation(
+            selected, self._matrix(list("abcd"), ["x"] * 4)
+        )
+        assert [result["matrix"][i][i] for i in range(4)] == [1.0] * 4
+        assert np.array(result["matrix"]).max() <= 1.0
+
+    def test_replicates_correlate_more_strongly_than_across_conditions(self):
+        """The claim the plot makes. Two groups with a shared offset should
+        show blocks on the diagonal, not a uniform matrix."""
+        np = self._np()
+
+        rng = np.random.default_rng(2)
+        base = rng.normal(size=30)
+        shift = rng.normal(size=30) * 3
+        selected = np.array([
+            base + rng.normal(size=30) * 0.1,
+            base + rng.normal(size=30) * 0.1,
+            base + shift + rng.normal(size=30) * 0.1,
+            base + shift + rng.normal(size=30) * 0.1,
+        ])
+        m = de_runner._sample_correlation(
+            selected, self._matrix(list("abcd"), ["ctl", "ctl", "trt", "trt"])
+        )["matrix"]
+        assert m[0][1] > m[0][2]
+        assert m[2][3] > m[1][2]
+
+    def test_the_matrix_is_symmetric(self):
+        np = self._np()
+
+        rng = np.random.default_rng(3)
+        selected = rng.normal(size=(4, 25))
+        m = np.array(
+            de_runner._sample_correlation(
+                selected, self._matrix(list("abcd"), ["x"] * 4)
+            )["matrix"]
+        )
+        assert np.array_equal(m, m.T)
+
+    def test_it_carries_the_sample_order_and_conditions(self):
+        """The frontend groups by condition and labels by sample, so the
+        matrix is meaningless without both travelling beside it."""
+        np = self._np()
+
+        result = de_runner._sample_correlation(
+            np.random.default_rng(4).normal(size=(3, 20)),
+            self._matrix(["s1", "s2", "s3"], ["ctl", "ctl", "trt"]),
+        )
+        assert result["samples"] == ["s1", "s2", "s3"]
+        assert result["conditions"] == ["ctl", "ctl", "trt"]
+
+    def test_it_names_the_method_it_used(self):
+        """Pearson and Spearman give different numbers, so a reader comparing
+        against another tool has to be told which this is."""
+        np = self._np()
+
+        result = de_runner._sample_correlation(
+            np.random.default_rng(5).normal(size=(3, 20)),
+            self._matrix(["s1", "s2", "s3"], ["a", "b", "c"]),
+        )
+        assert result["method"] == "spearman"
+
+    def test_two_samples_render_nothing_rather_than_an_empty_matrix(self):
+        """A 2x2 is one off-diagonal number beside a diagonal of ones. There is
+        no structure for a heatmap to show."""
+        np = self._np()
+
+        assert de_runner._sample_correlation(
+            np.random.default_rng(6).normal(size=(2, 20)),
+            self._matrix(["s1", "s2"], ["ctl", "trt"]),
+        ) is None
+
+    def test_a_missing_matrix_returns_none_rather_than_raising(self):
+        """`_expression_matrix` returning None must leave the rest of the
+        results tab intact, matching `_sample_pca`."""
+        assert de_runner._sample_correlation(None, self._matrix(["a"] * 3, ["x"] * 3)) is None
+
+    def test_a_broken_matrix_returns_none_rather_than_raising(self):
+        """A failure here costs one plot, not the results tab."""
+        assert de_runner._sample_correlation(
+            "not an array", self._matrix(["a", "b", "c"], ["x"] * 3)
+        ) is None

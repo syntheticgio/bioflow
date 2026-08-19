@@ -135,8 +135,14 @@ jobs:
     runs-on: ubuntu-latest
     # Default (no timeout-minutes) is GitHub's 360-minute hard cap. A stalled
     # apt-get mirror in "Install system build dependencies" has hung this job
-    # for over an hour with nothing to fail it (#494) — 15 min gives a real
+    # for over an hour with nothing to fail it (#577) — 15 min gives a real
     # margin over the ~2-3 min this job normally takes end to end.
+    #
+    # This is the outer backstop, not the first line of defence: both apt-get
+    # steps below bound their own fetches (see the note on the first one), so
+    # a dead mirror should fail in about a minute rather than burning the
+    # full 15. If this timeout is what ends a run, the apt options did not
+    # catch it and the stall is something else.
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
@@ -150,9 +156,42 @@ jobs:
 
       # pysam (C extension against htslib) and cryptography (Rust) need
       # toolchain headers that aren't in the base ubuntu-latest image.
+      #
+      # The -o options bound how long a bad mirror can stall this step
+      # (#577). ubuntu-latest resolves apt sources through a mirrorlist
+      # (file:/etc/apt/apt-mirrors.txt) that lists Azure's internal
+      # azure.archive.ubuntu.com first and public archive.ubuntu.com as
+      # fallback, so a fetch can fail two different ways:
+      #
+      #   - Connect never completes. apt gives up per its own timeout and
+      #     falls through to the next mirror. Visible as `Ign:` lines.
+      #   - Connect succeeds, then the transfer stalls mid-stream. This is
+      #     the one that hurt: the socket stays open, so nothing declares it
+      #     dead, and apt waits indefinitely. On PR #609 the last log line
+      #     was a `Get:` for a 126 kB InRelease that never arrived, and the
+      #     job sat there until the 15-minute job timeout killed it.
+      #
+      # Timeout is what bounds the second case: it is an inactivity deadline
+      # on the transfer, not just a connect deadline, so it fires on a mirror
+      # that accepts the connection and then goes quiet. Retries covers a
+      # mirror that is briefly down rather than slow. Both http and https are
+      # set because the mirrorlist mixes schemes — the Azure entry is http,
+      # the public fallback https — and each scheme reads its own key.
+      #
+      # Retries multiplies the timeout rather than replacing it: the budget
+      # per source is (1 + Retries) x Timeout, so 15s here means a dead
+      # source costs ~60s, not 15s. Measured against a server that accepts
+      # the connection and then stops sending, elapsed tracks that formula
+      # closely — Timeout=5 -> 27s, 15 -> 67s, 30 -> 127s. 15s is chosen to
+      # stay well inside the 15-minute job timeout even if several sources
+      # fail in sequence, while leaving enough headroom that a merely slow
+      # (not dead) mirror still succeeds.
       - name: Install system build dependencies
         run: |
-          sudo apt-get update
+          sudo apt-get -o Acquire::Retries=3 \
+                       -o Acquire::http::Timeout=15 \
+                       -o Acquire::https::Timeout=15 \
+                       update
           sudo apt-get install -y build-essential zlib1g-dev
 
       # Ruff is a standalone binary (no dependencies of its own), so install
@@ -194,7 +233,13 @@ jobs:
       # was added, so a failure here is a regression, not a backlog.
       - name: Lint shell scripts with shellcheck
         run: |
-          sudo apt-get update && sudo apt-get install -y shellcheck
+          # Same mirror-stall exposure as the build-dependencies step above;
+          # see the note there for why these options are set (#577).
+          sudo apt-get -o Acquire::Retries=3 \
+                       -o Acquire::http::Timeout=15 \
+                       -o Acquire::https::Timeout=15 \
+                       update
+          sudo apt-get install -y shellcheck
           # ops/hooks/commit-msg is named explicitly: it is a bash script
           # with no extension, so a *.sh glob skips it silently.
           shellcheck ops/*.sh ops/hooks/*.sh ops/hooks/commit-msg
@@ -215,7 +260,14 @@ jobs:
 
       - name: Install build dependencies
         run: |
-          sudo apt-get update
+          # Same mirror-stall exposure as backend-smoke's apt steps; see the
+          # note on its "Install system build dependencies" step (#577). This
+          # job pulls a much larger package set below, so it spends longer in
+          # apt and has correspondingly more chances to hit a bad mirror.
+          sudo apt-get -o Acquire::Retries=3 \
+                       -o Acquire::http::Timeout=15 \
+                       -o Acquire::https::Timeout=15 \
+                       update
           sudo apt-get install -y build-essential zlib1g-dev libhts-dev curl
 
       - name: Install pipeline tools
@@ -231,7 +283,10 @@ jobs:
           # The NCBI datasets CLI is not packaged; fetch the static binary the
           # same way backend/Dockerfile does. Route tests hit its probe before
           # their own assertions (a missing tool 500s where they expect 404).
-          sudo curl -fsSL \
+          # --retry/--max-time for the same reason apt gets Retries/Timeout
+          # above: -f catches an HTTP error but nothing bounds a transfer that
+          # opens and then stalls, and this one is a third-party host.
+          sudo curl -fsSL --retry 3 --retry-connrefused --max-time 120 \
             "https://ftp.ncbi.nlm.nih.gov/pub/datasets/command-line/v2/linux-amd64/datasets" \
             -o /usr/local/bin/datasets
           sudo chmod +x /usr/local/bin/datasets
@@ -248,7 +303,8 @@ jobs:
           # dispatcher that looks for its SIMD variants next to argv[0], so a
           # symlink in /usr/local/bin sends it hunting for variants that are
           # not there.
-          curl -fsSL https://github.com/bwa-mem2/bwa-mem2/releases/download/v2.2.1/bwa-mem2-2.2.1_x64-linux.tar.bz2 \
+          curl -fsSL --retry 3 --retry-connrefused --max-time 180 \
+            https://github.com/bwa-mem2/bwa-mem2/releases/download/v2.2.1/bwa-mem2-2.2.1_x64-linux.tar.bz2 \
             | sudo tar -xj -C /opt
           printf '#!/bin/sh\nexec "/opt/bwa-mem2-2.2.1_x64-linux/bwa-mem2" "$@"\n' \
             | sudo tee /usr/local/bin/bwa-mem2 >/dev/null

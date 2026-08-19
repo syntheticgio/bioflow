@@ -20,6 +20,7 @@ from app.services.suggestion_service import (
     build_align_card,
     build_annotate_card,
     build_assemble_card,
+    build_feature_coverage_card,
     build_preprocess_card,
     build_quantify_card,
     build_structural_variants_card,
@@ -1679,6 +1680,70 @@ class TestQuantifyCard:
             assert build_quantify_card(_vcf(), [_annotation()]) is None
 
 
+@contextmanager
+def installed_bedtools(available=True):
+    """Pin the bedtools probe the feature coverage card reads.
+
+    `tools.bedtools` is a plain `@lru_cache`d function read fresh at call
+    time by `build_feature_coverage_card`, not captured at import into a
+    frozen dataclass the way `aligner_registry`'s specs capture their probes
+    -- so a straightforward monkeypatch on the name `suggestion_service`
+    imported reaches the call, the same seam `installed_featurecounts` above
+    relies on for the quantify card.
+    """
+    with patch(
+        "app.services.suggestion_service.tools.bedtools",
+        return_value=_FakeTool(available, name="bedtools"),
+    ) as probe:
+        yield probe
+
+
+class TestFeatureCoverageCard:
+    def test_the_probe_patch_actually_takes_effect(self):
+        """Guards every test below it, for the reason CLAUDE.md spells out:
+        the image ships bedtools *installed*, so an available-card assertion
+        passes whether or not the patch worked. Only the unavailable
+        direction can tell a working seam from an escaped one.
+        """
+        with installed_bedtools(False):
+            card = build_feature_coverage_card(_bam(), [_annotation()])
+        assert card.status is CardStatus.UNAVAILABLE
+        assert "not installed" in card.reason
+
+    def test_a_bam_with_an_annotation_is_runnable(self):
+        with installed_bedtools(True):
+            card = build_feature_coverage_card(_bam(obj_id="xyz"), [_annotation()])
+        assert card.status is CardStatus.AVAILABLE
+        assert card.kind == "feature_coverage"
+        assert card.category == "ASSEMBLY_QC"
+        assert card.launch == {
+            "endpoint": "/pipelines/feature-coverage",
+            "body": {"bam_id": "xyz"},
+        }
+
+    def test_no_annotation_gates_the_card_with_an_actionable_reason(self):
+        with installed_bedtools(True):
+            card = build_feature_coverage_card(_bam(), [])
+        assert card.status is CardStatus.UNAVAILABLE
+        assert "no annotation" in card.reason
+
+    def test_a_missing_tool_is_reported_before_a_missing_annotation(self):
+        """Both are true when neither is present. The tool is the one the
+        user cannot fix by downloading a genome, so it is the one worth
+        saying."""
+        with installed_bedtools(False):
+            card = build_feature_coverage_card(_bam(), [])
+        assert "not installed" in card.reason
+
+    def test_a_fastq_gets_no_card_at_all(self):
+        with installed_bedtools(True):
+            assert build_feature_coverage_card(_fake_obj(), [_annotation()]) is None
+
+    def test_a_vcf_gets_no_card_at_all(self):
+        with installed_bedtools(True):
+            assert build_feature_coverage_card(_vcf(), [_annotation()]) is None
+
+
 class TestScaffoldCardOrchestration:
     """`suggestions_for`'s own listing for the scaffold card, as opposed to
     `build_scaffold_card`'s unit tests in test_scaffold_card.py -- those hand
@@ -2548,6 +2613,7 @@ class TestCardBuilderRegistry:
             "assemble",
             "scaffold",
             "completeness",
+            "polish_long",
         }
 
     def test_every_launch_endpoint_is_a_real_route(self):
@@ -2591,3 +2657,178 @@ class TestCardBuilderRegistry:
         assert unknown == set(), (
             f"cards launch endpoints with no POST route: {sorted(unknown)}"
         )
+
+
+def _ont_fastq(obj_id="ont1", name="reads.ont.fastq.gz"):
+    """A READY long-read FASTQ, matching `_read_object`'s pattern.
+
+    `facts={"qc_platform": "OXFORD_NANOPORE"}` is what `is_long_read`
+    (`reference_assembly.py`) reads via `_qc_platform` to classify a FASTQ
+    as long-read -- the card builder itself never inspects facts, since
+    `long_read_sets` has already done that filtering by the time the card
+    sees it, but the name mirrors `_read_object` for readability.
+    """
+    obj = _fake_obj(
+        kind=FormatKind.FASTQ,
+        obj_id=obj_id,
+        facts={"qc_platform": "OXFORD_NANOPORE"},
+    )
+    obj.name = name
+    return obj
+
+
+def _illumina_fastq(obj_id="ill1", name="reads.illumina.fastq.gz"):
+    """A READY short-read FASTQ -- the Illumina counterpart of `_ont_fastq`,
+    used only to prove the two polish cards gate on disjoint read sets."""
+    obj = _fake_obj(
+        kind=FormatKind.FASTQ,
+        obj_id=obj_id,
+        facts={"qc_platform": "ILLUMINA"},
+    )
+    obj.name = name
+    return obj
+
+
+class TestPolishLongCard:
+    """`build_polish_long_card(obj, long_read_sets)` -- the Medaka sibling of
+    `build_polish_card`. Same ambiguity gate, same shape, different tool and
+    endpoint.
+    """
+
+    def test_unavailable_when_medaka_is_missing(self):
+        """Assert the UNAVAILABLE direction, per CLAUDE.md.
+
+        The image ships tools installed, so an "available" assertion passes
+        whether or not the patch worked. This is the direction that fails
+        when the seam breaks.
+        """
+        from app.pipelines import tools as tools_module
+        from app.services import suggestion_service
+
+        broken = tools_module.Tool(
+            name="medaka", path=None, version=None, error="Medaka is not installed.",
+        )
+        with patch.object(suggestion_service.tools, "medaka", return_value=broken):
+            card = suggestion_service.build_polish_long_card(
+                _assembly_object(), [[_ont_fastq()]]
+            )
+        assert card is not None
+        assert card.status is CardStatus.UNAVAILABLE
+        assert "not installed" in card.reason
+
+    def test_unavailable_with_no_long_reads(self):
+        from app.services import suggestion_service
+
+        with patch.object(
+            suggestion_service.tools, "medaka",
+            return_value=_FakeTool(True, name="medaka"),
+        ):
+            card = suggestion_service.build_polish_long_card(_assembly_object(), [])
+        assert card is not None
+        assert card.status is CardStatus.UNAVAILABLE
+        assert "long reads" in card.reason
+
+    def test_unavailable_with_several_long_read_sets(self):
+        """Ambiguity is unavailable, not a guess.
+
+        Cards launch directly with the body they carry, so a card that
+        picked one of several sets would silently polish with whichever it
+        chose -- producing a plausible assembly that is quietly wrong.
+        """
+        from app.services import suggestion_service
+
+        with patch.object(
+            suggestion_service.tools, "medaka",
+            return_value=_FakeTool(True, name="medaka"),
+        ):
+            card = suggestion_service.build_polish_long_card(
+                _assembly_object(),
+                [
+                    [_ont_fastq(obj_id="ont1", name="a.fastq.gz")],
+                    [_ont_fastq(obj_id="ont2", name="b.fastq.gz")],
+                ],
+            )
+        assert card is not None
+        assert card.status is CardStatus.UNAVAILABLE
+        assert "2" in card.reason
+
+    def test_available_with_exactly_one_long_read_set(self):
+        from app.services import suggestion_service
+
+        with patch.object(
+            suggestion_service.tools, "medaka",
+            return_value=_FakeTool(True, name="medaka"),
+        ):
+            card = suggestion_service.build_polish_long_card(
+                _assembly_object(), [[_ont_fastq()]]
+            )
+        assert card is not None
+        assert card.status is CardStatus.AVAILABLE
+        assert card.launch["endpoint"] == "/pipelines/polish-long"
+        assert card.launch["body"]["draft_object_id"] == "asm1"
+        assert card.launch["body"]["reads_object_id"] == "ont1"
+
+    def test_no_card_for_a_non_assembly(self):
+        from app.services import suggestion_service
+
+        assert suggestion_service.build_polish_long_card(_read_object(), []) is None
+
+
+class TestPolishCardsDoNotCollide:
+    """Success criterion 3: the two cards never offer a broken combination.
+
+    They gate on mutually exclusive chemistry predicates, so this is a
+    property of the structure rather than a rule anything enforces -- which
+    is exactly why it is worth a test that would catch the structure
+    changing.
+    """
+
+    def test_short_read_project_gets_polypolish_not_medaka(self):
+        from app.services import suggestion_service
+
+        obj = _assembly_object()
+        with (
+            patch.object(
+                suggestion_service.tools, "polypolish",
+                return_value=_FakeTool(True, name="polypolish"),
+            ),
+            patch.object(
+                suggestion_service.tools, "bwa_mem2",
+                return_value=_FakeTool(True, name="bwa-mem2"),
+            ),
+            patch.object(
+                suggestion_service.tools, "medaka",
+                return_value=_FakeTool(True, name="medaka"),
+            ),
+        ):
+            short_card = suggestion_service.build_polish_card(
+                obj, [[_illumina_fastq()]]
+            )
+            long_card = suggestion_service.build_polish_long_card(obj, [])
+        assert short_card.status is CardStatus.AVAILABLE
+        assert long_card.status is CardStatus.UNAVAILABLE
+
+    def test_long_read_project_gets_medaka_not_polypolish(self):
+        from app.services import suggestion_service
+
+        obj = _assembly_object()
+        with (
+            patch.object(
+                suggestion_service.tools, "polypolish",
+                return_value=_FakeTool(True, name="polypolish"),
+            ),
+            patch.object(
+                suggestion_service.tools, "bwa_mem2",
+                return_value=_FakeTool(True, name="bwa-mem2"),
+            ),
+            patch.object(
+                suggestion_service.tools, "medaka",
+                return_value=_FakeTool(True, name="medaka"),
+            ),
+        ):
+            long_card = suggestion_service.build_polish_long_card(
+                obj, [[_ont_fastq()]]
+            )
+            short_card = suggestion_service.build_polish_card(obj, [])
+        assert long_card.status is CardStatus.AVAILABLE
+        assert short_card.status is CardStatus.UNAVAILABLE

@@ -160,6 +160,14 @@ async def _launch_vcf_stats(*, inputs: dict, params: dict, owner: str):
     )
 
 
+async def _launch_feature_coverage(*, inputs: dict, params: dict, owner: str):
+    return await pipeline_service.launch_feature_coverage(
+        bam_id=inputs["alignment"],
+        owner=owner,
+        annotation_id=inputs.get("annotation"),
+    )
+
+
 async def _launch_variant_calling(*, inputs: dict, params: dict, owner: str):
     return await pipeline_service.launch_variant_calling(
         bam_id=inputs["alignment"],
@@ -307,6 +315,15 @@ async def _launch_polish(*, inputs: dict, params: dict, owner: str):
         owner=owner,
         reads_object_id=inputs.get("reads"),
         mate_object_id=inputs.get("mate"),
+    )
+
+
+async def _launch_polish_long(*, inputs: dict, params: dict, owner: str):
+    return await pipeline_service.launch_polish_long(
+        draft_object_id=inputs["draft"],
+        owner=owner,
+        reads_object_id=inputs.get("reads"),
+        bacteria=bool(params.get("bacteria")),
     )
 
 
@@ -479,6 +496,36 @@ NODE_TYPES: dict[str, NodeTypeSpec] = {
             PortSpec(
                 "variants",
                 PortType(format=FormatKind.VCF, role=ObjectRole.VARIANTS),
+            ),
+        ),
+        outputs=(),
+    ),
+    "feature_coverage": NodeTypeSpec(
+        label="Feature coverage",
+        launch_name="pipeline_service.launch_feature_coverage",
+        run_kind=None,  # Read-only: facts + a report, no PipelineRun.
+        launch=_launch_feature_coverage,
+        inputs=(
+            PortSpec(
+                "alignment",
+                PortType(format=FormatKind.BAM, role=ObjectRole.ALIGNMENT),
+            ),
+            # Optional, same convention as quantify's annotation port:
+            # resolve_annotation falls back to the project's one unambiguous
+            # GTF/GFF when this is not wired, and refuses only when the
+            # project holds more than one. Both formats are genuinely usable
+            # here -- unlike quantify (which needs GTF's `-g gene_id`
+            # convention and cannot read GFF3), bedtools coverage only cares
+            # about column positions, which GTF and GFF3 share -- so the port
+            # accepts both rather than the single FormatKind.GTF a copy-paste
+            # from quantify's port would suggest. BED is left out: it is not
+            # actually reachable through resolve_annotation (_is_annotation
+            # only admits GFF/GTF), so declaring it here would let the canvas
+            # wire something the launch path can never receive this way.
+            PortSpec(
+                "annotation",
+                PortType(formats=(FormatKind.GFF, FormatKind.GTF)),
+                required=False,
             ),
         ),
         outputs=(),
@@ -819,6 +866,29 @@ NODE_TYPES: dict[str, NodeTypeSpec] = {
             # than one.
             PortSpec("reads", PortType(format=FormatKind.FASTQ), required=False),
             PortSpec("mate", PortType(format=FormatKind.FASTQ), required=False),
+        ),
+        outputs=(
+            PortSpec(
+                "polished",
+                PortType(format=FormatKind.FASTA, role=ObjectRole.REFERENCE),
+            ),
+        ),
+    ),
+    "polish_long": NodeTypeSpec(
+        label="Polish (Medaka)",
+        launch_name="pipeline_service.launch_polish_long",
+        launch=_launch_polish_long,
+        run_kind=RunKind.REFERENCE_ASSEMBLY,
+        run_tool="medaka",
+        inputs=(
+            PortSpec(
+                "draft",
+                PortType(format=FormatKind.FASTA, role=ObjectRole.REFERENCE),
+            ),
+            # Optional: when unwired, the launcher auto-picks the project's
+            # one unambiguous long-read set and refuses if there is more
+            # than one. No mate port -- long-read data is unpaired.
+            PortSpec("reads", PortType(format=FormatKind.FASTQ), required=False),
         ),
         outputs=(
             PortSpec(

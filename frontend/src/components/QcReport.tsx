@@ -1,5 +1,6 @@
 import { api } from "../api/client";
 import { InfoMarker } from "./InfoMarker";
+import { LongReadDistributions } from "./LongReadCharts";
 import type { QcFacts } from "../api/types";
 import type { JSX } from "react";
 
@@ -357,6 +358,13 @@ function LongReadQcReport({ qc, objectId }: { qc: QcFacts; objectId: string }) {
           </>
         )}
       </dl>
+
+      {/* The distributions behind the scalars above -- N50 is one number off
+          the length histogram, and the mean quality is one number off the
+          density grid. Inside this section rather than a sibling so the
+          numbers and the shapes they summarise stay together; renders
+          nothing at all for a file QC'd before those facts existed. */}
+      <LongReadDistributions qc={qc} />
     </div>
   );
 }
