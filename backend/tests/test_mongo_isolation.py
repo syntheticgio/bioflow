@@ -42,17 +42,37 @@ class TestDbNaming:
 
 
 class TestDirectMongoUrl:
-    def test_rewrites_compose_hostname(self):
-        assert "127.0.0.1" in iso.direct_mongo_url("mongodb://mongo:27017")
+    def test_rewrites_compose_hostname_when_running_on_the_host(self):
+        # On the host, `mongo` does not resolve; the published port does.
+        url = iso.direct_mongo_url("mongodb://mongo:27017", host_reachable=False)
+        assert "127.0.0.1" in url
 
-    def test_strips_replica_set_and_forces_direct(self):
-        url = iso.direct_mongo_url("mongodb://mongo:27017/?replicaSet=rs0")
-        assert "replicaSet" not in url
-        assert "directConnection=true" in url
+    def test_keeps_compose_hostname_when_running_in_the_network(self):
+        # In the api container the opposite holds -- nothing listens on the
+        # container's own localhost, so rewriting breaks every DB test.
+        url = iso.direct_mongo_url("mongodb://mongo:27017", host_reachable=True)
+        assert "://mongo:27017" in url
+        assert "127.0.0.1" not in url
+
+    def test_strips_replica_set_and_forces_direct_either_way(self):
+        for reachable in (True, False):
+            url = iso.direct_mongo_url(
+                "mongodb://mongo:27017/?replicaSet=rs0", host_reachable=reachable
+            )
+            assert "replicaSet" not in url
+            assert "directConnection=true" in url
 
     def test_leaves_direct_connection_alone_if_present(self):
-        url = iso.direct_mongo_url("mongodb://h:27017/?directConnection=true")
+        url = iso.direct_mongo_url(
+            "mongodb://h:27017/?directConnection=true", host_reachable=True
+        )
         assert url.count("directConnection") == 1
+
+    def test_probes_the_environment_when_not_told(self, monkeypatch):
+        monkeypatch.setattr(iso, "_compose_host_resolves", lambda hostname="mongo": True)
+        assert "://mongo:" in iso.direct_mongo_url("mongodb://mongo:27017")
+        monkeypatch.setattr(iso, "_compose_host_resolves", lambda hostname="mongo": False)
+        assert "127.0.0.1" in iso.direct_mongo_url("mongodb://mongo:27017")
 
 
 class TestStaleSweep:

@@ -10,10 +10,24 @@ they can be tested without a database.
 
 import os
 import re
+import socket
 import uuid
 
 STALE_AFTER_SECONDS = 7200
 _PREFIX = "biopipe_test_"
+
+
+def _compose_host_resolves(hostname: str = "mongo") -> bool:
+    """Whether the compose service name resolves, i.e. are we in the network?
+
+    Inside the `api` container `mongo` is a real DNS name; on the host it is
+    not. That is the whole difference between the two ways this suite is run.
+    """
+    try:
+        socket.getaddrinfo(hostname, None)
+        return True
+    except OSError:
+        return False
 
 
 def ensure_run_token() -> str:
@@ -33,10 +47,28 @@ def worker_db_name() -> str:
     return run_prefix() + os.environ.get("PYTEST_XDIST_WORKER", "main")
 
 
-def direct_mongo_url(base_url: str) -> str:
-    """Moved verbatim from the beanie_models fixture -- see its history."""
+def direct_mongo_url(base_url: str, *, host_reachable: bool | None = None) -> str:
+    """A single-node, direct connection to whichever Mongo this run can see.
+
+    `replicaSet=` is stripped and `directConnection=true` forced because the
+    set advertises its members under names only the compose network knows;
+    a replica-set-aware driver would follow those and hang.
+
+    The `mongo:` -> `127.0.0.1:` rewrite is the part that depends on where
+    pytest is running. From the host, `mongo` does not resolve and the
+    published port on localhost is the way in. From inside the `api`
+    container the opposite holds: `mongo` resolves and nothing listens on
+    the container's own localhost. Rewriting unconditionally -- as this did
+    when it was inlined in `beanie_models` -- makes every database test in
+    an in-container run fail server selection, which is what it silently
+    did until #679 (6 errors in tests/storage alone, on main).
+
+    `host_reachable` overrides the probe, for tests.
+    """
     url = base_url
-    if "://mongo:" in url:
+    if host_reachable is None:
+        host_reachable = _compose_host_resolves()
+    if "://mongo:" in url and not host_reachable:
         url = url.replace("://mongo:", "://127.0.0.1:")
     url = re.sub(r"replicaSet=[^&]*&?", "", url)
     if "directConnection=" not in url:
