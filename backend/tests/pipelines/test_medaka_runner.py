@@ -133,3 +133,100 @@ class TestModelLine:
         consensus that already exists on disk."""
         assert runner.parse_model_line("no model information here") == {}
         assert runner.parse_model_line("") == {}
+
+
+def _write_fasta(path: Path, records: list[tuple[str, str]]) -> Path:
+    """Write records as FASTA, wrapping at 60 columns.
+
+    Line wrapping is deliberate: a comparison implemented per-line rather
+    than per-sequence passes on single-line fixtures and fails on real
+    tool output, which always wraps.
+    """
+    with open(path, "w") as fh:
+        for name, seq in records:
+            fh.write(f">{name}\n")
+            for i in range(0, len(seq), 60):
+                fh.write(seq[i : i + 60] + "\n")
+    return path
+
+
+class TestChangedPositions:
+    def test_identical_sequences_report_zero(self, tmp_path):
+        seq = "ACGT" * 50
+        draft = _write_fasta(tmp_path / "d.fasta", [("ctg1", seq)])
+        cons = _write_fasta(tmp_path / "c.fasta", [("ctg1", seq)])
+
+        facts = runner.count_changed_positions(draft, cons)
+
+        assert facts["polish_changed_positions"] == 0
+        assert facts["polish_contigs_compared"] == 1
+
+    def test_known_substitutions_are_recovered_exactly(self, tmp_path):
+        """The count is the evidence that polishing did anything.
+
+        Medaka prints no tally of its own, so if this number is wrong there
+        is nothing else on the object to contradict it.
+        """
+        seq = list("ACGT" * 50)
+        draft = _write_fasta(tmp_path / "d.fasta", [("ctg1", "".join(seq))])
+        for pos in (10, 42, 99):
+            seq[pos] = "A" if seq[pos] != "A" else "C"
+        cons = _write_fasta(tmp_path / "c.fasta", [("ctg1", "".join(seq))])
+
+        facts = runner.count_changed_positions(draft, cons)
+
+        assert facts["polish_changed_positions"] == 3
+
+    def test_length_change_is_reported_separately(self, tmp_path):
+        """An indel is not a substitution count.
+
+        Folding a length change into `polish_changed_positions` would make
+        a one-base insertion look like every downstream base changed.
+        """
+        draft = _write_fasta(tmp_path / "d.fasta", [("ctg1", "ACGT" * 50)])
+        cons = _write_fasta(tmp_path / "c.fasta", [("ctg1", "ACGT" * 50 + "AAA")])
+
+        facts = runner.count_changed_positions(draft, cons)
+
+        assert facts["polish_length_delta"] == 3
+
+    def test_contig_missing_from_consensus_does_not_raise(self, tmp_path):
+        """Degrade to a visible count, never to an exception.
+
+        The facts exist to make failures visible; a parser that raises
+        would discard a consensus that is already on disk.
+        """
+        draft = _write_fasta(
+            tmp_path / "d.fasta", [("ctg1", "ACGT" * 20), ("ctg2", "TTTT" * 20)]
+        )
+        cons = _write_fasta(tmp_path / "c.fasta", [("ctg1", "ACGT" * 20)])
+
+        facts = runner.count_changed_positions(draft, cons)
+
+        assert facts["polish_contigs_unmatched"] == 1
+        assert facts["polish_contigs_compared"] == 1
+
+    def test_multiline_wrapping_does_not_affect_the_count(self, tmp_path):
+        seq = "ACGTACGTGG" * 30
+        draft = _write_fasta(tmp_path / "d.fasta", [("ctg1", seq)])
+        changed = seq[:5] + ("A" if seq[5] != "A" else "C") + seq[6:]
+        cons = _write_fasta(tmp_path / "c.fasta", [("ctg1", changed)])
+
+        facts = runner.count_changed_positions(draft, cons)
+
+        assert facts["polish_changed_positions"] == 1
+
+    def test_header_description_is_ignored_when_matching(self, tmp_path):
+        """Medaka appends its own description to contig headers.
+
+        Matching on the full header line would find zero shared contigs and
+        silently report a polish that changed nothing.
+        """
+        seq = "ACGT" * 40
+        draft = _write_fasta(tmp_path / "d.fasta", [("ctg1", seq)])
+        cons = _write_fasta(tmp_path / "c.fasta", [("ctg1 medaka consensus", seq)])
+
+        facts = runner.count_changed_positions(draft, cons)
+
+        assert facts["polish_contigs_compared"] == 1
+        assert facts["polish_contigs_unmatched"] == 0

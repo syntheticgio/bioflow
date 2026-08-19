@@ -116,3 +116,88 @@ def parse_model_line(text: str) -> dict:
         }
 
     return {}
+
+
+def _read_fasta(path: Path) -> dict[str, str]:
+    """Contig name -> sequence, uppercased.
+
+    Keyed on the first whitespace-delimited token of the header, not the
+    whole line: Medaka appends its own description to headers, and matching
+    on the full line would find zero shared contigs and report a polish
+    that changed nothing.
+
+    Same streaming shape `gc_tracks.py` uses. Uppercased because soft-
+    masking is a claim about repeats, not about bases, and a draft that
+    disagrees with the consensus only in case has not been polished.
+    """
+    contigs: dict[str, str] = {}
+    name: str | None = None
+    buf: list[str] = []
+
+    with open(path, errors="replace") as fh:
+        for line in fh:
+            stripped = line.rstrip("\n\r")
+            if stripped.startswith(">"):
+                if name is not None:
+                    contigs[name] = "".join(buf)
+                parts = stripped[1:].split()
+                name = parts[0] if parts else ""
+                buf = []
+            elif name is not None:
+                buf.append(stripped.strip().upper())
+
+    if name is not None:
+        contigs[name] = "".join(buf)
+    return contigs
+
+
+def count_changed_positions(draft: Path, consensus: Path) -> dict:
+    """How much the consensus differs from the draft it was built from.
+
+    Medaka, unlike Polypolish, prints no per-contig tally -- it writes a
+    consensus and stops. Without this number a run that changed nothing
+    would be indistinguishable from one that corrected a thousand errors,
+    and "polishing complete" would be the only evidence on the object.
+
+    **Alignment-free by design.** An aligner in the fact-gathering path
+    would be a second failure surface for a number that exists to make
+    failures visible. Medaka preserves contig identity and order, so a
+    name-keyed comparison is well-defined. Where a contig's length changed,
+    the substitutions over the shared prefix are still counted and the
+    difference is reported as `polish_length_delta` rather than being
+    forced into a substitution count that would be meaningless -- a
+    one-base insertion would otherwise read as every downstream base having
+    changed.
+
+    A contig in the draft with no counterpart in the consensus is counted
+    in `polish_contigs_unmatched` rather than raising. Degrading to a
+    visible number beats discarding a consensus that is already on disk.
+    """
+    try:
+        draft_contigs = _read_fasta(draft)
+        consensus_contigs = _read_fasta(consensus)
+    except OSError:
+        return {}
+
+    changed = 0
+    delta = 0
+    compared = 0
+    unmatched = 0
+
+    for name, draft_seq in draft_contigs.items():
+        polished_seq = consensus_contigs.get(name)
+        if polished_seq is None:
+            unmatched += 1
+            continue
+        compared += 1
+        delta += len(polished_seq) - len(draft_seq)
+        changed += sum(
+            1 for a, b in zip(draft_seq, polished_seq, strict=False) if a != b
+        )
+
+    return {
+        "polish_changed_positions": changed,
+        "polish_length_delta": delta,
+        "polish_contigs_compared": compared,
+        "polish_contigs_unmatched": unmatched,
+    }
