@@ -88,9 +88,12 @@ class TestStaleSweep:
         metas = {"biopipe_test_dead0000_gw0": self.NOW - 60}
         assert iso.stale_test_dbs(names, metas, self.NOW, "biopipe_test_live0000_") == []
 
-    def test_db_without_meta_is_stale(self):
+    def test_db_without_meta_is_left_alone(self):
+        # An unstamped database is being born, not abandoned: a concurrent
+        # run creates it and only then writes its marker. Sweeping here
+        # drops it mid-init_beanie and fails that run's index build.
         names = ["biopipe_test_dead0000_gw0"]
-        assert iso.stale_test_dbs(names, {}, self.NOW, "biopipe_test_live0000_") == names
+        assert iso.stale_test_dbs(names, {}, self.NOW, "biopipe_test_live0000_") == []
 
     def test_own_run_is_never_swept_even_if_old(self):
         names = ["biopipe_test_live0000_gw0"]

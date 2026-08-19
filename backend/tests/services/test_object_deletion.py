@@ -13,27 +13,50 @@ from app.services import object_service, project_service
 from tests.services.helpers import TEST_OWNER
 
 pytestmark = [
-    pytest.mark.usefixtures("beanie_models"),
+    pytest.mark.usefixtures("beanie_models", "private_report_roots"),
     pytest.mark.asyncio(loop_scope="module"),
-    # Pinned to one xdist worker (requires --dist loadgroup). Unlike the rest
-    # of the suite, these drive the real `settings.*_dir` roots under /data
-    # rather than a tmp_path: `reap_report_dirs` scans a whole root and decides
-    # what to delete by looking the directory name up as an object id. Since
-    # each worker owns a separate test database, a second worker's reap sees no
-    # row for this one's just-created live directory and deletes it as an
-    # orphan -- so these must not run beside each other.
-    pytest.mark.xdist_group("shared-data-report-dirs"),
 ]
+
+_ROOT_NAMES = (
+    "qc_reports_dir",
+    "bam_stats_dir",
+    "vcf_stats_dir",
+    "annotation_stats_dir",
+    "sv_stats_dir",
+)
+
+
+@pytest.fixture(scope="module", autouse=True)
+def private_report_roots(tmp_path_factory):
+    """Give this module its own report roots instead of the real ones.
+
+    `reap_report_dirs` scans an entire root and deletes any directory whose
+    name is not an object id in *its own* database. Pointed at the shared
+    /data roots, that makes the module hostile to anything else running at
+    the same time: another test run's live report directory is, from here,
+    an orphan to be swept. An `xdist_group` mark only serializes workers
+    within one run, so two concurrent runs still destroyed each other's
+    fixtures -- which is what the two-simultaneous-suites check caught.
+
+    Both the settings properties and `object_service._REPORT_ROOTS` are
+    redirected: the latter is a module-level tuple built at import time, so
+    patching settings alone would leave the code under test on the real
+    roots while the assertions looked at the private ones.
+    """
+    base = tmp_path_factory.mktemp("report-roots")
+    with pytest.MonkeyPatch.context() as mp:
+        roots = []
+        for name in _ROOT_NAMES:
+            path = base / name
+            path.mkdir(parents=True, exist_ok=True)
+            mp.setattr(type(settings), name, property(lambda _s, p=path: p))
+            roots.append(path)
+        mp.setattr(object_service, "_REPORT_ROOTS", tuple(roots))
+        yield
 
 
 def report_dirs():
-    return (
-        settings.qc_reports_dir,
-        settings.bam_stats_dir,
-        settings.vcf_stats_dir,
-        settings.annotation_stats_dir,
-        settings.sv_stats_dir,
-    )
+    return tuple(getattr(settings, name) for name in _ROOT_NAMES)
 
 
 class TestReportDirCleanup:

@@ -131,11 +131,14 @@ async def beanie_models():
     client = AsyncMongoClient(direct_mongo_url(settings.mongo_url), tz_aware=True)
     db = client[worker_db_name()]
 
-    for coll_name in await db.list_collection_names():
-        if not coll_name.startswith("system."):
-            await db[coll_name].delete_many({})
-
+    # Claim the database before touching anything else in it. This write is
+    # what creates it, and until the marker lands a concurrent run's sweep
+    # cannot tell a database being born from one abandoned by a crash.
     await db["_run_meta"].replace_one({}, {"started_at": time.time()}, upsert=True)
+
+    for coll_name in await db.list_collection_names():
+        if not coll_name.startswith("system.") and coll_name != "_run_meta":
+            await db[coll_name].delete_many({})
 
     await init_beanie(database=db, document_models=ALL_MODELS)
 
