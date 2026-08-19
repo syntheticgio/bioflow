@@ -2609,6 +2609,7 @@ async def _apply_polish_assembly(result: dict, *, owner: str) -> None:
         draft_id=draft_id,
         polished_id=str(polished.id),
         changed=facts.get("polish_changed_positions"),
+        tool=facts.get("polish_tool"),
         careful=facts.get("polish_careful_mode"),
     )
 

@@ -438,7 +438,13 @@ def polish_long_assembly(ctx: JobContext) -> dict:
     code = run_subprocess(
         ctx,
         medaka_runner.build_consensus_command(
-            medaka_path=tool.path,
+            # The probe versions the `medaka` binary (tool.path); the
+            # wrapper script `medaka_consensus` is what's actually executed
+            # here, hence settings.medaka_path rather than tool.path. Same
+            # conda prefix, deliberately different entry points -- see
+            # settings.medaka_path / settings.medaka_binary_path in
+            # app/config.py.
+            medaka_path=settings.medaka_path,
             draft=draft,
             reads=reads,
             outdir=outdir,
