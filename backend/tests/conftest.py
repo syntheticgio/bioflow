@@ -52,7 +52,15 @@ async def beanie_models():
     """
     from app.db.index_reconcile import reconcile_indexes
 
-    client = AsyncMongoClient(settings.mongo_url, tz_aware=True)
+    mongo_url = settings.mongo_url
+    if "://mongo:" in mongo_url:
+        mongo_url = mongo_url.replace("://mongo:", "://127.0.0.1:")
+    import re
+    mongo_url = re.sub(r"replicaSet=[^&]*&?", "", mongo_url)
+    if "directConnection=" not in mongo_url:
+        sep = "&" if "?" in mongo_url else "?"
+        mongo_url += f"{sep}directConnection=true"
+    client = AsyncMongoClient(mongo_url, tz_aware=True)
     db = client["biopipe_test"]
 
     for model in ALL_MODELS:

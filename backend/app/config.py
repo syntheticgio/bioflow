@@ -82,9 +82,9 @@ class Settings(BaseSettings):
     # docs/superpowers/specs/2026-08-07-cgroup-hard-limits-design.md.
     bioflow_hard_mem_mb: int | None = None
 
-    @field_validator("bioflow_hard_mem_mb", mode="before")
+    @field_validator("bioflow_hard_mem_mb", "bioinfo_cpu_budget", "bioinfo_mem_budget_mb", mode="before")
     @classmethod
-    def _empty_string_hard_mem_mb_is_none(cls, v):
+    def _empty_string_numeric_is_none(cls, v):
         """Compose always sets BIOFLOW_HARD_MEM_MB, resolving to '' when the
         launcher has not configured a hard limit (the default, off state) --
         pydantic-settings does not treat '' as None for an int field on its
