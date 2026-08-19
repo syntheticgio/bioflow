@@ -241,22 +241,67 @@ for arg in "${PYTEST_ARGS[@]}"; do
 done
 [ -n "$has_verbosity" ] || PYTEST_ARGS+=(-q)
 
+# Parallel by default, in two phases: everything but `heavy` across
+# PYTEST_WORKERS workers, then the heavy-marked tests alone. Same reasoning as
+# the Makefile's -- see the PYTEST_WORKERS comment there for why 8 rather than
+# `auto`, which would size the run by CPU count (24) while memory (12.4 GB) is
+# what is actually scarce.
+#
+# Lower than the Makefile's default would be defensible here, since several
+# worktree runs can be in flight at once, but they are already separated: each
+# gets its own Mongo (below) and its own test databases (per-run token, #679).
+# 8 stays for one reason -- an agent waiting on a worktree run is the case this
+# script exists to serve, and the measured cost is ~2.4 GB.
+WORKERS="${PYTEST_WORKERS:-8}"
+
+# Unless the caller is steering execution themselves. `-m` matters as much as
+# `-n`: a caller selecting a marker may be deliberately asking for the heavy
+# tests, and splitting their selection into two phases would run something
+# they did not ask for and drop something they did.
+CALLER_CONTROLS=
+for arg in "${PYTEST_ARGS[@]}"; do
+  case "$arg" in
+    -n | -n* | --numprocesses | --numprocesses=* | -m | -m* | --dist | --dist=* | -p)
+      CALLER_CONTROLS=1
+      ;;
+  esac
+done
+
 # The interpreter is named by absolute path, never as bare `python`: the image
 # puts a tool venv (/opt/medaka/env/bin) ahead of the app interpreter on PATH,
 # so both `python` and `python3` resolve to an environment with none of the
 # app's dependencies in it -- "No module named pytest", from an image where
 # pytest is demonstrably installed.
-docker run --rm \
-  --network biopipe_default \
-  -v "$REPO_ROOT/backend/app:/srv/app" \
-  -v "$REPO_ROOT/backend/tests:/srv/tests" \
-  -v "$REPO_ROOT/VERSION:/VERSION:ro" \
-  -v "$REPO_ROOT/docker-compose.override.yml:/docker-compose.override.yml:ro" \
-  -v "$REPO_ROOT/backend/pi-skills:/backend/pi-skills:ro" \
-  -v "$DATA_SOURCE:/data" \
-  -w /srv \
-  -e MONGO_URL="mongodb://$MONGO_NAME:27017/?replicaSet=rs0" \
-  -e REDIS_URL="redis://redis:6379/0" \
-  ${BIOFLOW_TEST_LIVE_DATA:+-e BIOFLOW_TEST_LIVE_DATA="$BIOFLOW_TEST_LIVE_DATA"} \
-  "${SSHD_ENV[@]+"${SSHD_ENV[@]}"}" \
-  "$IMAGE" /usr/local/bin/python3.12 -m pytest "${PYTEST_ARGS[@]}"
+#
+# --cpus bounds the run so several agents' worktree suites cannot saturate the
+# host between them. It is deliberately a little above WORKERS: the workers are
+# the parallel part, but the controller process and Mongo's client threads want
+# time too, and pinning it exactly to WORKERS makes the run slower than the
+# same worker count without a limit.
+run_pytest() {
+  docker run --rm \
+    --network biopipe_default \
+    --cpus "$((WORKERS + 2))" \
+    -v "$REPO_ROOT/backend/app:/srv/app" \
+    -v "$REPO_ROOT/backend/tests:/srv/tests" \
+    -v "$REPO_ROOT/VERSION:/VERSION:ro" \
+    -v "$REPO_ROOT/docker-compose.override.yml:/docker-compose.override.yml:ro" \
+    -v "$REPO_ROOT/backend/pi-skills:/backend/pi-skills:ro" \
+    -v "$DATA_SOURCE:/data" \
+    -w /srv \
+    -e MONGO_URL="mongodb://$MONGO_NAME:27017/?replicaSet=rs0" \
+    -e REDIS_URL="redis://redis:6379/0" \
+    ${BIOFLOW_TEST_LIVE_DATA:+-e BIOFLOW_TEST_LIVE_DATA="$BIOFLOW_TEST_LIVE_DATA"} \
+    "${SSHD_ENV[@]+"${SSHD_ENV[@]}"}" \
+    "$IMAGE" /usr/local/bin/python3.12 -m pytest "$@"
+}
+
+if [ -n "$CALLER_CONTROLS" ]; then
+  run_pytest "${PYTEST_ARGS[@]}"
+else
+  run_pytest -m "not heavy" -n "$WORKERS" --dist loadgroup "${PYTEST_ARGS[@]}"
+  # Exit 5 is "no tests collected", which is what the heavy phase returns
+  # while the marker has no members. Tolerated so the split costs nothing
+  # until a test earns the mark.
+  run_pytest -m heavy "${PYTEST_ARGS[@]}" || [ $? -eq 5 ]
+fi

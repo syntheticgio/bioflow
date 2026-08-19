@@ -1,6 +1,25 @@
-.PHONY: up down logs ps build containers test test-fast test-queue lint shell mongo redis clean check-home release release-launcher backup restore backup-verify
+.PHONY: up down logs ps build containers test test-serial test-fast test-queue lint shell mongo redis clean check-home release release-launcher backup restore backup-verify
 
 COMPOSE := docker compose
+
+# Workers for the parallel test phase. Override per-invocation:
+#   make test PYTEST_WORKERS=4
+#
+# 8, not `auto`: `auto` is one worker per core, and the Docker VM this runs in
+# reports 24 CPUs against 12.4 GB of RAM, so `auto` sizes the run by the
+# resource that is not scarce. Measured on the full suite (6299 tests) --
+# 4: 56s, 8: 39s, 12: 36s, 16: 35s -- so 8 takes about 90% of the available
+# speedup, and everything past it buys seconds while multiplying the memory a
+# second agent's concurrent run has to fit alongside. Peak api-container
+# memory at 8 workers was 2.4 GB.
+PYTEST_WORKERS ?= 8
+
+# The parallel phase excludes `heavy`; the sequential phase runs only those,
+# after it, with nothing else alive. `|| [ $$? -eq 5 ]` tolerates pytest's
+# exit 5 ("no tests collected"), which is what the heavy phase returns while
+# the marker has no members -- deliberately, so the split costs nothing until
+# a test earns the mark.
+PYTEST_PAR := -m "not heavy" -n $(PYTEST_WORKERS) --dist loadgroup
 
 containers: ## Rebuild and restart api/web/worker, then restart worker (picks up handler code)
 	$(COMPOSE) up -d --build api web worker
@@ -31,14 +50,20 @@ ps:
 build:
 	$(COMPOSE) build
 
-test: ## Run the backend test suite
+test: ## Run the backend test suite (parallel; PYTEST_WORKERS=N to change)
+	$(COMPOSE) exec -T api pytest $(PYTEST_PAR) --tb=short
+	$(COMPOSE) exec -T api pytest -m heavy --tb=short || [ $$? -eq 5 ]
+
+test-serial: ## Run the backend test suite one test at a time
 	$(COMPOSE) exec -T api pytest -v
 
 test-fast: ## Run fast unit tests (skipping slow tests)
-	$(COMPOSE) exec -T api pytest -m "not slow" --tb=short
+	$(COMPOSE) exec -T api pytest -m "not slow and not heavy" -n $(PYTEST_WORKERS) --dist loadgroup --tb=short
+	$(COMPOSE) exec -T api pytest -m "heavy and not slow" --tb=short || [ $$? -eq 5 ]
 
 test-queue: ## Run only the queue tests
-	$(COMPOSE) exec -T api pytest tests/queue -v
+	$(COMPOSE) exec -T api pytest tests/queue $(PYTEST_PAR) --tb=short
+	$(COMPOSE) exec -T api pytest tests/queue -m heavy --tb=short || [ $$? -eq 5 ]
 
 lint:
 	$(COMPOSE) exec -T api ruff check app

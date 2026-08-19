@@ -834,6 +834,19 @@ git commit -m "ci: run the backend suite in parallel with a sequential heavy pha
 
 ### Task 11: memory observation and heavy-marker population
 
+**Outcome (2026-08-19): nothing marked, and that is the answer.** Peak
+api-container memory during a full `-n 8` run was **2.6 GiB against 12.4 GB
+available** — no pressure, no swap, no exit 137. The `heavy` marker stays
+empty and its phase collects nothing, exactly as the plan allows for.
+
+The worker-count decision changed on measurement. The plan proposed 4 on the
+assumption that memory was the binding constraint; the Docker VM turns out to
+report 24 CPUs against 12.4 GB of RAM, so `-n auto` would size the run by the
+resource that is *not* scarce, while 4 left most of the machine idle. Full
+suite (6,299 tests): **4 → 56s, 8 → 39s, 12 → 36s, 16 → 35s.** 8 takes ~90% of
+the available speedup, and past it every extra worker buys seconds while
+multiplying what a second agent's concurrent run has to fit alongside.
+
 **Files:**
 - Possibly modify: test files found to spike memory (cannot be enumerated until observed).
 
