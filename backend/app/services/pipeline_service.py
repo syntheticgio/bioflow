@@ -3852,7 +3852,9 @@ async def launch_merge_structural_variants(
 
     ref_ids = {r[1] for r in references.values()}
     if len(ref_ids) > 1:
-        ref_details = ", ".join(f"'{name}': reference '{ref[0]}'" for name, ref in references.items())
+        ref_details = ", ".join(
+            f"'{name}': reference '{ref[0]}'" for name, ref in references.items()
+        )
         raise ValidationError(
             f"Cannot merge SV callsets across differing reference assemblies: {ref_details}.",
             details={"references": {name: str(ref[1]) for name, ref in references.items()}},

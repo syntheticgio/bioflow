@@ -82,7 +82,12 @@ class Settings(BaseSettings):
     # docs/superpowers/specs/2026-08-07-cgroup-hard-limits-design.md.
     bioflow_hard_mem_mb: int | None = None
 
-    @field_validator("bioflow_hard_mem_mb", "bioinfo_cpu_budget", "bioinfo_mem_budget_mb", mode="before")
+    @field_validator(
+        "bioflow_hard_mem_mb",
+        "bioinfo_cpu_budget",
+        "bioinfo_mem_budget_mb",
+        mode="before",
+    )
     @classmethod
     def _empty_string_numeric_is_none(cls, v):
         """Compose always sets BIOFLOW_HARD_MEM_MB, resolving to '' when the

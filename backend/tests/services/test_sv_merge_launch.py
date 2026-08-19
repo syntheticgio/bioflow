@@ -3,10 +3,10 @@ from pathlib import Path
 
 import pytest
 
-from app.errors import ValidationError
-from app.models import DataObject, ObjectRole, SidecarRole
-from app.services import object_service, pipeline_service, project_service
 from app.config import settings
+from app.errors import ValidationError
+from app.models import ObjectRole, SidecarRole
+from app.services import object_service, pipeline_service, project_service
 
 pytestmark = [
     pytest.mark.usefixtures("beanie_models"),
@@ -112,6 +112,7 @@ async def test_merge_structural_variants_refuses_differing_references(monkeypatc
 async def test_merge_structural_variants_succeeds_on_same_reference(monkeypatch):
     async def _stub_enqueue(*args, **kwargs):
         from unittest.mock import MagicMock
+
         from beanie import PydanticObjectId
         j = MagicMock()
         j.id = PydanticObjectId()

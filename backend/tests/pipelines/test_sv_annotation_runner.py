@@ -93,7 +93,7 @@ chr1\t1200\t.\tA\tG\t99\tPASS\tBCSQ=missense|GENE_A|rna-1|protein_coding|+|10K>1
     # Header injected
     assert "##INFO=<ID=BCSQ," in out_text
 
-    lines = [l for l in out_text.splitlines() if not l.startswith("#")]
+    lines = [line for line in out_text.splitlines() if not line.startswith("#")]
     assert len(lines) == 3
 
     # Multi-gene deletion (GENE_A and GENE_B)

@@ -1,8 +1,11 @@
 """Structural Variant Gene Overlap Annotator.
 
-Pure functions and runners for intersecting SV intervals [POS, END] against reference GFF/GTF annotations.
+Pure functions and runners for intersecting SV intervals [POS, END] against
+reference GFF/GTF annotations.
 
-Provides Option A annotation for Issue #652, attaching gene overlap information to symbolic SV records (e.g. <DEL>, <INS>, <DUP>) where small-variant tools like bcftools csq cannot produce predictions.
+Provides Option A annotation for Issue #652, attaching gene overlap
+information to symbolic SV records (e.g. <DEL>, <INS>, <DUP>) where
+small-variant tools like bcftools csq cannot produce predictions.
 """
 
 import bisect
@@ -10,7 +13,6 @@ import gzip
 import re
 from pathlib import Path
 
-from app.pipelines import annotation_parse
 from app.pipelines.annotation_parse import parse_gff_line, parse_gtf_line
 
 _BCSQ_HEADER = (
@@ -35,7 +37,7 @@ def _open_writer(path: Path):
     """Gzip-aware line writer."""
     if str(path).endswith(".gz"):
         return gzip.open(path, "wt")
-    return open(path, "wt")
+    return open(path, 'w')
 
 
 def build_gene_index(gff_path: Path) -> dict[str, list[tuple[int, int, str]]]:

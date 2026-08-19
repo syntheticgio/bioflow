@@ -16,7 +16,6 @@ from pathlib import Path
 
 from app.pipelines import medaka_runner as runner
 
-
 # Medaka announces its model choice on stderr before inference. The two
 # shapes below are what distinguish a run that read basecaller metadata
 # from one that fell back -- a distinction invisible in the consensus.

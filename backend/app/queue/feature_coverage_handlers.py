@@ -31,7 +31,9 @@ from app.queue.registry import HandlerMode, JobContext, handler
 log = get_logger(__name__)
 
 
-def _run_sort_with_clean_stdout(ctx: JobContext, cmd: list[str], *, stdout_path: str, log_path: str) -> int:
+def _run_sort_with_clean_stdout(
+    ctx: JobContext, cmd: list[str], *, stdout_path: str, log_path: str
+) -> int:
     """Run `bedtools sort`, keeping its real output separate from its log.
 
     `run_subprocess` (executor.py) always merges stderr into whatever
