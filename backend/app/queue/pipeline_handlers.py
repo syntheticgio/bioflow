@@ -20,6 +20,7 @@ from app.pipelines import (
     contamination_stats,
     cutadapt_runner,
     fastp_runner,
+    nanoplot_raw,
     qc_stats,
     tile_scanner,
     tools,
@@ -586,6 +587,12 @@ def _run_long_read_qc(
         # N50 is the headline number for a long-read run, the way Q30 is for a
         # short-read one.
         "--N50",
+        # Per-read lengths and qualities to a TSV beside the report. NanoPlot
+        # computes them either way on its path to the plots and discards them
+        # without this; they are what the length and density distributions on
+        # the QC tab are binned from. The file is deleted below once binned --
+        # see nanoplot_raw for why it is not kept.
+        "--raw",
     ]
 
     ctx.progress(phase="nanoplot", pct=0.1, message="running NanoPlot")
@@ -600,6 +607,7 @@ def _run_long_read_qc(
         raise _failure(code, log_path, tool="NanoPlot")
 
     facts = _parse_nanoplot_stats(out_dir)
+    facts.update(_bin_nanoplot_raw(out_dir))
     facts["qc_tool"] = "NanoPlot"
     facts["qc_tool_version"] = nanoplot.version
 
@@ -624,6 +632,29 @@ def _run_long_read_qc(
     facts["qc_read_chemistry"] = chemistry.value
     facts["qc_read_chemistry_reason"] = reason
 
+    return facts
+
+
+def _bin_nanoplot_raw(out_dir: Path) -> dict:
+    """Bin `--raw`'s per-read TSV into distribution facts, then delete it.
+
+    The delete is the point of doing this here rather than leaving the file
+    for a later reader: on a multi-million-read ONT run the TSV is tens of
+    megabytes, and its only consumer is the binning one line above. Keeping it
+    would put that cost in every long-read object's report directory forever
+    in exchange for nothing the facts do not already carry.
+
+    Deleted even when the binning found nothing, since a file that could not
+    be parsed is no more useful to keep than one that could.
+    """
+    raw = out_dir / "NanoPlot-data.tsv.gz"
+    try:
+        facts = nanoplot_raw.bin_raw_reads(raw)
+    finally:
+        # missing_ok: a NanoPlot version that ignored --raw, or a parse that
+        # already failed on an absent file. Neither is worth failing a QC job
+        # whose stats and HTML report are both already written.
+        raw.unlink(missing_ok=True)
     return facts
 
 
