@@ -20,7 +20,7 @@ from app.config import settings
 from app.errors import PermanentError
 from app.logging import get_logger
 from app.models import IoClass, JobClass, JobResources
-from app.pipelines import counts_runner, de_runner, tools
+from app.pipelines import counts_runner, de_runner, salmon_runner, tools
 from app.queue.align_handlers import _resolve_blob
 from app.queue.executor import run_subprocess
 from app.queue.pipeline_handlers import _failure, _prepare_workdir
@@ -269,3 +269,169 @@ def differential_expression(ctx: JobContext) -> dict:
         "facts": result.facts,
         "workdir": str(work),
     }
+
+
+def _salmon_result_dict(
+    *,
+    object_id: str,
+    transcriptome_object_id: str | None,
+    project_id: str | None,
+    job_id: str,
+    output_path: str,
+    tool_version: str | None,
+    transcriptome_name: str,
+    transcriptome_sha256: str | None,
+    facts: dict,
+    workdir: str,
+) -> dict:
+    """The dict `results._apply_salmon_quantify` consumes.
+
+    Split out from the handler so the key contract can be tested without
+    running Salmon.
+
+    `annotation_sha256` carries the *transcriptome* digest. There is no
+    annotation in this pipeline, but that is the key `pipeline_service` reads
+    when it assembles a differential expression design, and
+    `de_runner.merge_counts` refuses samples whose values differ. Filling it
+    with the transcriptome digest makes that gate do the right thing here: two
+    samples quantified against different transcriptomes are refused, and so is
+    a design mixing Salmon output with featureCounts output -- correctly, since
+    those two do not describe the same gene universe.
+    """
+    enriched = dict(facts)
+    enriched["quantified_by"] = "salmon"
+    return {
+        "object_id": object_id,
+        "transcriptome_object_id": transcriptome_object_id,
+        "project_id": project_id,
+        "job_id": job_id,
+        "output": {"tmp_path": output_path, "name": Path(output_path).name},
+        "tool_version": tool_version,
+        "annotation_name": transcriptome_name,
+        "annotation_sha256": transcriptome_sha256,
+        "facts": enriched,
+        "workdir": workdir,
+    }
+
+
+@handler(
+    "salmon_quantify",
+    mode=HandlerMode.SUBPROCESS,
+    job_class=JobClass.COMPUTE,
+    # Salmon holds the transcriptome index in memory and streams reads past
+    # it. The index for a vertebrate transcriptome is the driver; 8 GB covers
+    # it. HEAVY io because it reads the FASTQ files end to end.
+    resources=JobResources(cpu=4, mem_mb=8192, io=IoClass.HEAVY),
+    max_attempts=2,
+)
+def salmon_quantify(ctx: JobContext) -> dict:
+    """Quantify one sample against a transcriptome, without aligning.
+
+    One sample per job, matching `quantify` -- adding a thirteenth sample
+    costs one job rather than redoing twelve, and each per-sample count is a
+    first-class object with its own provenance.
+
+    Runs off the event loop in a worker thread and so cannot touch the
+    database: it returns a plain dict for `results._apply_salmon_quantify`.
+    """
+    salmon = tools.require(tools.salmon())
+
+    object_id = ctx.payload.get("object_id")
+    if not object_id:
+        raise PermanentError("salmon_quantify requires an 'object_id'")
+
+    work = _prepare_workdir(ctx, "salmon_quantify")
+
+    transcriptome_name = Path(
+        ctx.payload.get("transcriptome_name") or "transcriptome.fna"
+    ).name
+    transcriptome = work / transcriptome_name
+    transcriptome.unlink(missing_ok=True)
+    transcriptome.symlink_to(_resolve_blob(ctx.payload, "transcriptome"))
+
+    reads: list[Path] = []
+    for key, default in (("reads", "reads_1.fastq.gz"), ("reads2", "reads_2.fastq.gz")):
+        if key == "reads2" and not ctx.payload.get("reads2_blob_id"):
+            continue
+        name = Path(ctx.payload.get(f"{key}_name") or default).name
+        link = work / name
+        link.unlink(missing_ok=True)
+        link.symlink_to(_resolve_blob(ctx.payload, key))
+        reads.append(link)
+
+    log_path = settings.logs_dir / f"{ctx.job_id}.log"
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+
+    index_dir = work / "index"
+    ctx.progress(phase="indexing", pct=0.1, message="building transcriptome index")
+    code = run_subprocess(
+        ctx,
+        salmon_runner.index_command(
+            transcriptome=transcriptome,
+            index_dir=index_dir,
+            salmon_path=salmon.path,
+        ),
+        log_path=str(log_path),
+    )
+    if code != 0:
+        raise _failure(code, log_path, "salmon index")
+
+    out_dir = work / "quant"
+    ctx.progress(phase="quantifying", pct=0.5, message="quantifying transcripts")
+    code = run_subprocess(
+        ctx,
+        salmon_runner.quant_command(
+            index_dir=index_dir,
+            reads=reads,
+            out_dir=out_dir,
+            salmon_path=salmon.path,
+        ),
+        log_path=str(log_path),
+    )
+    if code != 0:
+        raise _failure(code, log_path, "salmon quant")
+
+    quant = salmon_runner.quant_file(out_dir)
+    if not quant.exists():
+        raise PermanentError(
+            "salmon reported success but wrote no quantification",
+            details={"expected": str(quant)},
+        )
+
+    ctx.progress(phase="summarizing", pct=0.9, message="summing transcripts to genes")
+
+    per_transcript, quant_facts = salmon_runner.parse_quant(
+        quant.read_text(errors="replace")
+    )
+    headers = [
+        line
+        for line in transcriptome.read_text(errors="replace").splitlines()
+        if line.startswith(">")
+    ]
+    tx2gene = salmon_runner.parse_tx2gene(headers)
+    counts, gene_facts = salmon_runner.summarize_to_gene(per_transcript, tx2gene)
+
+    output = work / salmon_runner.output_name(reads[0].name)
+    output.write_text(salmon_runner.format_counts(counts))
+
+    facts = {**quant_facts, **gene_facts}
+
+    log.info(
+        "salmon_quant_done",
+        job_id=ctx.job_id,
+        genes_detected=facts.get("genes_detected"),
+        transcripts_detected=facts.get("transcripts_detected"),
+    )
+
+    return _salmon_result_dict(
+        object_id=object_id,
+        transcriptome_object_id=ctx.payload.get("transcriptome_object_id"),
+        project_id=ctx.payload.get("project_id"),
+        job_id=ctx.job_id,
+        output_path=str(output),
+        tool_version=salmon.version,
+        transcriptome_name=transcriptome_name,
+        transcriptome_sha256=ctx.payload.get("transcriptome_sha256"),
+        facts=facts,
+        workdir=str(work),
+    )

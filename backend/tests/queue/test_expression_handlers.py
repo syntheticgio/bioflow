@@ -354,3 +354,52 @@ class TestDifferentialExpressionSuccess:
         assert result["counts_object_ids"] == ["id-a", "id-b"]
         assert result["tool_version"] == "0.4.12"
         assert result["output"]["name"] == "de_treated_vs_control.tsv"
+
+
+class TestSalmonQuantifyResultContract:
+    """The salmon_quantify handler's contract with the results applier.
+
+    The handler runs in a worker thread and cannot touch the database, so its
+    entire output is the dict it returns. These tests pin the keys that dict
+    must carry -- particularly annotation_sha256, which is what lets
+    de_runner.merge_counts refuse a design mixing incompatible samples.
+    """
+
+    def test_transcriptome_digest_is_carried_as_annotation_sha256(self):
+        # pipeline_service reads this key out of facts when it builds a DE
+        # design, and merge_counts refuses samples whose values differ. For
+        # Salmon the digest is the transcriptome's -- there is no annotation.
+        # This also, correctly, refuses a matrix mixing Salmon and
+        # featureCounts samples: their digests can never match, and they do
+        # not describe the same gene universe.
+        result = expression_handlers._salmon_result_dict(
+            object_id="64b" + "0" * 21,
+            transcriptome_object_id="64c" + "0" * 21,
+            project_id="64d" + "0" * 21,
+            job_id="64e" + "0" * 21,
+            output_path="/tmp/x/SRR1.counts.tsv",
+            tool_version="1.10.2",
+            transcriptome_name="cds.fna",
+            transcriptome_sha256="deadbeef",
+            facts={"genes_detected": 12},
+            workdir="/tmp/x",
+        )
+        assert result["annotation_sha256"] == "deadbeef"
+        assert result["annotation_name"] == "cds.fna"
+        assert result["facts"]["quantified_by"] == "salmon"
+
+    def test_output_carries_the_path_and_name_the_applier_needs(self):
+        result = expression_handlers._salmon_result_dict(
+            object_id="64b" + "0" * 21,
+            transcriptome_object_id="64c" + "0" * 21,
+            project_id="64d" + "0" * 21,
+            job_id="64e" + "0" * 21,
+            output_path="/tmp/x/SRR1.counts.tsv",
+            tool_version="1.10.2",
+            transcriptome_name="cds.fna",
+            transcriptome_sha256="deadbeef",
+            facts={},
+            workdir="/tmp/x",
+        )
+        assert result["output"]["name"] == "SRR1.counts.tsv"
+        assert result["output"]["tmp_path"] == "/tmp/x/SRR1.counts.tsv"
