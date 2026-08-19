@@ -289,12 +289,18 @@ async def test_resolves_lone_annotation_and_enqueues_exact_payload_keys():
 
 
 @pytest.mark.asyncio
-async def test_refuses_gtf_annotation_not_in_the_format_map():
-    """_FEATURE_COVERAGE_ANNOTATION_FORMATS deliberately excludes
-    FormatKind.GTF (see the comment above that dict in pipeline_service.py):
-    _is_annotation accepts GFF, BED, and GTF, so a project whose only
-    annotation is a GTF resolves here and must be refused rather than
-    silently mapped to the wrong bedtools flavor."""
+async def test_accepts_gtf_annotation_and_maps_to_gff_format():
+    """GTF is position-compatible with GFF3 for bedtools' purposes (see the
+    comment above _FEATURE_COVERAGE_ANNOTATION_FORMATS in
+    pipeline_service.py): both are 9-column tab-separated formats sharing the
+    same seq_id/type/start/end/strand/attributes column layout, differing
+    only in column 8's attribute punctuation, which feature_coverage_runner's
+    _gff_name now handles for both. Unlike featureCounts (which needs GTF's
+    `-g gene_id` convention and cannot read GFF3), bedtools coverage does not
+    care about attribute-name conventions at all -- so a project whose only
+    annotation is a GTF (the common NCBI case where quantify's own sort
+    prefers the GTF, per annotations_for_project) must resolve to a working
+    feature_coverage run, not a refusal."""
     bam = _bam()
     reference = _reference(project_id=bam.project_id)
     annotation = _annotation(project_id=bam.project_id, kind=FormatKind.GTF)
@@ -309,6 +315,22 @@ async def test_refuses_gtf_annotation_not_in_the_format_map():
         if role is SidecarRole.FAI:
             return fai
         return None
+
+    async def fake_resolve_readable(obj):
+        if obj is bam:
+            return "a" * 64, None
+        if obj is annotation:
+            return "c" * 64, None
+        if obj is fai:
+            return None, "/tmp/reference.fa.fai"
+        return None, None
+
+    captured = {}
+
+    async def fake_enqueue(job_type, **kwargs):
+        captured["job_type"] = job_type
+        captured.update(kwargs)
+        return SimpleNamespace(id=PydanticObjectId())
 
     with (
         patch(
@@ -331,10 +353,18 @@ async def test_refuses_gtf_annotation_not_in_the_format_map():
             "app.services.pipeline_service._sidecar_of_role",
             fake_sidecar_of_role,
         ),
+        patch(
+            "app.services.pipeline_service._resolve_readable",
+            fake_resolve_readable,
+        ),
+        patch("app.queue.queue.enqueue", fake_enqueue),
     ):
-        with pytest.raises(ValidationError, match="not GTF") as excinfo:
-            await pipeline_service.launch_feature_coverage(bam_id=bam.id, owner="t")
-    assert excinfo.value.details["kind"] == "gtf"
+        job = await pipeline_service.launch_feature_coverage(bam_id=bam.id, owner="t")
+
+    assert job is not None
+    payload = captured["payload"]
+    assert payload["annotation_format"] == "gff"
+    assert payload["annotation_id"] == str(annotation.id)
 
 
 @pytest.mark.asyncio
