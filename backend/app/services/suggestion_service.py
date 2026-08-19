@@ -2236,6 +2236,84 @@ def build_feature_coverage_card(obj, annotations) -> SuggestionCard | None:
     )
 
 
+def build_salmon_quantify_card(obj, transcriptomes) -> SuggestionCard | None:
+    """Alignment-free transcript quantification for RNA-seq reads.
+
+    `transcriptomes` is a parameter rather than something looked up here, for
+    the same reason `annotations` is on the quantify card above: finding it
+    lists the project, which is async, and the builders here are uniformly
+    synchronous and pure.
+
+    `transcriptomes_for_project` (`pipeline_service.py`) already filters by
+    `role is ObjectRole.TRANSCRIPT` rather than format, which is what keeps
+    `protein.faa` -- FASTA with no byte-level way to tell it apart from a CDS
+    FASTA -- out of the candidate list. What it does not do is deduplicate:
+    it returns every READY TRANSCRIPT-role object, so the same transcriptome
+    registered twice arrives here as two list entries. `resolve_transcriptome`
+    handles this by counting distinct `blob_sha256` values rather than list
+    length, and this card mirrors that so a duplicated upload does not read as
+    an ambiguous choice between two references when there is really one.
+    """
+    if obj.format.kind is not FormatKind.FASTQ:
+        return None
+
+    title = "Quantify transcripts -- Salmon"
+    description = (
+        "Estimate transcript abundance directly from reads, without aligning "
+        "to a genome first."
+    )
+
+    tool = tools.salmon()
+    if not tool.available:
+        return SuggestionCard(
+            kind="salmon_quantify",
+            category="EXPRESSION",
+            title=title,
+            description=description,
+            status=CardStatus.UNAVAILABLE,
+            reason=f"{tool.name} is not installed.",
+        )
+
+    if not transcriptomes:
+        return SuggestionCard(
+            kind="salmon_quantify",
+            category="EXPRESSION",
+            title=title,
+            description=description,
+            status=CardStatus.UNAVAILABLE,
+            reason=(
+                "This project has no transcriptome reference. Download a "
+                "CDS FASTA with the assembly, or upload one."
+            ),
+        )
+
+    distinct = {t.blob_sha256 for t in transcriptomes}
+
+    return SuggestionCard(
+        kind="salmon_quantify",
+        category="EXPRESSION",
+        title=title,
+        description=description,
+        why=(
+            "Salmon quantifies transcripts straight from reads, which is "
+            "faster than aligning first and does not need a genome "
+            "annotation. Note: a CDS reference covers coding transcripts "
+            "only; UTRs and non-coding RNA are not quantified."
+            + (
+                ""
+                if len(distinct) <= 1
+                else " Multiple distinct transcriptomes are available; the "
+                "endpoint will need one named explicitly."
+            )
+        ),
+        status=CardStatus.AVAILABLE,
+        launch={
+            "endpoint": "/pipelines/salmon-quantify",
+            "body": {"reads_id": str(obj.id), "params": {}},
+        },
+    )
+
+
 @dataclass(frozen=True)
 class _Prefetched:
     """The async lookups `suggestions_for` does once, before any builder runs.
@@ -2259,6 +2337,7 @@ class _Prefetched:
     all_read_sets: object | None
     assembly_alignments: object | None
     continuity_candidates: object | None
+    transcriptomes: list[DataObject]
 
 
 # Fixed order, and the order is behaviour: it is the order cards appear in the
@@ -2348,6 +2427,10 @@ CARD_BUILDERS: tuple[tuple[str, object], ...] = (
             obj, ctx.assembly_alignments, ctx.continuity_candidates
         ),
     ),
+    (
+        "salmon_quantify",
+        lambda obj, ctx: build_salmon_quantify_card(obj, ctx.transcriptomes),
+    ),
 )
 
 
@@ -2398,6 +2481,15 @@ async def suggestions_for(obj) -> list[dict]:
         # BAM only: the quantify card is the sole consumer, so listing a
         # project's annotations on a FASTQ click would discard the result.
         annotations = await pipeline_service.annotations_for_project(
+            obj.project_id, owner=obj.owner
+        )
+
+    transcriptomes: list[DataObject] = []
+    if obj.format.kind is FormatKind.FASTQ:
+        # FASTQ only: the salmon quantify card is the sole consumer, so
+        # listing a project's transcriptomes on a BAM click would discard
+        # the result.
+        transcriptomes = await pipeline_service.transcriptomes_for_project(
             obj.project_id, owner=obj.owner
         )
 
@@ -2567,6 +2659,7 @@ async def suggestions_for(obj) -> list[dict]:
         all_read_sets=all_read_sets,
         assembly_alignments=assembly_alignments,
         continuity_candidates=continuity_candidates,
+        transcriptomes=transcriptomes,
     )
 
     cards: list[dict] = []
