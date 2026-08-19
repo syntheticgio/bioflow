@@ -114,3 +114,47 @@ def test_breakends_are_absent_from_the_length_histogram(tmp_path: Path):
     db = tmp_path / "sv.sqlite"
     sv_db.build_sv_db(rows=iter([BND]), db_path=db)
     assert sum(b["count"] for b in sv_db.length_histogram(db)) == 0
+
+
+def test_sub_minimum_length_still_lands_in_the_smallest_bin(tmp_path: Path):
+    """A call shorter than the first bin's named floor (50bp) must still be
+    counted, not silently dropped by falling through every comparison.
+
+    Sniffles2's --minsvlen defaults to 50, but it is a configurable runner
+    parameter -- a run configured lower, or any shorter call, must still show
+    up in the histogram total rather than vanishing with no error.
+    """
+    db = tmp_path / "sv.sqlite"
+    tiny = (
+        "chr1\t2000\tSniffles2.DEL.2\tN\t<DEL>\t60\tPASS\t"
+        "SVTYPE=DEL;SVLEN=-10;END=2010;SUPPORT=5\tGT:DR:DV\t0/1:9:5"
+    )
+    inserted = sv_db.build_sv_db(rows=iter([DEL, INS, BND, tiny]), db_path=db)
+    assert inserted == 4
+
+    hist = sv_db.length_histogram(db)
+    by_label = {b["label"]: b["count"] for b in hist}
+    assert by_label["50 bp"] == 1
+    # DEL, INS, and the sub-minimum tiny record are all non-null lengths;
+    # BND is the only one excluded. Nothing else should be dropped.
+    assert sum(b["count"] for b in hist) == 3
+
+
+def test_build_sv_db_flushes_interior_batches(tmp_path: Path):
+    """The streaming build flushes every _INSERT_BATCH (10,000) rows before
+    the final flush at loop end -- exercise that interior flush branch
+    rather than only ever hitting the tail-batch path with small fixtures."""
+    db = tmp_path / "sv.sqlite"
+    row_count = 25_001
+
+    def make_rows():
+        for i in range(row_count):
+            pos = 1000 + i
+            yield (
+                f"chr1\t{pos}\tSniffles2.INS.{i}\tN\t<INS>\t50\tPASS\t"
+                f"SVTYPE=INS;SVLEN=100;END={pos};SUPPORT=5\tGT:DR:DV\t0/1:5:5"
+            )
+
+    inserted = sv_db.build_sv_db(rows=make_rows(), db_path=db)
+    assert inserted == row_count
+    assert sv_db.count_svs(db, sv_db.SvFilters()) == row_count

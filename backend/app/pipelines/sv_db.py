@@ -337,7 +337,11 @@ def length_histogram(db_path: Path) -> list[dict]:
     counts = [0] * len(LENGTH_BINS)
     for length in lengths:
         for i in range(len(LENGTH_BINS) - 1, -1, -1):
-            if length >= LENGTH_BINS[i][0]:
+            # Bin 0 has no effective floor: anything under its named
+            # threshold (e.g. a sub-50bp call from a lower --minsvlen) still
+            # belongs in the smallest bucket rather than falling through
+            # unmatched and vanishing from the histogram.
+            if length >= LENGTH_BINS[i][0] or i == 0:
                 counts[i] += 1
                 break
 
