@@ -7,7 +7,6 @@ kill) are exactly the ones a mock would assert away.
 
 import os
 import signal
-import subprocess
 import sys
 import textwrap
 import threading
@@ -258,14 +257,12 @@ class TestCancellation:
             run_subprocess(ctx, cmd, on_line=(lambda line: None) if streaming else None)
 
         grandchild_pid = int(pidfile.read_text())
-        # Derived from the grace period rather than hardcoded, with a margin
-        # wide enough to survive a loaded machine. At `+ 20` against a 15s
-        # grace the margin was 5s, which held when the suite ran serially and
-        # stopped holding under `-n auto` on a 4-core CI runner: the SIGKILL
-        # escalation lands after the grace, and with every core busy running
-        # other workers' tests it can land several seconds after that. The
-        # assertion below is unchanged -- this waits longer for the same
-        # outcome, it does not accept a weaker one.
+        # Derived from the grace period rather than hardcoding a number that
+        # silently stops covering it if the constant changes. The margin is
+        # generous because a loaded CI runner escalates to SIGKILL later than
+        # an idle laptop -- though note the CI failure that prompted this was
+        # not slowness at all, it was `_pid_alive` misreading a reaped zombie
+        # (see its comment); widening this alone did not fix it.
         deadline = time.monotonic() + executor_module.SUBPROCESS_GRACE_SECONDS + 45
         while time.monotonic() < deadline:
             if not _pid_alive(grandchild_pid):
@@ -447,14 +444,25 @@ def _pid_alive(pid: int) -> bool:
     except PermissionError:
         return True
     # Guard against the pid having been recycled into a zombie we can signal.
+    #
+    # Read /proc directly rather than shelling out to `ps`. /proc is always
+    # there on Linux, while `ps` comes from procps and is absent from slim
+    # images -- and the old `except OSError: return True` turned that absence
+    # into "every zombie is alive", failing the process-group cancellation
+    # tests with the opposite of what had happened: they reported the group
+    # was never signalled when it had been signalled and reaped correctly.
+    # That is why this matters in a job container in particular, where PID 1
+    # is the job's shell rather than an init that reaps orphans.
     try:
-        out = subprocess.run(
-            ["ps", "-o", "stat=", "-p", str(pid)], capture_output=True, text=True, timeout=5
-        )
-    except (subprocess.SubprocessError, OSError):
+        with open(f"/proc/{pid}/stat", "rb") as fh:
+            fields = fh.read().rsplit(b")", 1)[-1].split()
+    except FileNotFoundError:
+        return False
+    except OSError:
         return True
-    stat = out.stdout.strip()
-    return bool(stat) and not stat.startswith("Z")
+    # State is the first field after the comm parenthesis; "Z" is a zombie,
+    # i.e. dead and merely awaiting a reap.
+    return bool(fields) and fields[0] != b"Z"
 
 
 def test_signal_module_is_used_for_group_termination():
