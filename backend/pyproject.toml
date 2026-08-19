@@ -38,6 +38,7 @@ dependencies = [
 [project.optional-dependencies]
 dev = [
     "pytest>=8.3",
+    "pytest-xdist>=3.6",
     "pytest-asyncio>=0.24",
     "httpx>=0.28",
     "hypothesis>=6.115",
@@ -59,6 +60,7 @@ testpaths = ["tests"]
 filterwarnings = ["ignore::DeprecationWarning"]
 markers = [
     "slow: marks tests as slow (deselect with '-m \"not slow\"')",
+    "heavy: memory-heavy; excluded from the parallel phase and run sequentially afterwards",
 ]
 
 [tool.ruff]
