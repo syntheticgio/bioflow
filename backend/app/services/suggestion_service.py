@@ -1981,6 +1981,73 @@ def build_quantify_card(obj, annotations) -> SuggestionCard | None:
     )
 
 
+def build_feature_coverage_card(obj, annotations) -> SuggestionCard | None:
+    """Per-feature read coverage: which annotated features are poorly covered.
+
+    bam_stats answers this genome-wide; annotation_stats never looks at
+    reads. This is the positional join of the two, and the first direct
+    bedtools consumer (#632, stage 1).
+
+    Same `annotations`-as-parameter and same annotation-role caveat as
+    `build_quantify_card` immediately above: `annotations` is prefetched by
+    `suggestions_for` (already unconditional for every BAM, since the
+    `quantify` card needs it too) rather than looked up here, and it is
+    filtered by `pipeline_service._is_annotation` rather than
+    `ObjectRole.ANNOTATION`, which real ingested GFF/GTF objects do not carry.
+    """
+    if obj.format.kind is not FormatKind.BAM:
+        return None
+
+    title = "Feature coverage"
+    description = (
+        "Report read coverage per annotated feature, surfacing the genes "
+        "this alignment covers poorly or not at all."
+    )
+
+    tool = tools.bedtools()
+    if not tool.available:
+        return SuggestionCard(
+            kind="feature_coverage",
+            category="ASSEMBLY_QC",
+            title=title,
+            description=description,
+            status=CardStatus.UNAVAILABLE,
+            reason=f"{tool.name} is not installed.",
+        )
+
+    if not annotations:
+        return SuggestionCard(
+            kind="feature_coverage",
+            category="ASSEMBLY_QC",
+            title=title,
+            description=description,
+            status=CardStatus.UNAVAILABLE,
+            reason=(
+                "This project has no annotation to measure coverage "
+                "against. Download one with the assembly, or upload a "
+                "GFF/GTF."
+            ),
+        )
+
+    return SuggestionCard(
+        kind="feature_coverage",
+        category="ASSEMBLY_QC",
+        title=title,
+        description=description,
+        why=(
+            "This alignment has an annotation to measure against, so "
+            "per-gene coverage gaps are one run away."
+        ),
+        status=CardStatus.AVAILABLE,
+        launch={
+            "endpoint": "/pipelines/feature-coverage",
+            # annotation_id omitted: the server resolves it, same as
+            # quantify.
+            "body": {"bam_id": str(obj.id)},
+        },
+    )
+
+
 @dataclass(frozen=True)
 class _Prefetched:
     """The async lookups `suggestions_for` does once, before any builder runs.
@@ -2048,6 +2115,10 @@ CARD_BUILDERS: tuple[tuple[str, object], ...] = (
     ("align", lambda obj, ctx: build_align_card(obj, ctx.references)),
     ("variants", lambda obj, ctx: build_variants_card(obj, ctx.chemistry)),
     ("quantify", lambda obj, ctx: build_quantify_card(obj, ctx.annotations)),
+    (
+        "feature_coverage",
+        lambda obj, ctx: build_feature_coverage_card(obj, ctx.annotations),
+    ),
     ("annotate", lambda obj, ctx: build_annotate_card(obj, ctx.annotation_inputs)),
     ("annotate_genome", lambda obj, ctx: build_annotate_genome_card(obj)),
     ("assemble", lambda obj, ctx: build_assemble_card(obj)),
