@@ -1,0 +1,183 @@
+"""`_apply_call_structural_variants`'s SV-index move.
+
+The handler (`sv_handlers._build_sv_index`) builds the SQLite table under a
+transient path inside the job's own scratch workdir -- it cannot know the
+VCF's eventual object id, since ingest (which assigns one) happens later, in
+this applier. The applier is therefore what has to move the file to its
+permanent, VCF-keyed home once that id exists. These tests exercise that move
+directly against `_apply_call_structural_variants`, independent of whether
+Sniffles2 or bcftools are actually installed.
+"""
+
+import uuid
+from pathlib import Path
+from unittest.mock import patch
+
+import pytest
+
+from app.config import settings
+from app.models import DataObject, ObjectRole
+from app.queue import results
+from app.services import object_service, project_service
+
+pytestmark = [
+    pytest.mark.usefixtures("beanie_models"),
+    pytest.mark.asyncio(loop_scope="module"),
+]
+
+OWNER = "sv-results-owner"
+
+
+@pytest.fixture(autouse=True)
+def _no_queue(monkeypatch):
+    """Stub the enqueue `ingest_local_file` reaches, same as
+    `test_results_owner.py`'s fixture of the same name -- these tests are
+    not exercising the ingest-headers chain and should not need a live Redis
+    to pass."""
+
+    async def _skip_ingest(obj, **kwargs):
+        return ""
+
+    async def _skip_enqueue(*args, **kwargs):
+        return None
+
+    monkeypatch.setattr(object_service, "enqueue_ingest", _skip_ingest)
+    monkeypatch.setattr("app.queue.queue.enqueue", _skip_enqueue)
+
+
+def _scratch_file(*, suffix: str = "") -> Path:
+    settings.tmp_dir.mkdir(parents=True, exist_ok=True)
+    path = settings.tmp_dir / f"sv-results-{uuid.uuid4().hex}{suffix}"
+    path.write_bytes(uuid.uuid4().bytes)
+    return path
+
+
+async def _bam(owner: str) -> DataObject:
+    project = await project_service.create_project(
+        name=f"{owner}-{uuid.uuid4().hex}", owner=owner
+    )
+    path = _scratch_file(suffix=".bam")
+    return await object_service.ingest_local_file(
+        owner=owner,
+        project_id=project.id,
+        path=path,
+        name="aligned.bam",
+        role=ObjectRole.ALIGNMENT,
+    )
+
+
+class TestSvDbMove:
+    async def test_sv_db_is_moved_to_the_vcf_keyed_directory(self, tmp_path):
+        """The success path the review round flagged as untested: a db built
+        under scratch lands at sv_stats_dir/<vcf_id>/sv.db, not anywhere
+        keyed by the source BAM."""
+        bam = await _bam(OWNER)
+
+        # A scratch "workdir" the handler would have built the db under --
+        # deliberately outside settings.sv_stats_dir, matching how
+        # sv_handlers._build_sv_index now writes to out_dir (job scratch),
+        # not the permanent report root.
+        scratch_dir = tmp_path / "job-scratch" / "out"
+        scratch_dir.mkdir(parents=True)
+        scratch_db = scratch_dir / "sv.db"
+        scratch_db.write_bytes(b"sqlite-bytes")
+
+        vcf_out = _scratch_file(suffix=".vcf.gz")
+        tbi_out = _scratch_file(suffix=".vcf.gz.tbi")
+
+        # sv_stats_dir is a read-only computed property (see app/config.py):
+        # patching it on the *instance*, the way `bioinfo_home` gets patched
+        # elsewhere, hits pydantic's own __setattr__/__delattr__ and raises
+        # "no attribute". Patching the property on the class itself bypasses
+        # that -- and leaves bioinfo_home (and therefore require_home()'s
+        # sentinel check, which ingest_local_file depends on) untouched, so
+        # ingest against the real configured home still succeeds.
+        sv_stats_root = tmp_path / "sv_stats"
+        with patch.object(type(settings), "sv_stats_dir", property(lambda self: sv_stats_root)):
+            await results._apply_call_structural_variants(
+                {
+                    "bam_object_id": str(bam.id),
+                    "output": {"tmp_path": str(vcf_out), "name": "calls.sniffles.vcf.gz"},
+                    "index": {
+                        "tmp_path": str(tbi_out),
+                        "name": "calls.sniffles.vcf.gz.tbi",
+                    },
+                    "sv_db_path": str(scratch_db),
+                    "tool_version": "2.4",
+                    "params": {"min_sv_length": 50},
+                },
+                owner=OWNER,
+            )
+
+            produced = await DataObject.find(
+                DataObject.derived_from == bam.id, DataObject.owner == OWNER
+            ).to_list()
+            assert [p.name for p in produced] == ["calls.sniffles.vcf.gz"]
+            vcf = produced[0]
+
+            dest = sv_stats_root / str(vcf.id) / "sv.db"
+            assert dest.is_file(), "sv.db was not moved to the vcf-keyed directory"
+            assert dest.read_bytes() == b"sqlite-bytes"
+
+        # The scratch source no longer exists -- moved, not copied.
+        assert not scratch_db.exists()
+
+    async def test_a_move_failure_is_logged_not_raised(self, tmp_path, monkeypatch):
+        """A permissions error or a vanished scratch file must not blow up
+        the whole apply -- the VCF and its .tbi are the deliverable, and the
+        SQLite table is regenerable from the VCF at any time."""
+        bam = await _bam(OWNER)
+
+        scratch_db = tmp_path / "does-not-exist" / "sv.db"  # never created
+        vcf_out = _scratch_file(suffix=".vcf.gz")
+        tbi_out = _scratch_file(suffix=".vcf.gz.tbi")
+
+        errors: list[tuple] = []
+        monkeypatch.setattr(
+            results.log, "error", lambda event, **kw: errors.append((event, kw))
+        )
+
+        sv_stats_root = tmp_path / "sv_stats"
+        with patch.object(type(settings), "sv_stats_dir", property(lambda self: sv_stats_root)):
+            await results._apply_call_structural_variants(
+                {
+                    "bam_object_id": str(bam.id),
+                    "output": {"tmp_path": str(vcf_out), "name": "calls.sniffles.vcf.gz"},
+                    "index": {
+                        "tmp_path": str(tbi_out),
+                        "name": "calls.sniffles.vcf.gz.tbi",
+                    },
+                    "sv_db_path": str(scratch_db),
+                },
+                owner=OWNER,
+            )
+
+        # The VCF still landed despite the missing db source.
+        produced = await DataObject.find(
+            DataObject.derived_from == bam.id, DataObject.owner == OWNER
+        ).to_list()
+        assert [p.name for p in produced] == ["calls.sniffles.vcf.gz"]
+
+        assert any(event == "sv_db_move_failed" for event, _ in errors), (
+            "a missing scratch source should log sv_db_move_failed, not raise"
+        )
+
+    async def test_no_sv_db_path_is_a_silent_no_op(self):
+        """A result dict from before this key existed (or a handler that
+        genuinely built nothing) must not error just because `sv_db_path` is
+        absent."""
+        bam = await _bam(OWNER)
+        vcf_out = _scratch_file(suffix=".vcf.gz")
+
+        await results._apply_call_structural_variants(
+            {
+                "bam_object_id": str(bam.id),
+                "output": {"tmp_path": str(vcf_out), "name": "calls.sniffles.vcf.gz"},
+            },
+            owner=OWNER,
+        )
+
+        produced = await DataObject.find(
+            DataObject.derived_from == bam.id, DataObject.owner == OWNER
+        ).to_list()
+        assert [p.name for p in produced] == ["calls.sniffles.vcf.gz"]

@@ -2837,14 +2837,18 @@ async def _apply_call_structural_variants(result: dict, *, owner: str) -> None:
         except Exception as e:  # noqa: BLE001
             log.error("sv_tbi_ingest_failed", vcf_id=str(vcf.id), error=str(e))
 
-    # The SV index was built by the handler under a transient, BAM-keyed
-    # path (the VCF had no object id yet -- ingest above is what assigns
-    # one). Move it now to sv_stats_dir/<vcf_id>/sv.db, matching the
-    # convention every sibling report directory follows: vcf_stats_dir,
-    # bam_stats_dir, annotation_stats_dir are all keyed by the object the
-    # report is *about*, not by that object's source. Best-effort, like the
-    # index above: the VCF is the deliverable, and the SQLite table can be
-    # rebuilt from it at any time.
+    # The SV index was built by the handler under a transient path inside
+    # the job's own scratch workdir (the VCF had no object id yet -- ingest
+    # above is what assigns one). Move it now to sv_stats_dir/<vcf_id>/sv.db,
+    # matching the convention every sibling report directory follows:
+    # vcf_stats_dir, bam_stats_dir, annotation_stats_dir are all keyed by the
+    # object the report is *about*, not by that object's source. Best-effort,
+    # like the index above: the VCF is the deliverable, and the SQLite table
+    # can be rebuilt from it at any time. The scratch workdir itself (not
+    # sv_stats_dir) owns cleanup of whatever this move leaves behind, via
+    # ordinary job-lifecycle teardown -- no separate reclaim path is needed
+    # the way there would be for a stray directory left inside a permanent
+    # report root.
     sv_db_path = result.get("sv_db_path")
     if sv_db_path:
         try:
@@ -2852,10 +2856,6 @@ async def _apply_call_structural_variants(result: dict, *, owner: str) -> None:
             dest_dir = settings.sv_stats_dir / str(vcf.id)
             dest_dir.mkdir(parents=True, exist_ok=True)
             shutil.move(str(src), str(dest_dir / "sv.db"))
-            # The rest of the transient, BAM-keyed sv_stats_dir directory
-            # (now empty) is left for the drift sweep / next delete to
-            # reclaim rather than removed here -- best-effort appliers in
-            # this file do not also own cleanup of their own scratch space.
         except OSError as e:
             log.error("sv_db_move_failed", vcf_id=str(vcf.id), error=str(e))
 

@@ -156,14 +156,14 @@ def call_structural_variants(ctx: JobContext) -> dict:
     tbi = _index_vcf(ctx, vcf, log_path)
 
     ctx.progress(phase="db", pct=0.9, message="building the SV index")
-    # Keyed by the BAM's object id, not the VCF's -- the VCF does not have an
-    # object id yet at this point in a SUBPROCESS handler; ingest happens
-    # later, in `_apply_call_structural_variants`, which is what assigns one.
-    # That applier moves this file to its permanent, VCF-keyed home (matching
-    # every sibling report directory's convention: vcf_stats_dir, bam_stats_dir,
-    # etc. are all keyed by the object the report is *about*) once the VCF's
-    # real id is known. This path is therefore transient, not the database's
-    # final location.
+    # Built under the job's own scratch dir, not `sv_stats_dir` -- the VCF
+    # does not have an object id yet at this point in a SUBPROCESS handler;
+    # ingest happens later, in `_apply_call_structural_variants`, which is
+    # what assigns one. That applier moves this file to its permanent,
+    # VCF-keyed home (matching every sibling report directory's convention:
+    # vcf_stats_dir, bam_stats_dir, etc. are all keyed by the object the
+    # report is *about*) once the VCF's real id is known. This path is
+    # therefore transient scratch, not the database's final location.
     db_path = _build_sv_index(ctx, vcf, out_dir)
 
     ctx.progress(phase="done", pct=1.0, message="structural variant calling complete")
@@ -182,8 +182,9 @@ def call_structural_variants(ctx: JobContext) -> dict:
         "index": {"tmp_path": str(tbi), "name": tbi.name, "role": "tbi"},
         "tool_version": tool.version,
         "params": ctx.payload.get("params") or {},
-        # Transient, BAM-keyed path. `_apply_call_structural_variants` moves
-        # it to `sv_stats_dir/<vcf_object_id>/sv.db` once the VCF is ingested.
+        # Transient scratch path, inside the job's own workdir.
+        # `_apply_call_structural_variants` moves it to
+        # `sv_stats_dir/<vcf_object_id>/sv.db` once the VCF is ingested.
         "sv_db_path": str(db_path),
         "workdir": str(work),
     }
@@ -224,6 +225,14 @@ def _build_sv_index(ctx: JobContext, vcf: Path, out_dir: Path) -> Path:
     `subprocess.Popen` pipe would not be. The file is then read back as an
     iterator of lines, the shape `sv_db.build_sv_db` expects -- one VCF data
     line per row -- without materializing them in memory.
+
+    Built inside `out_dir` -- the job's own scratch space, cleaned up as part
+    of normal job lifecycle -- rather than under `settings.sv_stats_dir`. The
+    VCF has no object id yet at this point (ingest, which assigns one,
+    happens later in `_apply_call_structural_variants`), and `sv_stats_dir`
+    is a *permanent* report root that `_REPORT_ROOTS` sweeps on delete/share:
+    building there under a transient, BAM-keyed name would leave a stray,
+    permanent-looking, empty directory behind after every successful move.
     """
     bcftools = tools.require(tools.bcftools())
 
@@ -236,7 +245,7 @@ def _build_sv_index(ctx: JobContext, vcf: Path, out_dir: Path) -> Path:
     if code != 0:
         raise RetryableError("bcftools view exited nonzero while building the SV index")
 
-    db_path = settings.sv_stats_dir / str(ctx.payload.get("bam_object_id")) / "sv.db"
+    db_path = out_dir / "sv.db"
     with open(rows_path, errors="replace") as fh:
         sv_db.build_sv_db(rows=fh, db_path=db_path)
 
