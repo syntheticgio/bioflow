@@ -1,0 +1,16 @@
+
+Found 1 command tree.
+Number of 21-mers that are:
+  unique                   8773  (exactly one instance of the kmer is in the input)
+  distinct                 8816  (non-redundant kmer sequences in the input)
+  present                  8940  (...)
+  missing         4398046502288  (non-redundant kmer sequences not in the input)
+
+             number of   cumulative   cumulative     presence
+              distinct     fraction     fraction   in dataset
+frequency        kmers     distinct        total       (1e-6)
+--------- ------------ ------------ ------------ ------------
+        1         8773       0.9951       0.9813   111.856823
+        2            2       0.9953       0.9818   223.713647
+        3            1       0.9955       0.9821   335.570470
+        4           40       1.0000       1.0000   447.427293

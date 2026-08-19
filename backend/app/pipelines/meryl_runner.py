@@ -1,9 +1,11 @@
 """Meryl k-mer spectra and repeat-density command builders and parsers.
 
-Pure functions only: no I/O, no subprocess, no database. The handler in
-`app.queue.assembly_qc_handlers` does the running; this module decides what
-to run and what the output means, which is what makes both testable without
-a tool installed.
+No subprocess, no database. The handler in `app.queue.assembly_qc_handlers`
+does the running; this module decides what to run and what the output means,
+which is what makes both testable without a tool installed. One exception to
+"no I/O": `iter_fasta_contigs` streams the assembly FASTA, mirroring
+`gc_tracks.compute_gc_tracks` — meryl databases store no genomic positions,
+so locating repeats means scanning the assembly ourselves (#612).
 
 `build_meryl_count_command` lives in `merqury_runner.py` and is reused
 directly. This module adds statistics, histogram parsing, genome-size
@@ -11,7 +13,11 @@ estimation, and per-window repeat-density binning."""
 
 from __future__ import annotations
 
+import threading
+from collections.abc import Iterable, Iterator
 from pathlib import Path
+
+from app.errors import JobCancelled
 
 # Reused rather than duplicated: the same windowing scheme gc_tracks.py
 # fixes for the Circos plot, because #177 adds a ring to that same plot.
@@ -40,32 +46,40 @@ def build_meryl_print_gt_command(
     database: Path,
     threshold: int = REPEAT_DENSITY_THRESHOLD,
 ) -> list[str]:
-    """`meryl print greater-than <N> <db>` — high-frequency k-mers with positions."""
-    return [meryl_path, "print", f"greater-than={threshold}", str(database)]
+    """`meryl print greater-than <N> <db>` — high-frequency k-mers.
+
+    Two tokens for the filter, not ``greater-than=N``: meryl 1.4.2 misparses
+    the one-token form as ``opLessThan`` (verified live against the worker
+    image) and prints nothing.
+    """
+    return [meryl_path, "print", "greater-than", str(threshold), str(database)]
 
 
 def parse_meryl_histogram(text: str) -> list[list[int]]:
-    """Parse `meryl statistics` output.
+    """Parse the frequency histogram out of `meryl statistics` output.
 
-    Tab-separated, no header::
+    Real meryl 1.4.2 output is a prose preamble followed by a space-aligned
+    five-column table (fixture ``meryl-1.4.2-statistics.log``)::
 
-        1   12345678
-        2   8901234
-        3   4567890
+        Number of 21-mers that are:
+          unique                   8773  (exactly one instance ...)
+          ...
+        frequency        kmers     distinct        total       (1e-6)
+        --------- ------------ ------------ ------------ ------------
+                1         8773       0.9951       0.9813   111.856823
 
-    Returns a list of ``[frequency, count]`` pairs. Blank lines are skipped.
+    A histogram row is any line whose first two whitespace-separated fields
+    are both integers — the preamble lines all start with a word, so they
+    self-select out. Returns ``[frequency, count]`` pairs.
     """
     result: list[list[int]] = []
     for line in text.splitlines():
-        line = line.strip()
-        if not line:
-            continue
-        fields = line.split("\t")
+        fields = line.split()
         if len(fields) < 2:
             continue
         try:
             result.append([int(fields[0]), int(fields[1])])
-        except (ValueError, IndexError):
+        except ValueError:
             continue
     return result
 
@@ -133,95 +147,131 @@ def compute_genome_size(
     return result
 
 
+_KMER_CHARS = frozenset("ACGT")
+_COMPLEMENT = str.maketrans("ACGT", "TGCA")
+
+
+def parse_meryl_print_kmers(text: str) -> set[str]:
+    """Parse ``meryl print greater-than <N>`` output into a k-mer set.
+
+    Real output is ``KMER\\tCOUNT`` lines (fixture
+    ``meryl-1.4.2-print-greater-than.log``), interleaved with banner lines
+    ("Found 1 command tree.", "PROCESSING TREE ...") when stderr is merged
+    into the same stream, as `run_subprocess` does. A k-mer line is any line
+    whose first field is pure ACGT and whose second is an integer.
+
+    Meryl databases store no genomic positions — only the sequences and
+    their counts — so this set is the input to a scan of the assembly
+    itself (`compute_repeat_density`), not a list of locations.
+    """
+    kmers: set[str] = set()
+    for line in text.splitlines():
+        fields = line.split()
+        if len(fields) != 2:
+            continue
+        kmer = fields[0].upper()
+        if not kmer or (set(kmer) - _KMER_CHARS):
+            continue
+        try:
+            int(fields[1])
+        except ValueError:
+            continue
+        kmers.add(kmer)
+    return kmers
+
+
+def expand_kmer_orientations(kmers: set[str]) -> set[str]:
+    """Add the reverse complement of every k-mer.
+
+    Meryl counts canonical k-mers (the lexicographically smaller of a k-mer
+    and its reverse complement), so a repeat can sit on either strand of the
+    assembly. Expanding the set once lets the scan test plain forward
+    membership instead of canonicalizing at every position.
+    """
+    return kmers | {kmer.translate(_COMPLEMENT)[::-1] for kmer in kmers}
+
+
+def iter_fasta_contigs(path: Path) -> Iterator[tuple[str, str]]:
+    """Stream ``(name, uppercased sequence)`` per contig from a FASTA.
+
+    Sniffs gzip by magic bytes rather than trusting a payload field, so it
+    works for any job payload vintage. Buffers one contig at a time, like
+    `gc_tracks.compute_gc_tracks`. An unreadable file yields nothing —
+    the caller's empty-result path already handles that.
+    """
+    import gzip
+
+    try:
+        with open(path, "rb") as raw:
+            is_gzip = raw.read(2) == b"\x1f\x8b"
+        opener = gzip.open if is_gzip else open
+        with opener(path, "rt", errors="replace") as fh:
+            name: str | None = None
+            buf: list[str] = []
+            for line in fh:
+                stripped = line.rstrip("\n\r")
+                if stripped.startswith(">"):
+                    if name is not None:
+                        yield name, "".join(buf).upper()
+                    name = stripped[1:].split()[0] if len(stripped) > 1 else ""
+                    buf = []
+                elif name is not None:
+                    buf.append(stripped)
+            if name is not None:
+                yield name, "".join(buf).upper()
+    except (OSError, EOFError, UnicodeDecodeError):
+        return
+
+
 def compute_repeat_density(
-    lines: list[str],
-    contig_lengths: dict[str, int],
+    contigs: Iterable[tuple[str, str]],
+    repeat_kmers: set[str],
     *,
+    k: int = 21,
     threshold: int = REPEAT_DENSITY_THRESHOLD,
     window_count: int = WINDOW_COUNT,
+    cancel_event: threading.Event | None = None,
 ) -> dict:
-    """Bin high-frequency k-mer hits into per-window density tracks.
+    """Scan contig sequences for repetitive k-mers, binned per window.
 
-    `lines` is the output of ``meryl print greater-than <N>``::
-
-        >contig_1:1000-1021 AAAAAAAAAAAAAAAAAAAAA
-        >contig_1:2500-2521 TTTTTTTTTTTTTTTTTTTTT
-
-    Only the contig name and start position are parsed; the k-mer sequence is
-    discarded. Each hit is binned into its window by ``pos // window_width``.
-
-    `contig_lengths` is the ``sequence_lengths`` fact on the assembly —
-    names mapped to base-pair lengths. Contigs that appear in lengths but
-    have zero k-mer hits get ``null`` windows.
+    `contigs` yields ``(name, sequence)`` — usually `iter_fasta_contigs`
+    over the assembly. `repeat_kmers` is `parse_meryl_print_kmers`' set; both
+    orientations are matched (see `expand_kmer_orientations`). Each position
+    whose k-mer is in the set counts as one hit in its window; density is
+    hits over k-mer positions per window. Windows with no hits are 0.0 — a
+    real measurement, not missing data, now that the scan sees every contig.
 
     Returns a dict matching #151's ``gc_tracks`` shape with ``density`` and
     ``count`` parallel arrays, plus ``repeat_density_partial`` when contigs
     were truncated at ``MAX_STORED_CONTIGS``.
     """
-    # Build per-contig hit counts by window.
+    expanded = expand_kmer_orientations(repeat_kmers)
 
-    hit_bins: dict[str, list[int]] = {}
-    for line in lines:
-        line = line.strip()
-        if not line or not line.startswith(">"):
-            continue
-        # Parse ">contig:pos-len" from the FASTA header meryl emits.
-        header = line[1:].split()[0]  # strip '>' and k-mer sequence
-        if ":" not in header:
-            continue
-        contig, rest = header.split(":", 1)
-        pos_str = rest.split("-")[0] if "-" in rest else rest
-        try:
-            pos = int(pos_str)
-        except ValueError:
-            continue
-        if contig not in hit_bins:
-            hit_bins[contig] = []
-        hit_bins[contig].append(pos)
-
-    # Resolve per contig.
     resolved: list[dict] = []
-    for name, total_length in contig_lengths.items():
+    for name, seq in contigs:
+        if cancel_event is not None and cancel_event.is_set():
+            raise JobCancelled("repeat density scan cancelled")
+
+        total_length = len(seq)
         n_windows = min(window_count, total_length // MIN_WINDOW_BASES)
         if n_windows == 0:
             continue
         window_bases = total_length // n_windows
-        if window_bases == 0:
-            continue
 
-        hits_list = hit_bins.get(name, [])
-        if not hits_list:
-            resolved.append({
-                "name": name,
-                "length": total_length,
-                "window_bases": window_bases,
-                "density": [None] * n_windows,
-                "count": [None] * n_windows,
-            })
-            continue
+        kmer_counts = [0] * n_windows
+        if expanded and total_length >= k:
+            for i in range(total_length - k + 1):
+                if seq[i : i + k] in expanded:
+                    wi = min(i // window_bases, n_windows - 1)
+                    kmer_counts[wi] += 1
 
-        # Contig has hits: count per window.
-        kmer_counts = [0] * n_windows  # type: list[int]
-        for pos in hits_list:
-            wi = min(pos // window_bases, n_windows - 1)
-            kmer_counts[wi] += 1
-
-        density: list[float | None] = []
-        count_out: list[int | None] = []
-        for wi in range(n_windows):
-            c = kmer_counts[wi]
-            count_out.append(c)
-            if c > 0:
-                density.append(round(c / max(1, (window_bases - 21 + 1)), 4))
-            else:
-                density.append(0.0)
-
+        positions_per_window = max(1, window_bases - k + 1)
         resolved.append({
             "name": name,
             "length": total_length,
             "window_bases": window_bases,
-            "density": density,
-            "count": count_out,
+            "density": [round(c / positions_per_window, 4) for c in kmer_counts],
+            "count": kmer_counts,
         })
 
     if not resolved:
@@ -234,7 +284,7 @@ def compute_repeat_density(
         resolved = resolved[:MAX_STORED_CONTIGS]
 
     result: dict = {
-        "k": 21,
+        "k": k,
         "threshold": threshold,
         "window_count": window_count,
         "contigs": resolved,
