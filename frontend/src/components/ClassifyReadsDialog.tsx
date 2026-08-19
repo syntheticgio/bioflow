@@ -90,6 +90,23 @@ export function ClassifyReadsDialog({
     },
   });
 
+  const launchAnyway = useMutation({
+    mutationFn: () =>
+      api.launchClassifyReads({
+        object_id: object.id,
+        db_key: dbKey,
+        ...(mateObjectId ? { mate_object_id: mateObjectId } : {}),
+        resource_override: true,
+      }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["jobs"] });
+      notify.success("Launching without the memory check");
+      onClose();
+      navigate("/activity");
+    },
+    onError: (e: Error) => notify.error(e.message),
+  });
+
   return (
     <div className="modal-backdrop" onClick={onClose}>
       <div className="modal trim-modal" onClick={(e) => e.stopPropagation()}>
@@ -164,8 +181,8 @@ export function ClassifyReadsDialog({
               replan={refusal.replan ?? null}
               onCancel={onClose}
               onEdit={() => setRefusal(null)}
-              onLaunchAnyway={() => launch.mutate()}
-              launchAnywayPending={launch.isPending}
+              onLaunchAnyway={() => launchAnyway.mutate()}
+              launchAnywayPending={launchAnyway.isPending}
               onAcceptReplan={() => setRefusal(null)}
             />
           )}

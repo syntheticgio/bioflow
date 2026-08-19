@@ -1946,6 +1946,9 @@ class ClassifyReadsRequest(BaseModel):
     object_id: PydanticObjectId
     db_key: str
     mate_object_id: PydanticObjectId | None = None
+    # "Launch anyway" from the refusal card. Skips the enqueue-time BLOCK and
+    # persists on the job, where claim.lua admits it only as sole occupant.
+    resource_override: bool = False
 
 
 @router.post("/classify-reads", response_model=JobOut, status_code=status.HTTP_201_CREATED)
@@ -1962,6 +1965,7 @@ async def launch_classify_reads_route(
         db_key=body.db_key,
         owner=owner,
         mate_object_id=body.mate_object_id,
+        resource_override=body.resource_override,
     )
     return JobOut.of(job)
 

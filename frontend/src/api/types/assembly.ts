@@ -89,4 +89,5 @@ export interface ClassifyReadsRequest {
   object_id: string;
   db_key: string;
   mate_object_id?: string;
+  resource_override?: boolean;
 }
