@@ -254,4 +254,4 @@ docker run --rm \
   -e REDIS_URL="redis://redis:6379/0" \
   ${BIOFLOW_TEST_LIVE_DATA:+-e BIOFLOW_TEST_LIVE_DATA="$BIOFLOW_TEST_LIVE_DATA"} \
   "${SSHD_ENV[@]+"${SSHD_ENV[@]}"}" \
-  "$IMAGE" python -m pytest "${PYTEST_ARGS[@]}"
+  "$IMAGE" /usr/local/bin/python3.12 -m pytest "${PYTEST_ARGS[@]}"
