@@ -164,6 +164,7 @@ _NO_NARRATIVE_STEP: frozenset[str] = frozenset(
         # Statistics written back onto an existing object rather than
         # producing one; the numbers already show in the file panel.
         "run_bam_stats",
+        "feature_coverage",
         "run_transcript_qc",
         "run_vcf_stats",
         "run_annotation_stats",
