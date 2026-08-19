@@ -2347,11 +2347,16 @@ TOOL_META: dict[str, ToolMeta] = {
         citation_url="https://doi.org/10.1093/bioinformatics/btq033",
         license="MIT",
         usage=(
-            "Runs interval arithmetic on genomic features. Used for per-feature "
-            "coverage quantification and structural variant analysis, where the "
-            "input is one or more coordinate sets and the output is coverage, "
-            "overlap, or intersection results."
+            "Installed alongside the Merqury k-mer QV scripts, which call it "
+            "internally. Direct BioFlow features backed by it are planned "
+            "(per-feature coverage first); until one ships, nothing dispatches "
+            "to it directly."
         ),
+        # No job handler branches on bedtools directly today -- a per-feature
+        # coverage feature is planned but not built. Flip to True when that
+        # handler lands (see the `runnable` field comment above for why this
+        # matters).
+        runnable=False,
     ),
     "seqkit": ToolMeta(
         pipelines=(PipelineType.UTILITY,),
@@ -2372,14 +2377,19 @@ TOOL_META: dict[str, ToolMeta] = {
         ),
         homepage="https://bioinf.shenwei.me/seqkit/",
         repository="https://github.com/shenwei356/seqkit",
-        citation="Shen, Shibuya & Zhu, bioRxiv 2016",
-        citation_url="https://doi.org/10.1101/081851",
+        # The seqkit README's own "Citation" section points to the SeqKit2
+        # paper, superseding the original 2016 bioRxiv preprint.
+        citation="Shen, Sipos & Zhao, iMeta 2024",
+        citation_url="https://doi.org/10.1002/imt2.191",
         license="MIT",
         usage=(
-            "Runs sequence filtering, sampling, and reformatting operations. "
-            "Handles FASTA and FASTQ in compressed or uncompressed formats, "
-            "streaming results for memory efficiency on large files."
+            "Installed for the planned region/sequence extraction feature; "
+            "nothing dispatches to it yet."
         ),
+        # No job handler branches on seqkit today -- see the `runnable` field
+        # comment above for why this must be set explicitly rather than left
+        # at the default.
+        runnable=False,
     ),
 }
 

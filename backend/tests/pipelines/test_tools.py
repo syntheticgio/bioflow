@@ -1160,3 +1160,16 @@ def test_seqkit_probe_reports_missing_binary(monkeypatch):
     tool = tools.seqkit()
     assert tool.name == "seqkit"
     assert tool.available is False
+
+
+def test_bedtools_is_not_runnable():
+    """No job handler branches on bedtools yet -- a per-feature coverage
+    feature is planned but not built -- so it must not read as an
+    actionable pipeline step."""
+    assert tools.TOOL_META["bedtools"].runnable is False
+
+
+def test_seqkit_is_not_runnable():
+    """No job handler branches on seqkit yet, so it must not read as an
+    actionable pipeline step."""
+    assert tools.TOOL_META["seqkit"].runnable is False
