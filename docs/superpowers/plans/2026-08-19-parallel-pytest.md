@@ -22,7 +22,7 @@
 - Work branch for PR 1: `test/679-parallel-pytest` (already exists, holds the spec commit). PR 2 branch: `test/679-parallel-wrappers`.
 - `pyproject.toml` dependency changes require rebuilding the api image: `docker compose up -d --build api` (from main repo root).
 - Never name a helper function `test_*` in importable test modules — pytest collects imported `test_*` callables as tests.
-- **Inside the api container, bare `python` is `/opt/medaka/env/bin/python`** (a tool venv that shadows the app interpreter on PATH) and cannot import the app. Use `pytest` directly, or `python3` when an interpreter is genuinely needed — never `python -m pytest`.
+- **Inside the api container, both `python` and `python3` are `/opt/medaka/env/bin/*`** — a tool venv that shadows the app interpreter on PATH and cannot import the app or its dev dependencies. Use `pytest` directly, or `/usr/local/bin/python3.12` by absolute path when an interpreter is genuinely needed. Never `python -m pytest`, never bare `python3 -c`.
 
 ---
 
