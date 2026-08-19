@@ -236,69 +236,25 @@ jobs:
     if: ${{ !inputs.skip_backend_full }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    # Runs inside the prebuilt CI image rather than installing its toolchain
+    # on a bare runner. `.github/Dockerfile.ci` was built for exactly this
+    # (see ci-runner.yml) and ships minimap2, samtools, tabix/bgzip, flye,
+    # fastp, bcftools, bowtie2, hisat2, the NCBI datasets CLI and bwa-mem2 --
+    # the same set the removed apt/curl steps used to fetch on every run.
+    # Those steps regularly took the bulk of the job's 20-minute budget and
+    # were its main source of flakiness (apt mirror stalls, #577).
+    #
+    # The image ships no Python packages, so the dev extras are still
+    # installed below; that step is cached and fast.
+    container:
+      image: ghcr.io/syntheticgio/bioflow-ci-runner:latest
+      # The Docker socket, so the Mongo replica set below can still be started
+      # with `docker run`. GitHub's `services:` cannot express it: a service
+      # container takes no `command:`, and `options` cannot set CMD, so there
+      # is no way to pass mongod the --replSet flag transactions require.
+      options: --volume /var/run/docker.sock:/var/run/docker.sock
     steps:
       - uses: actions/checkout@v7
-
-      - uses: actions/setup-python@v7
-        with:
-          python-version: '3.12'
-          cache: 'pip'
-          cache-dependency-path: backend/pyproject.toml
-
-      - name: Install build dependencies
-        run: |
-          # Same mirror-stall exposure as backend-smoke's apt steps; see the
-          # note on its "Install system build dependencies" step (#577). This
-          # job pulls a much larger package set below, so it spends longer in
-          # apt and has correspondingly more chances to hit a bad mirror.
-          sudo apt-get -o Acquire::Retries=3 \
-                       -o Acquire::http::Timeout=15 \
-                       -o Acquire::https::Timeout=15 \
-                       update
-          sudo apt-get install -y build-essential zlib1g-dev libhts-dev curl
-
-      - name: Install pipeline tools
-        # The suite normally runs inside the backend image, which ships these.
-        # Launch-path tests probe them for real (shutil.which + --version), so
-        # a bare runner fails with "minimap2 is not available" / "flye is not
-        # installed" rather than skipping. tabix provides bgzip, which
-        # storage/test_compress needs to contrast against the stdlib fallback.
-        run: |
-          sudo apt-get install -y --no-install-recommends \
-            minimap2 samtools tabix flye fastp bcftools bowtie2 hisat2 \
-            sra-toolkit
-          # The NCBI datasets CLI is not packaged; fetch the static binary the
-          # same way backend/Dockerfile does. Route tests hit its probe before
-          # their own assertions (a missing tool 500s where they expect 404).
-          # --retry/--max-time for the same reason apt gets Retries/Timeout
-          # above: -f catches an HTTP error but nothing bounds a transfer that
-          # opens and then stalls, and this one is a third-party host.
-          sudo curl -fsSL --retry 3 --retry-connrefused --max-time 120 \
-            "https://ftp.ncbi.nlm.nih.gov/pub/datasets/command-line/v2/linux-amd64/datasets" \
-            -o /usr/local/bin/datasets
-          sudo chmod +x /usr/local/bin/datasets
-          datasets --version
-          # align_runner builds "/bin/sh -o pipefail -c ..." pipelines and two
-          # tests execute them for real. The runner's dash rejects -o pipefail
-          # (exit 2 even for `true | true`); the backend image's shell accepts
-          # it, so point sh at bash to match.
-          sudo ln -sf bash /bin/sh
-          /bin/sh -o pipefail -c 'true | true'
-          # bwa-mem2 is not packaged for Debian/Ubuntu; use the upstream
-          # prebuilt x86-64 bundle, installed the same way backend/Dockerfile
-          # does: a wrapper, not a symlink -- the `bwa-mem2` entrypoint is a
-          # dispatcher that looks for its SIMD variants next to argv[0], so a
-          # symlink in /usr/local/bin sends it hunting for variants that are
-          # not there.
-          curl -fsSL --retry 3 --retry-connrefused --max-time 180 \
-            https://github.com/bwa-mem2/bwa-mem2/releases/download/v2.2.1/bwa-mem2-2.2.1_x64-linux.tar.bz2 \
-            | sudo tar -xj -C /opt
-          printf '#!/bin/sh\nexec "/opt/bwa-mem2-2.2.1_x64-linux/bwa-mem2" "$@"\n' \
-            | sudo tee /usr/local/bin/bwa-mem2 >/dev/null
-          sudo chmod +x /usr/local/bin/bwa-mem2
-          # No --version flag: it prints usage (with the version) and exits
-          # non-zero, so tolerate the exit code and just prove it dispatches.
-          bwa-mem2 version || true
 
       - name: Install backend dev dependencies
         run: pip install -e 'backend/.[dev]'
@@ -308,41 +264,46 @@ jobs:
         # .biopipe/VERSION sentinel is what require_home() checks before every
         # write path; without it the storage layer refuses to run and dozens
         # of ingest/share/results tests fail with StorageUnavailableError.
+        #
+        # No sudo: the job container runs as root, and the image has no sudo
+        # installed to call anyway.
         run: |
-          sudo mkdir -p /data/.biopipe /data/objects /data/staging /data/tmp
-          echo "biopipe-home-v1" | sudo tee /data/.biopipe/VERSION
-          sudo chmod -R 777 /data
+          mkdir -p /data/.biopipe /data/objects /data/staging /data/tmp
+          echo "biopipe-home-v1" > /data/.biopipe/VERSION
+          chmod -R 777 /data
 
-      - name: Start MongoDB with replica set
+      - name: Start MongoDB with a replica set
+        # `docker run` against the mounted socket, so this is a *sibling* of
+        # the job container, not a child. Sibling containers do not share
+        # localhost, so the set is initiated and addressed by container name
+        # on a network the job container joins below.
         run: |
-          docker run -d --name mongo \
-            -p 27017:27017 \
+          docker network create biopipe-ci 2>/dev/null || true
+          docker run -d --name mongo --network biopipe-ci \
             mongo:7 --replSet rs0 --bind_ip_all
-          # Wait for MongoDB to accept connections
-          for i in $(seq 1 30); do
-            if docker exec mongo mongosh --quiet --eval 'db.adminCommand("ping")' >/dev/null 2>&1; then
-              echo "MongoDB is ready"
+          # Join this job's own container to that network so `mongo:27017`
+          # resolves from the test process.
+          docker network connect biopipe-ci "$(cat /etc/hostname)"
+          for i in $(seq 1 60); do
+            if docker exec mongo mongosh --quiet --eval 'db.adminCommand("ping").ok' >/dev/null 2>&1; then
+              echo "mongod is accepting connections"
               break
             fi
             sleep 1
           done
-
-      - name: Initialize replica set
-        run: |
-          # Wait for the primary to accept connections, then initiate.
-          for i in $(seq 1 30); do
-            if docker exec mongo mongosh --quiet --eval 'db.adminCommand("ping")' >/dev/null 2>&1; then
-              echo "MongoDB is ready"
+          # Initiate, then wait for the election -- initiate returns before a
+          # primary exists, and a write in that window fails NotWritablePrimary.
+          docker exec mongo mongosh --quiet --eval \
+            'rs.initiate({_id:"rs0",members:[{_id:0,host:"mongo:27017"}]})' || true
+          for i in $(seq 1 60); do
+            if docker exec mongo mongosh --quiet --eval 'db.hello().isWritablePrimary' 2>/dev/null | grep -q true; then
+              echo "replica set is primary"
               break
             fi
             sleep 1
           done
-          # Initialize the replica set
-          docker exec mongo mongosh --quiet \
-            --eval 'rs.initiate({_id: "rs0", members: [{_id: 0, host: "localhost:27017"}]})'
-          sleep 3
 
       - name: Run full test suite
         run: pytest backend/tests/ -q --tb=no
         env:
-          MONGO_URL: "mongodb://localhost:27017/biopipe_test?replicaSet=rs0&directConnection=true"
+          MONGO_URL: "mongodb://mongo:27017/biopipe_test?replicaSet=rs0&directConnection=true"
