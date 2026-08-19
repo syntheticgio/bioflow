@@ -67,6 +67,7 @@ import { ProteinStructureTab } from "./ProteinStructureTab";
 import { TrimDialog } from "./TrimDialog";
 import { AssembleDialog } from "./AssembleDialog";
 import { CompletenessDialog } from "./CompletenessDialog";
+import { PolishDialog } from "./PolishDialog";
 import { ScaffoldDialog } from "./ScaffoldDialog";
 import { QuantifyDialog } from "./QuantifyDialog";
 import { DifferentialExpressionDialog } from "./DifferentialExpressionDialog";
@@ -466,6 +467,7 @@ function ObjectDetail({ id }: { id: string }) {
   const [quantifyOpen, setQuantifyOpen] = useState(false);
   const [assembleOpen, setAssembleOpen] = useState(false);
   const [completenessOpen, setCompletenessOpen] = useState(false);
+  const [polishLongOpen, setPolishLongOpen] = useState(false);
   const [scaffoldOpen, setScaffoldOpen] = useState(false);
   const [deOpen, setDeOpen] = useState(false);
   // The suggestion card's launch body, when a dialog was opened by "Adjust…"
@@ -541,6 +543,9 @@ function ObjectDetail({ id }: { id: string }) {
         break;
       case "completeness":
         setCompletenessOpen(true);
+        break;
+      case "polish_long":
+        setPolishLongOpen(true);
         break;
       default:
         setPrefill(null);
@@ -1129,6 +1134,16 @@ function ObjectDetail({ id }: { id: string }) {
           prefill={prefill}
           onClose={() => {
             setCompletenessOpen(false);
+            setPrefill(null);
+          }}
+        />
+      )}
+      {polishLongOpen && (
+        <PolishDialog
+          object={obj}
+          prefill={prefill}
+          onClose={() => {
+            setPolishLongOpen(false);
             setPrefill(null);
           }}
         />

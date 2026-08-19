@@ -2520,6 +2520,7 @@ class TestCardBuilderRegistry:
             "assemble",
             "scaffold",
             "completeness",
+            "polish_long",
         }
 
     def test_every_launch_endpoint_is_a_real_route(self):

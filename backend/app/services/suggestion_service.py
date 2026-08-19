@@ -2193,6 +2193,11 @@ _CONFIGURE_DIALOGS: dict[str, str] = {
     "assemble": "assemble",
     "scaffold": "scaffold",
     "completeness": "completeness",
+    # Medaka's bacterial-methylation model is an opt-in from the launch
+    # dialog, not a card decision -- matching iVar's primer scheme and
+    # completeness's lineage override. The card offers the tool; it does not
+    # guess that this assembly is a bacterial isolate.
+    "polish_long": "polish_long",
 }
 
 
