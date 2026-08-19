@@ -3059,6 +3059,85 @@ async def _apply_quantify(result: dict, *, owner: str) -> None:
             await run_service.record_outputs(run_id, [counts.id], owner=counts.owner)
 
 
+def salmon_provenance(result: dict) -> dict:
+    """The facts a Salmon quantification stamps onto its counts file.
+
+    `counted_by` distinguishes it from featureCounts output on the object
+    itself rather than only by which job produced it, because the two are the
+    same role and the same format and a user looking at two counts files has
+    no other way to tell them apart.
+
+    `annotation_sha256` holds the transcriptome digest -- see
+    `expression_handlers._salmon_result_dict` for why that key rather than a
+    new one.
+    """
+    provenance = {
+        "counted_by": "salmon",
+        "salmon_version": result.get("tool_version"),
+        "annotation_name": result.get("annotation_name"),
+        "annotation_sha256": result.get("annotation_sha256"),
+    }
+    provenance.update(result.get("facts") or {})
+    return provenance
+
+
+async def _apply_salmon_quantify(result: dict, *, owner: str) -> None:
+    """Turn a finished Salmon run into a counts object.
+
+    The counts descend from both the reads and the transcriptome, for the same
+    reason featureCounts output descends from its BAM and its annotation: a
+    count is a claim about a gene, and which gene depends entirely on which
+    reference was used.
+
+    Metadata is copied from the reads object, which is where `condition` and
+    `sample` live. `_apply_quantify` takes them from the BAM instead only
+    because a BAM is what it has; this path has no BAM and the reads are the
+    parent, so it reads them from the source directly.
+    """
+    from app.services import object_service, run_service
+
+    output = result.get("output")
+    reads_id = result.get("object_id")
+    if not output or not reads_id:
+        return
+
+    reads = await DataObject.get(PydanticObjectId(reads_id))
+    if reads is None:
+        log.warning("salmon_quantify_parent_missing", object_id=reads_id)
+        return
+
+    parents = [reads.id]
+    transcriptome_id = result.get("transcriptome_object_id")
+    if transcriptome_id:
+        parents.append(PydanticObjectId(transcriptome_id))
+
+    job_id = result.get("job_id")
+    try:
+        counts = await object_service.ingest_local_file(
+            owner=reads.owner,
+            project_id=reads.project_id,
+            path=Path(output["tmp_path"]),
+            name=output["name"],
+            role=ObjectRole.COUNTS,
+            derived_from=parents,
+            produced_by_job=PydanticObjectId(job_id) if job_id else None,
+            facts=salmon_provenance(result),
+            metadata=dict(reads.metadata),
+        )
+    except Exception as e:  # noqa: BLE001
+        log.error("salmon_counts_ingest_failed", object_id=reads_id, error=str(e))
+        return
+
+    log.info(
+        "salmon_quantify_applied", reads_id=reads_id, counts_id=str(counts.id)
+    )
+
+    if job_id:
+        run_id = await run_service.run_for_job(PydanticObjectId(job_id))
+        if run_id is not None:
+            await run_service.record_outputs(run_id, [counts.id], owner=counts.owner)
+
+
 async def _apply_differential_expression(result: dict, *, owner: str) -> None:
     """Turn a finished DE run into a results object.
 
@@ -3253,6 +3332,7 @@ _APPLIERS = {
     "extract_genbank_sequence": _apply_extract_genbank_sequence,
     "annotate_variants": _apply_annotate_variants,
     "quantify": _apply_quantify,
+    "salmon_quantify": _apply_salmon_quantify,
     "differential_expression": _apply_differential_expression,
     "assemble_reads": _apply_assemble_reads,
     "assess_completeness": _apply_assess_completeness,
