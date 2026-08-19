@@ -22,6 +22,7 @@ from app.services.suggestion_service import (
     build_assemble_card,
     build_preprocess_card,
     build_quantify_card,
+    build_structural_variants_card,
     build_variants_card,
     is_eukaryotic,
     resolve_reference,
@@ -812,6 +813,73 @@ class TestVariantsCard:
         card = build_variants_card(_bam(), None)
         assert card.title
         assert card.description
+
+
+class TestStructuralVariantsCard:
+    @pytest.mark.parametrize(
+        "chemistry",
+        [
+            align_runner.ReadChemistry.HIFI,
+            align_runner.ReadChemistry.CLR,
+            align_runner.ReadChemistry.ONT_SIMPLEX,
+            align_runner.ReadChemistry.ONT_DUPLEX,
+        ],
+    )
+    def test_card_is_offered_for_every_long_read_chemistry(self, chemistry):
+        with patch(
+            "app.services.suggestion_service.tools.sniffles",
+            return_value=_FakeTool(True, name="sniffles"),
+        ):
+            card = build_structural_variants_card(_bam(), chemistry)
+        assert card.status is CardStatus.AVAILABLE
+        assert card.launch["endpoint"] == "/pipelines/structural_variants"
+        assert card.launch["body"]["bam_id"] == "bam456"
+
+    def test_card_is_unavailable_when_the_probe_fails(self):
+        """The load-bearing direction.
+
+        The image ships Sniffles installed, so asserting the card is
+        *available* passes whether or not a patch worked. Only the flip to
+        unavailable fails when the seam breaks. This is #619's third success
+        criterion.
+        """
+        with patch(
+            "app.services.suggestion_service.tools.sniffles",
+            return_value=_FakeTool(False, name="sniffles"),
+        ):
+            card = build_structural_variants_card(
+                _bam(), align_runner.ReadChemistry.ONT_SIMPLEX
+            )
+        assert card.status is CardStatus.UNAVAILABLE
+        assert "not installed" in card.reason
+        assert card.launch is None
+
+    def test_short_read_reason_names_the_missing_capability(self):
+        """The wording is the seam #620's Delly card replaces -- it must say
+        a different *tool* is needed, not that SV calling is impossible."""
+        card = build_structural_variants_card(
+            _bam(), align_runner.ReadChemistry.SHORT
+        )
+        assert card.status is CardStatus.UNAVAILABLE
+        assert "long reads" in card.reason
+
+    def test_unknown_chemistry_is_refused(self):
+        """UNKNOWN means QC has not run. Running Sniffles on a BAM that turns
+        out to be Illumina produces junk quietly."""
+        card = build_structural_variants_card(
+            _bam(), align_runner.ReadChemistry.UNKNOWN
+        )
+        assert card.status is CardStatus.UNAVAILABLE
+
+    def test_none_chemistry_is_refused(self):
+        card = build_structural_variants_card(_bam(), None)
+        assert card.status is CardStatus.UNAVAILABLE
+        assert card.launch is None
+
+    def test_not_offered_for_a_fastq(self):
+        assert build_structural_variants_card(
+            _fake_obj(), align_runner.ReadChemistry.ONT_SIMPLEX
+        ) is None
 
 
 class TestAssembleCard:

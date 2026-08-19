@@ -26,6 +26,7 @@ from app.pipelines import (
     assembler_registry,
     assembly_qc_registry,
     lineage_inference,
+    sniffles_runner,
     tools,
     variant_runner,
 )
@@ -706,6 +707,74 @@ def build_variants_card(obj, chemistry) -> SuggestionCard | None:
                 "bam_id": str(obj.id),
                 "params": {"caller": caller.value},
             },
+        },
+    )
+
+
+def build_structural_variants_card(obj, chemistry) -> SuggestionCard | None:
+    """Call structural variants against the reference this BAM was aligned to.
+
+    Separate from `build_variants_card` rather than a branch inside it: SVs
+    and small variants answer different questions from the same BAM, and the
+    two callsets are stored and displayed separately (see the SV design doc).
+    """
+    if obj.format.kind is not FormatKind.BAM:
+        return None
+
+    title = "Call structural variants"
+    description = "Find deletions, insertions, duplications, and inversions."
+
+    # `align_runner.ReadChemistry`, not a bare import: that is this module's
+    # existing convention (see `_is_long_read` and `build_variants_card`).
+    if chemistry is None or chemistry is align_runner.ReadChemistry.UNKNOWN:
+        return SuggestionCard(
+            kind="structural_variants",
+            category="VARIANTS",
+            title=title,
+            description=description,
+            status=CardStatus.UNAVAILABLE,
+            reason="Unknown sequencing platform for this BAM.",
+        )
+
+    if not sniffles_runner.sv_calling_allowed_for(chemistry):
+        # Worded so #620's short-read caller replaces this reason on the same
+        # card rather than adding a second SV card beside it.
+        return SuggestionCard(
+            kind="structural_variants",
+            category="VARIANTS",
+            title=title,
+            description=description,
+            status=CardStatus.UNAVAILABLE,
+            reason=(
+                "Sniffles2 needs long reads; short-read structural variant "
+                "calling needs a different tool."
+            ),
+        )
+
+    tool = tools.sniffles()
+    if not tool.available:
+        return SuggestionCard(
+            kind="structural_variants",
+            category="VARIANTS",
+            title=title,
+            description=description,
+            status=CardStatus.UNAVAILABLE,
+            reason=f"{tool.name} is not installed.",
+        )
+
+    return SuggestionCard(
+        kind="structural_variants",
+        category="VARIANTS",
+        title=title,
+        description=description,
+        why=(
+            "Long reads span breakpoints, which is what makes structural "
+            "variants resolvable."
+        ),
+        status=CardStatus.AVAILABLE,
+        launch={
+            "endpoint": "/pipelines/structural_variants",
+            "body": {"bam_id": str(obj.id), "params": {}},
         },
     )
 
@@ -2047,6 +2116,10 @@ CARD_BUILDERS: tuple[tuple[str, object], ...] = (
     ("preprocess", lambda obj, ctx: build_preprocess_card(obj)),
     ("align", lambda obj, ctx: build_align_card(obj, ctx.references)),
     ("variants", lambda obj, ctx: build_variants_card(obj, ctx.chemistry)),
+    (
+        "structural_variants",
+        lambda obj, ctx: build_structural_variants_card(obj, ctx.chemistry),
+    ),
     ("quantify", lambda obj, ctx: build_quantify_card(obj, ctx.annotations)),
     ("annotate", lambda obj, ctx: build_annotate_card(obj, ctx.annotation_inputs)),
     ("annotate_genome", lambda obj, ctx: build_annotate_genome_card(obj)),
