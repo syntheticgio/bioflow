@@ -128,3 +128,80 @@ def parse_bracken_output(text: str) -> list[dict]:
         except ValueError:
             continue
     return rows
+
+
+# The fact payload's selection rule (spec K2-R6): enough taxa to see the
+# picture, few enough to stay a fact rather than a report.
+_TOP_N = 10
+_MIN_PCT = 1.0
+# A taxon is "dominant" for the mismatch check at >= 5% of clade reads
+# (spec K2-R7): low enough to catch a heavily contaminated sample, high
+# enough that trace noise never accuses the metadata.
+_DOMINANT_PCT = 5.0
+
+
+def top_taxa(kraken_rows: list[dict], bracken_rows: list[dict]) -> dict:
+    """The ``taxonomy`` fact payload.
+
+    Bracken's species fractions are preferred; Kraken2's own species rows
+    (rank ``S``) are the fallback when Bracken was skipped (spec K2-R6).
+    Selection: top 10 by abundance, plus every taxon at >= 1% -- which for
+    a clean single-organism sample is one row, and for a contaminated one
+    is the evidence.
+    """
+    unclassified = next(
+        (r["pct"] for r in kraken_rows if r["rank"] == "U"), 0.0
+    )
+    if bracken_rows:
+        candidates = [
+            {
+                "name": r["name"],
+                "rank": "S",
+                "taxid": r["taxid"],
+                "pct": round(r["fraction"] * 100, 2),
+            }
+            for r in bracken_rows
+        ]
+        used = True
+    else:
+        candidates = [
+            {"name": r["name"], "rank": r["rank"], "taxid": r["taxid"], "pct": r["pct"]}
+            for r in kraken_rows
+            if r["rank"] == "S"
+        ]
+        used = False
+
+    candidates.sort(key=lambda t: t["pct"], reverse=True)
+    taxa = [t for i, t in enumerate(candidates) if i < _TOP_N or t["pct"] >= _MIN_PCT]
+    return {"taxa": taxa, "unclassified_pct": unclassified, "bracken_used": used}
+
+
+def organism_mismatch(
+    metadata_organism: str | None, kraken_rows: list[dict]
+) -> dict | None:
+    """Whether the reads disagree with ``metadata["organism"]``.
+
+    Genus-level on purpose: strain and species names in metadata are too
+    free-form to match reliably, and a genus-level miss is already a real
+    problem.  Absent metadata means no check and no fact -- "not stated"
+    and "wrong" are different claims (spec K2-R7).  Returns the evidence
+    dict for the ``taxonomy_mismatch`` fact, or None.
+    """
+    if not metadata_organism or not metadata_organism.strip():
+        return None
+    claimed_genus = metadata_organism.strip().split()[0].lower()
+
+    dominant = [
+        r for r in kraken_rows
+        if r["rank"] == "S" and r["pct"] >= _DOMINANT_PCT
+    ]
+    if not dominant:
+        # Nothing classified confidently enough to accuse the metadata.
+        return None
+    for row in dominant:
+        if row["name"].strip().split()[0].lower() == claimed_genus:
+            return None
+    return {
+        "claimed": metadata_organism.strip(),
+        "dominant": [{"name": r["name"], "pct": r["pct"]} for r in dominant],
+    }

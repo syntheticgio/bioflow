@@ -105,3 +105,69 @@ def test_parse_bracken_output():
 def test_parse_bracken_garbage_is_empty():
     assert kraken_runner.parse_bracken_output("") == []
     assert kraken_runner.parse_bracken_output("no\ttabs\there\n") == []
+
+
+def _kr(pct, clade, direct, rank, taxid, name):
+    return {"pct": pct, "clade_reads": clade, "direct_reads": direct,
+            "rank": rank, "taxid": taxid, "name": name}
+
+
+def test_top_taxa_prefers_bracken():
+    kraken = [
+        _kr(12.5, 1250, 1250, "U", 0, "unclassified"),
+        _kr(86.2, 8620, 8000, "S", 562, "Escherichia coli"),
+    ]
+    bracken = [
+        {"name": "Escherichia coli", "taxid": 562, "fraction": 0.985},
+        {"name": "Staphylococcus aureus", "taxid": 1280, "fraction": 0.015},
+    ]
+    result = kraken_runner.top_taxa(kraken, bracken)
+    assert result["bracken_used"] is True
+    assert result["unclassified_pct"] == 12.5
+    assert result["taxa"][0] == {
+        "name": "Escherichia coli", "rank": "S", "taxid": 562, "pct": 98.5,
+    }
+
+
+def test_top_taxa_falls_back_to_kraken_species():
+    kraken = [
+        _kr(12.5, 1250, 1250, "U", 0, "unclassified"),
+        _kr(86.2, 8620, 8000, "S", 562, "Escherichia coli"),
+        _kr(0.5, 50, 50, "S", 1280, "Staphylococcus aureus"),
+    ]
+    result = kraken_runner.top_taxa(kraken, [])
+    assert result["bracken_used"] is False
+    assert [t["name"] for t in result["taxa"]] == [
+        "Escherichia coli", "Staphylococcus aureus",
+    ]
+
+
+def test_top_taxa_keeps_top_ten_plus_one_percent():
+    # 12 species at 0.5% each after two big ones: top 10 kept, plus all >=1%
+    kraken = [_kr(30.0, 3000, 3000, "S", 100 + i, f"Species {i}") for i in range(2)]
+    kraken += [_kr(0.5, 50, 50, "S", 200 + i, f"Minor {i}") for i in range(12)]
+    result = kraken_runner.top_taxa(kraken, [])
+    assert len(result["taxa"]) == 10
+
+
+def test_mismatch_fires_when_genus_absent():
+    kraken = [
+        _kr(94.0, 9400, 9000, "S", 1280, "Staphylococcus aureus"),
+        _kr(2.0, 200, 200, "S", 562, "Escherichia coli"),
+    ]
+    result = kraken_runner.organism_mismatch("Escherichia coli", kraken)
+    assert result == {
+        "claimed": "Escherichia coli",
+        "dominant": [{"name": "Staphylococcus aureus", "pct": 94.0}],
+    }
+
+
+def test_mismatch_silent_when_genus_dominant():
+    kraken = [_kr(94.0, 9400, 9000, "S", 562, "Escherichia coli")]
+    assert kraken_runner.organism_mismatch("Escherichia coli K-12", kraken) is None
+
+
+def test_mismatch_silent_without_metadata():
+    kraken = [_kr(94.0, 9400, 9000, "S", 1280, "Staphylococcus aureus")]
+    assert kraken_runner.organism_mismatch(None, kraken) is None
+    assert kraken_runner.organism_mismatch("  ", kraken) is None
