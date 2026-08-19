@@ -127,7 +127,14 @@ class TestMergeFastq:
     async def test_leaves_no_temp_file_behind(self, client, two_profiles, a_project):
         """The merge stages into /tmp before re-ingesting; a multi-GB leak there
         is the kind that fills a disk quietly."""
+        import uuid
         from pathlib import Path
+
+        # The staging directory is a fixed path shared by every run on this
+        # machine, so the *name* is what has to be unique: with a fixed one,
+        # a concurrent run's identical merge is in flight under the same path
+        # and this assertion reads its file, not a leak of its own.
+        output_name = f"tmp_merged_{uuid.uuid4().hex[:8]}.fastq"
 
         one = await _stored_fastq(a_project, "tmp_a.fastq", READ_A)
         two = await _stored_fastq(a_project, "tmp_b.fastq", READ_B)
@@ -136,12 +143,12 @@ class TestMergeFastq:
             f"/api/v1/projects/{a_project.id}/operations/merge-fastq",
             json={
                 "object_ids": [str(one.id), str(two.id)],
-                "output_name": "tmp_merged.fastq",
+                "output_name": output_name,
             },
             headers=two_profiles["a_headers"],
         )
 
-        assert not (Path("/tmp/bioflow-merge-fastq") / "tmp_merged.fastq").exists()
+        assert not (Path("/tmp/bioflow-merge-fastq") / output_name).exists()
 
     async def test_refuses_an_object_that_is_not_in_the_project(
         self, client, two_profiles, a_project

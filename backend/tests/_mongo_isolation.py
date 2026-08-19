@@ -82,8 +82,19 @@ def stale_test_dbs(db_names, started_at_by_db, now, active_prefix):
 
     Never the legacy bare `biopipe_test` (no trailing underscore, so the
     prefix check excludes it), never the active run's own, and otherwise
-    only those whose `_run_meta` timestamp is missing or older than
+    only those whose `_run_meta` timestamp is older than
     STALE_AFTER_SECONDS -- a failed run's data stays inspectable until then.
+
+    A database with *no* marker is left alone, which is the opposite of the
+    obvious rule and the reason this function has a test for it. An
+    unstamped database is far more likely being born than abandoned: a
+    concurrent run creates it, and only then writes its marker. Sweeping on
+    a missing marker turns that gap into a race the other run loses --
+    measured, before this rule changed, as `init_beanie` dying with
+    "OperationFailure: Operation not permitted" when its index build landed
+    on a database this sweep had just dropped underneath it. The cost of
+    being wrong the other way is one leaked database until someone drops it
+    by hand, which is the cheaper mistake.
     """
     stale = []
     for name in db_names:
@@ -92,6 +103,6 @@ def stale_test_dbs(db_names, started_at_by_db, now, active_prefix):
         if name.startswith(active_prefix):
             continue
         started = started_at_by_db.get(name)
-        if started is None or now - started > STALE_AFTER_SECONDS:
+        if started is not None and now - started > STALE_AFTER_SECONDS:
             stale.append(name)
     return stale
