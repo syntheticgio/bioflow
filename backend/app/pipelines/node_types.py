@@ -45,7 +45,7 @@ from app.models.object import FormatKind, ObjectRole
 from app.models.run import RunKind
 from app.models.workflow import PortType
 from app.pipelines.aligner_registry import Choice, ParamField
-from app.pipelines.tool_choice import ALIGN_TOOL_CHOICE, ToolChoice
+from app.pipelines.tool_choice import ALIGN_TOOL_CHOICE, ANNOTATION_TOOL_CHOICE, ToolChoice
 from app.services import (
     ncbi_assembly_service,
     pipeline_service,
@@ -200,7 +200,9 @@ async def _launch_merge_structural_variants(*, inputs: dict, params: dict, owner
 
 async def _launch_annotation(*, inputs: dict, params: dict, owner: str):
     return await pipeline_service.launch_annotation(
-        object_id=inputs["variants"], owner=owner
+        object_id=inputs["variants"],
+        owner=owner,
+        annotator=params.get("annotator"),
     )
 
 
@@ -605,6 +607,7 @@ NODE_TYPES: dict[str, NodeTypeSpec] = {
         # Creates no PipelineRun -- launch_annotation never calls
         # run_service.create_run, unlike launch_variant_calling beside it.
         run_kind=None,
+        tool_choice=ANNOTATION_TOOL_CHOICE,
         inputs=(
             # The reference and annotation (GFF3) are resolved internally via
             # resolve_annotation_inputs, not accepted as launch arguments, so

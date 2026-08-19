@@ -295,6 +295,7 @@ class TestSerialization:
             # version that ran a differential expression test is half that
             # result's provenance, and the panel is where a user reads it.
             "pydeseq2",
+            "snpeff",
         }
 
 

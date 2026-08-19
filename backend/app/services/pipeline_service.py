@@ -4058,35 +4058,40 @@ async def resolve_annotation_inputs(vcf: DataObject) -> AnnotationInputs:
     return AnnotationInputs(ok=True, reference=reference, annotation=annotation)
 
 
-async def launch_annotation(*, object_id: PydanticObjectId, owner: str):
+async def launch_annotation(
+    *,
+    object_id: PydanticObjectId,
+    owner: str,
+    annotator: str | None = None,
+    install_optional: bool = False,
+):
     """Queue a consequence-annotation run for a VCF.
 
     Resolution goes through `resolve_annotation_inputs` rather than repeating
     the rules, so a launch cannot succeed where the card said it could not, or
     the reverse.
+
+    `annotator` selects the tool: "bcftools_csq" (default), "snpeff", or None
+    (which also defaults to bcftools csq).
     """
     from app.queue import queue
     from app.services import object_service
 
-    tools.require(tools.bcftools_csq())
+    tool = annotator or "bcftools_csq"
+    install_job_id = None
+
+    if tool == "snpeff":
+        install_job_id = await _require_or_offer_install(
+            tools.snpeff(), owner=owner, install_optional=install_optional
+        )
+    else:
+        tools.require(tools.bcftools_csq())
 
     vcf = await object_service.get_object(object_id, owner=owner)
 
     inputs = await resolve_annotation_inputs(vcf)
     if not inputs.ok:
         raise ValidationError(inputs.reason)
-
-    # The handler stages the reference the same way call_variants does --
-    # materialized as a real sibling of its .fai, not a symlink `samtools
-    # faidx` would resolve through -- so the .fai has to exist and be
-    # resolvable here, exactly as launch_variant_calling requires one.
-    fai = await _sidecar_of_role(inputs.reference, SidecarRole.FAI)
-    if fai is None:
-        raise ValidationError(
-            f"Reference {inputs.reference.name!r} has no FASTA index (.fai). "
-            f"Build its index first.",
-            details={"reference_id": str(inputs.reference.id), "needs": "build_index"},
-        )
 
     payload: dict = {
         "object_id": str(vcf.id),
@@ -4096,18 +4101,55 @@ async def launch_annotation(*, object_id: PydanticObjectId, owner: str):
         "vcf_name": vcf.name,
         "reference_name": inputs.reference.name,
         "annotation_name": inputs.annotation.name,
+        "tool": tool,
     }
-    for key, obj in (
-        ("vcf", vcf),
-        ("reference", inputs.reference),
-        ("annotation", inputs.annotation),
-        ("fai", fai),
-    ):
-        digest, path = await _resolve_readable(obj)
-        if digest:
-            payload[f"{key}_sha256"] = digest
-        if path:
-            payload[f"{key}_path"] = path
+
+    if tool == "snpeff":
+        # SnpEff doesn't need the .fai (it reads the FASTA directly via its
+        # database build), but it does need the genome accession for the
+        # database directory name.
+        accession = inputs.reference.facts.get("ncbi_assembly_accession")
+        if accession:
+            payload["genome_accession"] = accession
+        # Skip the .fai check for SnpEff — it builds its own database from
+        # the raw reference FASTA and GFF3, not from bcftools' indexed view.
+        for key, obj in (
+            ("vcf", vcf),
+            ("reference", inputs.reference),
+            ("annotation", inputs.annotation),
+        ):
+            digest, path = await _resolve_readable(obj)
+            if digest:
+                payload[f"{key}_sha256"] = digest
+            if path:
+                payload[f"{key}_path"] = path
+    else:
+        # The handler stages the reference the same way call_variants does --
+        # materialized as a real sibling of its .fai, not a symlink `samtools
+        # faidx` would resolve through -- so the .fai has to exist and be
+        # resolvable here, exactly as launch_variant_calling requires one.
+        fai = await _sidecar_of_role(inputs.reference, SidecarRole.FAI)
+        if fai is None:
+            raise ValidationError(
+                f"Reference {inputs.reference.name!r} has no FASTA index (.fai). "
+                f"Build its index first.",
+                details={
+                    "reference_id": str(inputs.reference.id),
+                    "needs": "build_index",
+                },
+            )
+
+        for key, obj in (
+            ("vcf", vcf),
+            ("reference", inputs.reference),
+            ("annotation", inputs.annotation),
+            ("fai", fai),
+        ):
+            digest, path = await _resolve_readable(obj)
+            if digest:
+                payload[f"{key}_sha256"] = digest
+            if path:
+                payload[f"{key}_path"] = path
 
     return await queue.enqueue(
         "annotate_variants",
@@ -4119,6 +4161,7 @@ async def launch_annotation(*, object_id: PydanticObjectId, owner: str):
         dedup_key=f"annotate:{vcf.id}",
         project_id=vcf.project_id,
         object_id=vcf.id,
+        depends_on=[install_job_id] if install_job_id else None,
     )
 
 
