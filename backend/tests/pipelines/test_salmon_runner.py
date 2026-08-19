@@ -156,3 +156,90 @@ class TestSummarizeToGene:
         tx2gene = {"t1": "geneA", "t2": "geneB"}
         _, facts = salmon_runner.summarize_to_gene(per_tx, tx2gene)
         assert facts["counted_fragments"] == 15
+
+
+from pathlib import Path
+
+
+class TestIndexCommand:
+    def test_builds_an_index_from_a_transcriptome(self):
+        cmd = salmon_runner.index_command(
+            transcriptome=Path("/w/tx.fna"),
+            index_dir=Path("/w/idx"),
+            salmon_path="/usr/bin/salmon",
+            threads=8,
+        )
+        assert cmd[:2] == ["/usr/bin/salmon", "index"]
+        assert "-t" in cmd and "/w/tx.fna" in cmd
+        assert "-i" in cmd and "/w/idx" in cmd
+        assert "-p" in cmd and "8" in cmd
+
+
+class TestQuantCommand:
+    def test_single_end_uses_unmated_reads_flag(self):
+        cmd = salmon_runner.quant_command(
+            index_dir=Path("/w/idx"),
+            reads=[Path("/w/a.fastq.gz")],
+            out_dir=Path("/w/out"),
+            salmon_path="/usr/bin/salmon",
+        )
+        assert cmd[:2] == ["/usr/bin/salmon", "quant"]
+        assert "-r" in cmd
+        assert "-1" not in cmd
+
+    def test_paired_end_uses_mate_flags(self):
+        cmd = salmon_runner.quant_command(
+            index_dir=Path("/w/idx"),
+            reads=[Path("/w/r1.fastq.gz"), Path("/w/r2.fastq.gz")],
+            out_dir=Path("/w/out"),
+            salmon_path="/usr/bin/salmon",
+        )
+        assert "-1" in cmd and "/w/r1.fastq.gz" in cmd
+        assert "-2" in cmd and "/w/r2.fastq.gz" in cmd
+        assert "-r" not in cmd
+
+    def test_library_type_is_always_automatic(self):
+        # -l A. The featureCounts path needs the library orientation supplied
+        # because a wrong -s yields near-zero counts that look like a failed
+        # experiment; Salmon infers it, so there is no flag for a user to get
+        # wrong and none is offered.
+        cmd = salmon_runner.quant_command(
+            index_dir=Path("/w/idx"),
+            reads=[Path("/w/a.fastq.gz")],
+            out_dir=Path("/w/out"),
+            salmon_path="/usr/bin/salmon",
+        )
+        assert "-l" in cmd
+        assert cmd[cmd.index("-l") + 1] == "A"
+
+    def test_refuses_more_than_two_read_files(self):
+        with pytest.raises(ValidationError):
+            salmon_runner.quant_command(
+                index_dir=Path("/w/idx"),
+                reads=[Path("/w/a"), Path("/w/b"), Path("/w/c")],
+                out_dir=Path("/w/out"),
+                salmon_path="/usr/bin/salmon",
+            )
+
+    def test_refuses_no_reads(self):
+        with pytest.raises(ValidationError):
+            salmon_runner.quant_command(
+                index_dir=Path("/w/idx"),
+                reads=[],
+                out_dir=Path("/w/out"),
+                salmon_path="/usr/bin/salmon",
+            )
+
+
+class TestPaths:
+    def test_quant_file_is_inside_the_output_directory(self):
+        assert salmon_runner.quant_file(Path("/w/out")) == Path("/w/out/quant.sf")
+
+    def test_output_name_is_derived_from_the_sample(self):
+        assert salmon_runner.output_name("SRR123_1.fastq.gz").endswith(".counts.tsv")
+        assert "SRR123" in salmon_runner.output_name("SRR123_1.fastq.gz")
+
+    def test_command_line_is_copy_pasteable(self):
+        assert salmon_runner.command_line(["salmon", "quant", "-i", "/a b"]) == (
+            "salmon quant -i '/a b'"
+        )
