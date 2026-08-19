@@ -12,8 +12,8 @@ its own knobs, so an unknown key for the wrong tool is rejected at launch
 rather than silently dropped.
 """
 
-from dataclasses import dataclass
 import math
+from dataclasses import dataclass
 
 from app.errors import ValidationError
 from app.pipelines.aligner_preset_ids import BOWTIE2_PRESET_IDS
