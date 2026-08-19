@@ -32,6 +32,7 @@ import type {
   ExtractedSequence,
   FacetValue,
   Facets,
+  FeatureCoverageReport,
   FeatureQuery,
   Feedback,
   FeedbackSubmission,
@@ -1175,6 +1176,13 @@ export const api = {
   /** URL for downloading the complete per-contig TSV. */
   bamStatsDownloadUrl: (objectId: string, reportPath: string) =>
     `${BASE}/pipelines/bamstats/report/${objectId}/${reportPath}?download=1&${profileQuery()}`,
+
+  /** The per-feature coverage report for a BAM, once the job has run.
+   * No dedicated launch fetcher: the Actions-tab card launches this job
+   * through the generic api.launchSuggestion(endpoint, body) path, same as
+   * every other suggestion card. */
+  featureCoverageReport: (objectId: string) =>
+    request<FeatureCoverageReport>(`/pipelines/feature-coverage/${objectId}/report`),
 
   /** Queue the Results computation for a VCF/BCF. Read-only: produces facts
    * and a variants TSV, no derived objects. */

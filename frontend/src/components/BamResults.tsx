@@ -16,6 +16,7 @@ import { ContigTable } from "./ContigTable";
 import { ContigDepthChart } from "./ContigDepthChart";
 import { ContigDepthStrip } from "./ContigDepthStrip";
 import { DepthHistogramChart } from "./DepthHistogramChart";
+import { FeatureCoverage } from "./FeatureCoverage";
 import { OnDemandCompute } from "./OnDemandCompute";
 import { TranscriptQc } from "./TranscriptQc";
 
@@ -239,6 +240,12 @@ export function BamResults({ obj }: { obj: ObjectDetailData }) {
           </>
         )}
       </OnDemandCompute>
+
+      {/* Independent job from bam_stats -- launched from its own
+          Actions-tab card via the generic suggestion launcher, not from
+          "Compute results" above -- so it lives outside OnDemandCompute
+          and is gated on its own fact rather than `hasResults`. */}
+      {f.feature_coverage_report && <FeatureCoverage objectId={obj.id} />}
     </>
   );
 }

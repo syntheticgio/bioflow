@@ -608,6 +608,13 @@ export const METRIC_INFO: Record<string, MetricInfo> = {
     computed:
       "The scale is the aligner's, not a shared one. Under STAR the value encodes the number of loci a read mapped to rather than a phred-scaled probability, so a STAR BAM's bars are not comparable with a BWA BAM's; the chart says so when it detects that scale.",
   },
+  "ui.feature_coverage_table": {
+    term: "Per-feature coverage",
+    description:
+      "Every feature in the annotation with its read count and breadth of coverage — the fraction of the feature's own length any read touched. Sorted worst first, so a gene with reads but almost no breadth (a handful of reads piling onto one end) surfaces before healthier ones.",
+    computed:
+      "Computed with `bedtools coverage` between the BAM and the project's annotation (GFF or BED). Breadth is bases covered divided by feature length, not depth — a feature can have many reads and still show low breadth if they cluster.",
+  },
 
   // ---- Results tab: variants ---------------------------------------------
   "ui.vcf_variants": {
