@@ -390,6 +390,17 @@ export const METRIC_INFO: Record<string, MetricInfo> = {
       "The read length at which half the sequenced bases sit in reads that long or longer. For long-read data this describes the run far better than a mean, which a tail of short reads drags down.",
   },
 
+  "ui.chart_length_bases_histogram": {
+    term: "Bases by read length",
+    description:
+      "Total bases in each read-length bin — not the number of reads. The distinction changes the conclusion: a long-read run's reads are mostly short while its bases are mostly long, and it is the bases that decide whether a repeat gets spanned during assembly. The dashed line marks N50, the length at which half the bases sit in reads that long or longer.",
+  },
+  "ui.chart_length_quality_density": {
+    term: "Length vs quality",
+    description:
+      "How many reads sit at each combination of length and mean quality; darker is denser. Two separate clouds mean two populations — a HiFi run with incomplete consensus shows a second, lower-quality group, and a mass of short poor reads dragging the averages down looks quite different from a run that is uniformly mediocre, though both give the same mean.",
+  },
+
   // ---- Quality-tab charts ------------------------------------------------
   "ui.chart_quality_per_position": {
     term: "Quality per position",
