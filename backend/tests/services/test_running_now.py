@@ -107,12 +107,19 @@ class TestEndpointJobTypes:
         import app.services.suggestion_service as ss
 
         source = Path(ss.__file__).read_text()
-        offered = set(re.findall(r'"endpoint":\s*"(/[a-z0-9/\-]+)"', source))
+        offered = set(re.findall(r'"endpoint":\s*"(/[a-z0-9/_\-]+)"', source))
         missing = offered - set(running_now.ENDPOINT_JOB_TYPES)
         assert missing == set(), (
             "suggestion cards post to endpoints that ENDPOINT_JOB_TYPES does "
             f"not map, so their Launch buttons will not grey out: {sorted(missing)}"
         )
+        # Guard the regex itself: an underscore endpoint (like SV's) must
+        # actually be scraped, not silently dropped by the character class.
+        # This is the exact failure mode that let /pipelines/structural_variants
+        # slip through unnoticed -- every other endpoint uses hyphens, so SV
+        # was the first underscore endpoint and the first to expose the gap.
+        assert "/pipelines/structural_variants" in offered
+        assert "/pipelines/structural_variants" in running_now.ENDPOINT_JOB_TYPES
 
 
 def _card(kind: str, endpoint: str | None) -> dict:
