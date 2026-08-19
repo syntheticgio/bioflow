@@ -475,6 +475,21 @@ RUN chmod +x /srv/scripts/install-compleasm.sh \
        COMPLEASM_VERSION="${COMPLEASM_VERSION}" \
        /srv/scripts/install-compleasm.sh
 
+# --- Kraken2 / Bracken -------------------------------------------------------
+# Taxonomic classification and abundance re-estimation. Neither is packaged
+# for trixie; both are plain C++/shell with no arch-specific code, so a
+# source build (each tool's own install_*.sh from its pinned release tag) is
+# the same route compleasm above takes, and works on both amd64 and arm64.
+# The reference database is not installed here -- it is several GB and is
+# delivered on demand at launch time, per tools.kraken2()/tools.bracken().
+ARG KRAKEN2_VERSION=2.1.3
+ARG BRACKEN_VERSION=2.9
+COPY scripts/install-kraken2.sh /srv/scripts/install-kraken2.sh
+RUN chmod +x /srv/scripts/install-kraken2.sh \
+    && KRAKEN2_VERSION="${KRAKEN2_VERSION}" \
+       BRACKEN_VERSION="${BRACKEN_VERSION}" \
+       /srv/scripts/install-kraken2.sh
+
 # --- Polypolish -------------------------------------------------------------
 #
 # Short-read polishing of long-read assemblies. Not in Debian; installed from

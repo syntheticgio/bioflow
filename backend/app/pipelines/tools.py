@@ -641,6 +641,19 @@ def bakta() -> Tool:
 
 
 @lru_cache(maxsize=1)
+def kraken2() -> Tool:
+    """k-mer taxonomic classifier; database delivered on demand, not bundled."""
+    return _probe("kraken2", settings.kraken2_path, ["--version"])
+
+
+@lru_cache(maxsize=1)
+def bracken() -> Tool:
+    """Abundance re-estimation over a Kraken2 report. Non-fatal companion:
+    classify_reads ships Kraken2-only results when this is missing."""
+    return _probe("bracken", settings.bracken_path, ["-v"])
+
+
+@lru_cache(maxsize=1)
 def miniprot() -> Tool:
     # compleasm's protein aligner, built from source alongside it -- see
     # install-compleasm.sh. Probed separately from compleasm() so a broken
@@ -2498,6 +2511,69 @@ TOOL_META: dict[str, ToolMeta] = {
         # at the default.
         runnable=False,
     ),
+    "kraken2": ToolMeta(
+        pipelines=(PipelineType.QC,),
+        one_liner="k-mer taxonomic classification of sequencing reads",
+        summary=(
+            "Kraken2 assigns a taxonomic label to each sequencing read by "
+            "matching k-mers against a reference database, producing a "
+            "per-taxon report of what organisms a sample contains. Used "
+            "for verifying sample identity and detecting cross-species "
+            "contamination (e.g. human reads in a microbial sample)."
+        ),
+        strengths=(
+            "Classifies millions of reads per minute",
+            "Detects cross-species contamination and mislabeled samples",
+            "Standard report format consumed by Krona and Pavian",
+        ),
+        homepage="https://github.com/DerrickWood/kraken2",
+        repository="https://github.com/DerrickWood/kraken2",
+        citation=(
+            "Wood DE, Lu J, Langmead B. Improved metagenomic analysis with "
+            "Kraken 2. Genome Biology. 2019;20:257."
+        ),
+        citation_url="https://doi.org/10.1186/s13059-019-1891-0",
+        license="MIT",
+        usage=(
+            "Classifies FASTQ reads against an on-demand reference "
+            "database chosen at launch (Standard-8 by default), reporting "
+            "per-taxon read percentages. The database is several GB and "
+            "is downloaded on first use rather than shipped in the image. "
+            "Results feed the taxonomy panel and the organism-metadata "
+            "mismatch check."
+        ),
+        delivery=Delivery.BUNDLED,
+    ),
+    "bracken": ToolMeta(
+        pipelines=(PipelineType.QC,),
+        one_liner="Bayesian species-abundance re-estimation from Kraken2 reports",
+        summary=(
+            "Bracken redistributes reads that Kraken2 assigned at genus "
+            "level or above down to species using a Bayesian re-estimation "
+            "over the database's k-mer distribution, turning a raw "
+            "classification report into species-level abundance estimates."
+        ),
+        strengths=(
+            "Species-level abundances from higher-rank assignments",
+            "Runs in seconds over an existing report",
+        ),
+        homepage="https://github.com/jenniferlu717/Bracken",
+        repository="https://github.com/jenniferlu717/Bracken",
+        citation=(
+            "Lu J, Breitwieser FP, Thielen P, Salzberg SL. Bracken: "
+            "estimating species abundance in metagenomics data. PeerJ "
+            "Computer Science. 2017;3:e104."
+        ),
+        citation_url="https://doi.org/10.7717/peerj-cs.104",
+        license="GPL-3.0",
+        usage=(
+            "Runs automatically inside the classification job after "
+            "Kraken2, refining the report into species-level abundances. "
+            "Failure is non-fatal: the job ships Kraken2-only results "
+            "with a note when Bracken cannot run."
+        ),
+        delivery=Delivery.BUNDLED,
+    ),
 }
 
 
@@ -2616,3 +2692,5 @@ def reset_cache() -> None:
     gci.cache_clear()
     winnowmap.cache_clear()
     bakta.cache_clear()
+    kraken2.cache_clear()
+    bracken.cache_clear()

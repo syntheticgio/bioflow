@@ -164,6 +164,12 @@ class Settings(BaseSettings):
     # Bacterial genome annotation. On-demand delivery — the database is
     # several GB — so this probe only checks the binary, not the DB.
     bakta_path: str = "bakta"
+    # Taxonomic classification. On-demand delivery — the database is several
+    # GB — so this probe only checks the binary, not the DB.
+    kraken2_path: str = "kraken2"
+    # Bracken re-estimates abundances over an existing Kraken2 report; no
+    # database of its own to probe.
+    bracken_path: str = "bracken"
     # Assembly completeness. Built from source in the Dockerfile -- neither is
     # packaged for trixie -- so compleasm resolves miniprot on PATH under this
     # exact name rather than needing a second setting passed through to it.
