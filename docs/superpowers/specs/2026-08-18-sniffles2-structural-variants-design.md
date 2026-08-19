@@ -343,6 +343,35 @@ The obligation this creates is narrow but real: **the VCF and its index must
 be downloadable together**, since a `.vcf.gz` without its `.tbi` is not a
 track a viewer can load.
 
+## Decision 7: a new `PipelineType`, not a reuse of `VARIANT`
+
+`TOOL_META` entries carry a `pipelines` tuple, and `PipelineType` drives the
+tool picker: `PipelineToolSelector.tsx` renders one screen per member, headed
+by a label from `PIPELINE_LABEL`.
+
+`PipelineType.VARIANT`'s label is **"a variant caller"**. Declaring Sniffles
+under it would list it beside Clair3, bcftools, and DeepVariant as something
+to *call small variants with* -- offering a user picking an SNV caller a tool
+that cannot produce SNVs. That is precisely the mistake the `ASSEMBLY_QC`
+member's own comment records avoiding, where a completeness tool declared
+`ASSEMBLE` would have been offered "in the picker headed 'an assembler',
+beside Flye, as something to assemble *with*".
+
+So: a new member, `STRUCTURAL_VARIANT = "structural_variant"`, labelled **"a
+structural variant caller"**.
+
+This is consistent with Decision 1 rather than a separate judgement -- if SVs
+warrant their own pipeline, table, and view because they answer a different
+question, they warrant their own picker family for the same reason.
+
+**The frontend half is not optional and cannot be forgotten.**
+`PIPELINE_LABEL` is typed `Record<PipelineType, string>`, deliberately
+exhaustive, and its comment records that this is load-bearing: it "earned its
+keep on 2026-08-01 by being the only thing that noticed `expression` had
+reached the backend without reaching the frontend at all". Adding the enum
+member without the label is a TypeScript compile error, so the two changes
+belong in one commit.
+
 ## Out of scope
 
 Two capabilities were considered for this issue and deliberately deferred,
