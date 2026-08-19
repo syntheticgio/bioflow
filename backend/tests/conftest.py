@@ -76,8 +76,27 @@ def pytest_sessionstart(session):
 
 
 def pytest_sessionfinish(session, exitstatus):
-    """Green runs leave no databases behind; failures keep theirs for inspection."""
-    if not _is_controller(session.config) or exitstatus != 0:
+    """Drop this run's databases unless something failed worth inspecting.
+
+    Keyed on this run's own failures rather than on `exitstatus == 0`, which
+    was the first rule and was wrong in the case that matters: a suite with
+    any long-standing red test never cleans up at all, so every run leaks
+    one database per worker forever. Measured at 51 leaked databases across
+    a dozen runs while three unrelated tests were failing on main.
+
+    `BIOPIPE_KEEP_TEST_DBS=1` keeps them regardless, for a failure that
+    needs the data after the run has already exited.
+    """
+    if not _is_controller(session.config):
+        return
+    if os.getenv("BIOPIPE_KEEP_TEST_DBS"):
+        return
+    if session.testsfailed:
+        print(
+            f"biopipe: keeping {run_prefix()}* for inspection "
+            f"({session.testsfailed} failed); BIOPIPE_KEEP_TEST_DBS=1 to always keep",
+            file=sys.stderr,
+        )
         return
     try:
         client = _sync_mongo_client()
