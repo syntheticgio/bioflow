@@ -247,6 +247,13 @@ class Settings(BaseSettings):
     # DEEPVARIANT_IMAGE to pin a different build.
     deepvariant_image: str = Field(default_factory=default_deepvariant_image)
 
+    # SnpEff on-demand image. Pinned tag; the image includes Java and SnpEff.
+    # Override with SNPEFF_IMAGE to pin a different build.
+    snpeff_image: str = "pegi3s/snpeff:5.2a"
+
+    # Directory for cached SnpEff databases, keyed by genome accession.
+    snpeff_data_dir: Path = Path("/data/snpeff")
+
     # Threads a single trim run may use. Deliberately well below the core count:
     # the queue admits more than one compute job at a time, and fastp's own
     # scaling flattens out past a handful of threads while the IO cost does not.

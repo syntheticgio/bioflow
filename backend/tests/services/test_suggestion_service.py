@@ -1112,15 +1112,19 @@ def installed_csq(available=True, error=None):
     A plain module-attribute lookup, like the variants card's caller probes
     above -- not a frozen-spec seam like the aligners', since `bcftools_csq`
     is called directly rather than through a registry.
+
+    Also patches the SnpEff probe to be available, since the annotate card
+    now checks both tools. Tests that specifically test the SnpEff-unavailable
+    path should use `installed_snpeff` explicitly instead.
     """
     with patch(
         "app.services.suggestion_service.tools.bcftools_csq",
         return_value=_FakeTool(available, name="bcftools csq"),
-    ) as probe:
-        # `_FakeTool` has no `error` attribute by default; the card reads
-        # `.error` only on the unavailable path, so it is added here rather
-        # than widening the shared fake for every other test.
-        probe.return_value.error = error
+    ) as csq_probe, patch(
+        "app.services.suggestion_service.tools.snpeff",
+        return_value=_FakeTool(True, name="snpeff"),
+    ):
+        csq_probe.return_value.error = error
         yield
 
 
@@ -1144,9 +1148,11 @@ class TestAnnotateCard:
 
         with installed_csq(False, error="nope"):
             assert not suggestion_service.tools.bcftools_csq().available
+            # SnpEff is still available via the patch. Inputs is None (bad),
+            # so the card shows UNAVAILABLE with the inputs reason.
             card = build_annotate_card(_vcf(), None)
             assert card.status is CardStatus.UNAVAILABLE
-            assert card.reason == "nope"
+            assert card.reason == "Inputs could not be resolved."
 
     def test_no_card_on_a_non_vcf(self):
         with installed_csq(True):
@@ -1163,7 +1169,7 @@ class TestAnnotateCard:
             card = build_annotate_card(vcf, inputs)
         assert card.status is CardStatus.AVAILABLE
         assert card.launch["endpoint"] == "/pipelines/annotate"
-        assert card.launch["body"] == {"object_id": "vcf789"}
+        assert card.launch["body"] == {"object_id": "vcf789", "annotator": "bcftools_csq"}
 
     def test_a_bcf_is_also_offered_the_card(self):
         """`FormatKind.BCF` is the binary sibling of VCF; both are called
@@ -1180,6 +1186,8 @@ class TestAnnotateCard:
         assert card.status is CardStatus.AVAILABLE
 
     def test_unavailable_reason_comes_from_the_resolver(self):
+        """When inputs do not resolve, the card is UNAVAILABLE with the
+        resolver's reason, regardless of tool availability."""
         inputs = pipeline_service.AnnotationInputs(
             ok=False, reason="No annotation (GFF3) for this reference."
         )
@@ -1189,7 +1197,9 @@ class TestAnnotateCard:
         assert card.reason == "No annotation (GFF3) for this reference."
         assert card.launch is None
 
-    def test_unavailable_when_csq_is_missing(self):
+    def test_unavailable_when_csq_is_missing_but_snpeff_available(self):
+        """When bcftools csq is missing but SnpEff is available, the card
+        defaults to SnpEff rather than showing unavailable."""
         reference = _ref("ref1", "ref.fna")
         annotation = _ref("gff1", "annotation.gff3")
         inputs = pipeline_service.AnnotationInputs(
@@ -1197,9 +1207,80 @@ class TestAnnotateCard:
         )
         with installed_csq(False, error="bcftools csq requires bcftools >= 1.12."):
             card = build_annotate_card(_vcf(), inputs)
+        assert card.status is CardStatus.AVAILABLE
+        assert card.launch["body"]["annotator"] == "snpeff"
+
+    def test_both_tools_available_offers_bcftools_csq_default(self):
+        """When both SnpEff and bcftools csq are available, the card shows
+        the tool picker and defaults to bcftools_csq."""
+        reference = _ref("ref1", "ref.fna")
+        annotation = _ref("gff1", "annotation.gff3")
+        inputs = pipeline_service.AnnotationInputs(
+            ok=True, reference=reference, annotation=annotation
+        )
+        with installed_csq(True), installed_snpeff(True):
+            card = build_annotate_card(_vcf(), inputs)
+        assert card.status is CardStatus.AVAILABLE
+        assert card.launch["body"]["annotator"] == "bcftools_csq"
+        assert card.title == "Annotate variants"
+
+    def test_only_snpeff_available_defaults_to_snpeff(self):
+        """When only SnpEff is available, the card defaults to snpeff
+        without a tool picker."""
+        reference = _ref("ref1", "ref.fna")
+        annotation = _ref("gff1", "annotation.gff3")
+        inputs = pipeline_service.AnnotationInputs(
+            ok=True, reference=reference, annotation=annotation
+        )
+        with installed_csq(False, error="bcftools csq unavailable"), installed_snpeff(True):
+            card = build_annotate_card(_vcf(), inputs)
+        assert card.status is CardStatus.AVAILABLE
+        assert card.launch["body"]["annotator"] == "snpeff"
+
+    def test_only_csq_available_defaults_to_bcftools_csq(self):
+        """When only bcftools csq is available, the card defaults to
+        bcftools_csq without a tool picker."""
+        reference = _ref("ref1", "ref.fna")
+        annotation = _ref("gff1", "annotation.gff3")
+        inputs = pipeline_service.AnnotationInputs(
+            ok=True, reference=reference, annotation=annotation
+        )
+        with installed_csq(True), installed_snpeff(False, error="SnpEff image not found"):
+            card = build_annotate_card(_vcf(), inputs)
+        assert card.status is CardStatus.AVAILABLE
+        assert card.launch["body"]["annotator"] == "bcftools_csq"
+
+    def test_neither_tool_available_shows_unavailable(self):
+        """When neither annotator is available, the card is UNAVAILABLE
+        with the SnpEff error message (richer tool checked first)."""
+        reference = _ref("ref1", "ref.fna")
+        annotation = _ref("gff1", "annotation.gff3")
+        inputs = pipeline_service.AnnotationInputs(
+            ok=True, reference=reference, annotation=annotation
+        )
+        with installed_csq(False, error="bcftools csq missing"), installed_snpeff(
+            False, error="SnpEff image not pulled"
+        ):
+            card = build_annotate_card(_vcf(), inputs)
         assert card.status is CardStatus.UNAVAILABLE
         assert card.launch is None
-        assert "csq" in card.reason.lower()
+        assert "SnpEff" in card.reason
+
+
+@contextmanager
+def installed_snpeff(available=True, error=None):
+    """Pin the SnpEff probe the annotate card reads.
+
+    Like `installed_csq` but for the on-demand image probe. The real probe
+    returns a Tool with path=docker, version=None; this fake returns a
+    matching shape so the card can read `.error` on the unavailable path.
+    """
+    with patch(
+        "app.services.suggestion_service.tools.snpeff",
+        return_value=_FakeTool(available, name="snpeff"),
+    ) as probe:
+        probe.return_value.error = error
+        yield
 
 
 @contextmanager
@@ -1325,8 +1406,9 @@ class TestSuggestionsFor:
         assert assemble["launch"] is None
         assert assemble["configure"] is None
 
-    async def test_a_kind_with_no_dialog_carries_no_configure(self):
-        """Twelve kinds have no settings dialog; their cards show Launch alone."""
+    async def test_the_annotate_kind_now_has_a_configure_dialog(self):
+        """The annotate card now has a tool picker, so it carries a
+        configure dialog."""
         inputs = pipeline_service.AnnotationInputs(
             ok=True,
             reference=_ref("aaa", "ref.fna"),
@@ -1336,7 +1418,8 @@ class TestSuggestionsFor:
             cards = await suggestions_for(_vcf())
         annotate = next(c for c in cards if c["kind"] == "annotate")
         assert annotate["launch"] is not None
-        assert annotate["configure"] is None
+        assert annotate["configure"] is not None
+        assert annotate["configure"]["dialog"] == "annotation"
 
     async def test_a_fastq_never_gets_a_variants_card(self):
         """Variants are called on an alignment, not on reads."""
@@ -2609,6 +2692,7 @@ class TestCardBuilderRegistry:
             "trim",
             "align",
             "variant",
+            "annotation",
             "quantify",
             "assemble",
             "scaffold",

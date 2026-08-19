@@ -811,18 +811,14 @@ def build_merge_structural_variants_card(obj, ctx=None) -> SuggestionCard | None
         },
     )
 
-
-
 def build_annotate_card(obj, inputs) -> SuggestionCard | None:
     """Consequence annotation for a called VCF.
-
     `inputs` is a parameter rather than something resolved here, mirroring
     `build_variants_card`'s chemistry: `resolve_annotation_inputs` walks
     provenance to the reference and lists the project for a GFF3, which is an
     async database round trip the endpoint has already paid for by the time
     this builder runs. Taking the resolved value keeps this module's builders
     uniformly synchronous and pure.
-
     The reason text is the resolver's, not this card's. Two places deciding
     why something is unavailable drift, and the card is the one the user
     reads -- so it must say exactly what the launcher would enforce.
@@ -830,56 +826,64 @@ def build_annotate_card(obj, inputs) -> SuggestionCard | None:
     if obj.format.kind not in (FormatKind.VCF, FormatKind.BCF):
         return None
 
-    title = "Annotate variants"
     description = "Add gene and protein consequences to these variants."
 
-    csq = tools.bcftools_csq()
-    if not csq.available:
+    # Probe both annotators. SnpEff is checked first so its error text is the
+    # one shown when both are missing -- it is the richer tool and its absence
+    # is the more actionable message (installable on demand).
+    snpeff_tool = tools.snpeff()
+    csq_tool = tools.bcftools_csq()
+    snpeff_ok = snpeff_tool.available
+    csq_ok = csq_tool.available
+
+    if not snpeff_ok and not csq_ok:
+        reason = snpeff_tool.error or csq_tool.error or "No annotator is available."
         return SuggestionCard(
             kind="annotate",
             category="ANNOTATE",
-            title=title,
+            title="Annotate variants",
             description=description,
             status=CardStatus.UNAVAILABLE,
-            reason=csq.error or "bcftools csq is unavailable.",
+            reason=reason,
         )
 
     if inputs is None or not inputs.ok:
         return SuggestionCard(
             kind="annotate",
             category="ANNOTATE",
-            title=title,
+            title="Annotate variants",
             description=description,
             status=CardStatus.UNAVAILABLE,
             reason=(inputs.reason if inputs else "Inputs could not be resolved."),
         )
 
-    # `ok=True` guarantees both reference and annotation are set -- see the
-    # single ok return in resolve_annotation_inputs, which is reached only
-    # after both are found.
+    # Both tools or at least one is available, and inputs resolved.
+    # Determine the default annotator for the launch body.
+    if snpeff_ok and csq_ok:
+        # Both available: use the configured default (bcftools_csq).
+        # The frontend tool picker lets the user switch; the card gets a
+        # configure dialog so the picker is accessible.
+        default_annotator = "bcftools_csq"
+    elif snpeff_ok:
+        default_annotator = "snpeff"
+    else:
+        default_annotator = "bcftools_csq"
+
     return SuggestionCard(
         kind="annotate",
         category="ANNOTATE",
-        title=title,
+        title="Annotate variants",
         description=description,
-        # `resolve_annotation_inputs` matches on `ncbi_assembly_accession`, so
-        # there is exactly one candidate annotation by construction -- naming
-        # it in `description` cannot disambiguate anything, and every real
-        # file here is literally `genomic.gff`, which tells the user nothing.
-        # `why` is where the other available cards (preprocess, align,
-        # variants) put this kind of detail, and the frontend falls back to
-        # `reason` when `why` is absent -- which an available card never has.
         why=f"Consequences called against {inputs.annotation.name}.",
         status=CardStatus.AVAILABLE,
         launch={
             "endpoint": "/pipelines/annotate",
-            # The complete request body: `/pipelines/annotate` keys on
-            # `object_id` alone and resolves the reference/annotation itself,
-            # the same walk `inputs` above already came from.
-            "body": {"object_id": str(obj.id)},
+            "body": {
+                "object_id": str(obj.id),
+                "annotator": default_annotator,
+            },
         },
     )
-
 
 def build_annotate_genome_card(obj) -> SuggestionCard | None:
     """Genome annotation for a bacterial or archaeal assembly.
@@ -2292,6 +2296,7 @@ _CONFIGURE_DIALOGS: dict[str, str] = {
     "preprocess": "trim",
     "align": "align",
     "variants": "variant",
+    "annotate": "annotation",
     "quantify": "quantify",
     "assemble": "assemble",
     "scaffold": "scaffold",

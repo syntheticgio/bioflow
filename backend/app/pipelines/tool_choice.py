@@ -91,3 +91,19 @@ ALIGN_TOOL_CHOICE = ToolChoice(
     default="minimap2",
     resolve=_resolve_align_ports,
 )
+
+
+def _resolve_annotate_ports(base_inputs, base_outputs, tool: str):
+    """Both annotators (bcftools csq and SnpEff) share the same ports."""
+    return base_inputs, base_outputs
+
+
+ANNOTATION_TOOL_CHOICE = ToolChoice(
+    param_key="annotator",
+    options=(
+        ToolOption(value="bcftools_csq", label="bcftools csq"),
+        ToolOption(value="snpeff", label="SnpEff"),
+    ),
+    default="bcftools_csq",
+    resolve=_resolve_annotate_ports,
+)

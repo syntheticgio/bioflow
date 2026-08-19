@@ -865,6 +865,21 @@ def pydeseq2() -> Tool:
     )
 
 
+def snpeff() -> Tool:
+    """SnpEff variant consequence annotator.
+
+    Delivered as an on-demand OCI image: SnpEff is Java-based and would
+    require a JRE in the backend image plus a multi-hundred-MB download of
+    the SnpEff distribution. Keeping it as an image avoids both.
+
+    The image is probed by presence rather than by --version, matching the
+    DeepVariant pattern: SnpEff's own --version output is not trivially
+    parseable in a way that survives version bumps, and the pinned tag in
+    settings already encodes the version.
+    """
+    return _probe_on_demand_image("snpeff", settings.snpeff_image)
+
+
 def all_tools() -> list[Tool]:
     return [
         fastp(),
@@ -902,6 +917,7 @@ def all_tools() -> list[Tool]:
         winnowmap(),
         bedtools(),
         seqkit(),
+        snpeff(),
     ]
 
 
@@ -2497,6 +2513,53 @@ TOOL_META: dict[str, ToolMeta] = {
         # comment above for why this must be set explicitly rather than left
         # at the default.
         runnable=False,
+    ),
+    "snpeff": ToolMeta(
+        pipelines=(PipelineType.ANNOTATION,),
+        one_liner="Richer variant consequence annotation with impact scoring",
+        summary=(
+            "A self-contained Java-based variant annotation tool that builds "
+            "its own database from a GFF3/GTF and reference genome. Produces "
+            "per-variant consequence annotations with impact severity "
+            "(HIGH/MODERATE/LOW/MODIFIER), HGVS notation (both coding and "
+            "protein-level), and per-transcript ranking, written directly "
+            "into the VCF's ANN field. Lighter-weight than Ensembl VEP with "
+            "no external database dependency at runtime."
+        ),
+        strengths=(
+            "Impact severity tiers: HIGH, MODERATE, LOW, MODIFIER",
+            "HGVS notation: protein and coding-sequence changes",
+            "Per-transcript consequence ranking",
+            "Self-contained database build from GFF3/GTF",
+            "No external network dependency after database is built",
+        ),
+        homepage="https://pcingola.github.io/SnpEff/",
+        repository="https://github.com/pcingola/SnpEff",
+        citation=(
+            "Cingolani P, Platts A, Wang LL, Coon M, Nguyen T, Wang L, "
+            "Land SJ, Lu X, Ruden DM. A program for annotating and "
+            "predicting the effects of single nucleotide polymorphisms, "
+            "SnpEff: SNPs in the genome of Drosophila melanogaster strain "
+            "w1118; iso-2; iso-3. Fly. 2012;6(2):80-92."
+        ),
+        citation_url="https://doi.org/10.4161/fly.19695",
+        # Checked via gh api repos/pcingola/SnpEff/license on 2026-08-18.
+        license="LGPL-3.0",
+        usage=(
+            "An alternative to bcftools csq for variant consequence "
+            "annotation. Builds a SnpEff database from the project's GFF3 "
+            "and reference genome on first use per genome accession, cached "
+            "for subsequent runs. Then annotates the called VCF with "
+            "consequence effects including impact severity, HGVS notation, "
+            "and per-transcript rankings. Runs as a separate container image "
+            "rather than being installed in the BioFlow image."
+        ),
+        runnable=True,
+        delivery=Delivery.ON_DEMAND_IMAGE,
+        image=settings.snpeff_image,
+        # Measured 2026-08-18 pulling pegi3s/snpeff:5.2a: 797 MB compressed
+        # transfer (docker pull output).
+        download_bytes=797_000_000,
     ),
 }
 

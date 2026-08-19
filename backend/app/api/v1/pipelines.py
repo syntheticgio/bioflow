@@ -809,12 +809,15 @@ async def launch_vcf_stats(body: VcfStatsRequest, owner: OwnerDep) -> JobOut:
 
 class AnnotateRequest(BaseModel):
     object_id: PydanticObjectId
+    annotator: str | None = None
 
 
 @router.post("/annotate", response_model=JobOut, status_code=status.HTTP_201_CREATED)
 async def launch_annotate(body: AnnotateRequest, owner: OwnerDep) -> JobOut:
     """Queue consequence annotation for a called VCF."""
-    job = await pipeline_service.launch_annotation(object_id=body.object_id, owner=owner)
+    job = await pipeline_service.launch_annotation(
+        object_id=body.object_id, owner=owner, annotator=body.annotator
+    )
     return JobOut.of(job)
 
 
