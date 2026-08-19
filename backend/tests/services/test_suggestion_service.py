@@ -2658,6 +2658,7 @@ class TestCardBuilderRegistry:
             "scaffold",
             "completeness",
             "polish_long",
+            "classify_reads",
         }
 
     def test_every_launch_endpoint_is_a_real_route(self):

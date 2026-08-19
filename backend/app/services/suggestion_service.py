@@ -2347,6 +2347,7 @@ _CONFIGURE_DIALOGS: dict[str, str] = {
     # completeness's lineage override. The card offers the tool; it does not
     # guess that this assembly is a bacterial isolate.
     "polish_long": "polish_long",
+    "classify_reads": "classify_reads",
 }
 
 

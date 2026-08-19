@@ -73,3 +73,20 @@ export interface LineageStatus {
   odb: string;
   present: boolean;
 }
+
+/** One Kraken2 database choice for the classify-reads dialog, as returned by
+ *  `GET /pipelines/kraken-dbs` -- `present` is a disk probe, not a static
+ *  fact, so it can flip between requests as downloads complete. */
+export interface KrakenDbInfo {
+  key: string;
+  label: string;
+  description: string;
+  download_bytes: number;
+  present: boolean;
+}
+
+export interface ClassifyReadsRequest {
+  object_id: string;
+  db_key: string;
+  mate_object_id?: string;
+}

@@ -18,6 +18,7 @@ import type {
   AlignRequest,
   AssemblyAccepted,
   BulkResult,
+  ClassifyReadsRequest,
   CompleteAccepted,
   CompletenessDefaults,
   CompletenessRequest,
@@ -40,6 +41,7 @@ import type {
   JobLog,
   JobSummary,
   JobTypeInfo,
+  KrakenDbInfo,
   LineageDownloadRequest,
   LineageStatus,
   LocalDatabaseEntry,
@@ -1087,6 +1089,18 @@ export const api = {
         ...(odb ? { odb } : {}),
       })}`,
     ),
+
+  /** The three Kraken2 database choices, each with disk presence -- what
+   * flips the classify-reads dialog's download warning. */
+  krakenDbs: () => request<KrakenDbInfo[]>("/pipelines/kraken-dbs"),
+
+  launchClassifyReads: (body: ClassifyReadsRequest, targetNode?: string) =>
+    request<JobSummary>(
+      `/pipelines/classify-reads${targetNode ? `?target_node=${encodeURIComponent(targetNode)}` : ""}`,
+      {
+        method: "POST",
+        body: JSON.stringify(body),
+      }),
 
   variantDefaults: (bamId: string) =>
     request<VariantDefaults>(`/pipelines/variants/defaults/${bamId}`),

@@ -69,6 +69,7 @@ import { TrimDialog } from "./TrimDialog";
 import { AssembleDialog } from "./AssembleDialog";
 import { CompletenessDialog } from "./CompletenessDialog";
 import { PolishDialog } from "./PolishDialog";
+import { ClassifyReadsDialog } from "./ClassifyReadsDialog";
 import { ScaffoldDialog } from "./ScaffoldDialog";
 import { QuantifyDialog } from "./QuantifyDialog";
 import { DifferentialExpressionDialog } from "./DifferentialExpressionDialog";
@@ -469,6 +470,7 @@ function ObjectDetail({ id }: { id: string }) {
   const [assembleOpen, setAssembleOpen] = useState(false);
   const [completenessOpen, setCompletenessOpen] = useState(false);
   const [polishLongOpen, setPolishLongOpen] = useState(false);
+  const [classifyReadsOpen, setClassifyReadsOpen] = useState(false);
   const [scaffoldOpen, setScaffoldOpen] = useState(false);
   const [deOpen, setDeOpen] = useState(false);
   // The suggestion card's launch body, when a dialog was opened by "Adjust…"
@@ -547,6 +549,9 @@ function ObjectDetail({ id }: { id: string }) {
         break;
       case "polish_long":
         setPolishLongOpen(true);
+        break;
+      case "classify_reads":
+        setClassifyReadsOpen(true);
         break;
       default:
         setPrefill(null);
@@ -1151,6 +1156,16 @@ function ObjectDetail({ id }: { id: string }) {
           prefill={prefill}
           onClose={() => {
             setPolishLongOpen(false);
+            setPrefill(null);
+          }}
+        />
+      )}
+      {classifyReadsOpen && (
+        <ClassifyReadsDialog
+          object={obj}
+          prefill={prefill}
+          onClose={() => {
+            setClassifyReadsOpen(false);
             setPrefill(null);
           }}
         />
