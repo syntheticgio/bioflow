@@ -385,6 +385,18 @@ class Settings(BaseSettings):
         return self.bioinfo_home / "bam_stats"
 
     @property
+    def feature_coverage_dir(self) -> Path:
+        """Generated per-feature coverage reports (the bedtools coverage
+        JSON), keyed by BAM object id.
+
+        Outside objects/ deliberately, same rationale as bam_stats_dir: this
+        is derivative and regenerable from the BAM and annotation, so content-
+        addressing it would buy deduplication of something never shared and
+        cost a blob record per run.
+        """
+        return self.bioinfo_home / "feature_coverage"
+
+    @property
     def vcf_stats_dir(self) -> Path:
         """Generated Variant Results artifacts (the variants TSV and the
         SQLite database the table queries), keyed by object id.

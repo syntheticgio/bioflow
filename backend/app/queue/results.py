@@ -1733,6 +1733,38 @@ async def _apply_run_bam_stats(result: dict, *, owner: str) -> None:
     )
 
 
+async def _apply_feature_coverage(result: dict, *, owner: str) -> None:
+    """Record a per-feature coverage computation's numbers on the BAM it
+    described.
+
+    Read-only like bam_stats: no files to ingest, just facts merged onto the
+    object.
+    """
+    object_id = result.get("object_id")
+    facts = result.get("facts") or {}
+    if not object_id or not facts:
+        return
+
+    obj = await DataObject.get(PydanticObjectId(object_id))
+    if obj is None:
+        log.warning("feature_coverage_object_missing", object_id=object_id)
+        return
+
+    await obj.set(
+        {
+            DataObject.facts: {**obj.facts, **facts},
+            DataObject.updated_at: datetime.now(UTC),
+        }
+    )
+
+    log.info(
+        "feature_coverage_applied",
+        object_id=object_id,
+        feature_count=facts.get("feature_coverage_feature_count"),
+        median_breadth=facts.get("feature_coverage_median_breadth"),
+    )
+
+
 async def _apply_run_transcript_qc(result: dict, *, owner: str) -> None:
     """Record RNA-seq transcript QC on the BAM it described.
 
@@ -3018,6 +3050,7 @@ _APPLIERS = {
     "index_bam": _apply_index_bam,
     "call_variants": _apply_call_variants,
     "run_bam_stats": _apply_run_bam_stats,
+    "feature_coverage": _apply_feature_coverage,
     "run_transcript_qc": _apply_run_transcript_qc,
     "run_vcf_stats": _apply_run_vcf_stats,
     "run_annotation_stats": _apply_run_annotation_stats,
