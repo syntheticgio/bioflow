@@ -258,7 +258,15 @@ class TestCancellation:
             run_subprocess(ctx, cmd, on_line=(lambda line: None) if streaming else None)
 
         grandchild_pid = int(pidfile.read_text())
-        deadline = time.monotonic() + 20  # SIGTERM grace is 15s
+        # Derived from the grace period rather than hardcoded, with a margin
+        # wide enough to survive a loaded machine. At `+ 20` against a 15s
+        # grace the margin was 5s, which held when the suite ran serially and
+        # stopped holding under `-n auto` on a 4-core CI runner: the SIGKILL
+        # escalation lands after the grace, and with every core busy running
+        # other workers' tests it can land several seconds after that. The
+        # assertion below is unchanged -- this waits longer for the same
+        # outcome, it does not accept a weaker one.
+        deadline = time.monotonic() + executor_module.SUBPROCESS_GRACE_SECONDS + 45
         while time.monotonic() < deadline:
             if not _pid_alive(grandchild_pid):
                 break
