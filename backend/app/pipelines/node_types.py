@@ -171,6 +171,12 @@ async def _launch_variant_calling(*, inputs: dict, params: dict, owner: str):
     )
 
 
+async def _launch_structural_variant_calling(*, inputs: dict, params: dict, owner: str):
+    return await pipeline_service.launch_structural_variant_calling(
+        bam_id=inputs["alignment"], params=params, owner=owner
+    )
+
+
 async def _launch_annotation(*, inputs: dict, params: dict, owner: str):
     return await pipeline_service.launch_annotation(
         object_id=inputs["variants"], owner=owner
@@ -476,6 +482,31 @@ NODE_TYPES: dict[str, NodeTypeSpec] = {
             ),
             # Optional: the launcher infers the reference from the BAM's own
             # provenance (reference_for_bam) when this is not wired.
+            PortSpec(
+                "reference",
+                PortType(format=FormatKind.FASTA, role=ObjectRole.REFERENCE),
+                required=False,
+            ),
+        ),
+        outputs=(
+            PortSpec(
+                "variants",
+                PortType(format=FormatKind.VCF, role=ObjectRole.VARIANTS),
+            ),
+        ),
+    ),
+    "call_structural_variants": NodeTypeSpec(
+        label="Call structural variants",
+        launch_name="pipeline_service.launch_structural_variant_calling",
+        launch=_launch_structural_variant_calling,
+        run_kind=RunKind.STRUCTURAL_VARIANT_CALLING,
+        inputs=(
+            PortSpec(
+                "alignment",
+                PortType(format=FormatKind.BAM, role=ObjectRole.ALIGNMENT),
+            ),
+            # Optional, like call_variants: the launcher infers the reference
+            # from the BAM's own provenance when this is not wired.
             PortSpec(
                 "reference",
                 PortType(format=FormatKind.FASTA, role=ObjectRole.REFERENCE),

@@ -408,6 +408,18 @@ class Settings(BaseSettings):
         return self.bioinfo_home / "annotation_stats"
 
     @property
+    def sv_stats_dir(self) -> Path:
+        """Generated structural variant Results artifacts (the SQLite table
+        the SV view queries), keyed by object id.
+
+        Outside objects/ deliberately, same rationale as vcf_stats_dir: this
+        is derivative and regenerable from the VCF itself, so content-
+        addressing it would buy deduplication of something never shared and
+        cost a blob record per run.
+        """
+        return self.bioinfo_home / "sv_stats"
+
+    @property
     def lineages_dir(self) -> Path:
         """compleasm's `--library_path`: downloaded lineage datasets, shared
         across every project and every run.

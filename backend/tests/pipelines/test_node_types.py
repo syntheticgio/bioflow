@@ -40,6 +40,19 @@ class TestExhaustiveness:
         used = {spec.launch_name for spec in NODE_TYPES.values()}
         assert not (used & EXCLUDED_LAUNCHES)
 
+    def test_structural_variant_launcher_is_classified_exactly_once(self):
+        """NODE_TYPES/EXCLUDED_LAUNCHES is a partition, not a covering.
+
+        #355 added a spec entry and an exclusion for the same launcher in two
+        independent commits; both landed, satisfying the test its issue named
+        while failing the double-classification test in this class. Run the
+        whole class, not this test alone.
+        """
+        name = "pipeline_service.launch_structural_variant_calling"
+        classified = {spec.launch_name for spec in NODE_TYPES.values()}
+        assert name in classified
+        assert name not in EXCLUDED_LAUNCHES
+
 
 class TestSpecs:
     def test_every_spec_declares_a_callable_launch(self):

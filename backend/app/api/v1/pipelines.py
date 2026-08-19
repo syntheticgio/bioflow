@@ -2024,6 +2024,27 @@ async def launch_variant_calling(body: VariantRequest, owner: OwnerDep) -> JobOu
     return JobOut.of(job)
 
 
+class StructuralVariantRequest(BaseModel):
+    # Keyed on bam_id, matching /pipelines/variants -- both take an
+    # alignment rather than a generic object.
+    bam_id: PydanticObjectId
+    params: dict = {}
+
+
+@router.post(
+    "/structural_variants", response_model=JobOut, status_code=status.HTTP_201_CREATED
+)
+async def launch_structural_variant_calling(
+    body: StructuralVariantRequest, owner: OwnerDep
+) -> JobOut:
+    """Queue a Sniffles2 structural variant calling run over an aligned,
+    indexed long-read BAM."""
+    job = await pipeline_service.launch_structural_variant_calling(
+        bam_id=body.bam_id, params=body.params, owner=owner
+    )
+    return JobOut.of(job)
+
+
 class QuantifyRequest(BaseModel):
     bam_id: PydanticObjectId
     # Normally resolved from the project. Supplied when a project holds more

@@ -2762,6 +2762,85 @@ async def _apply_call_variants(result: dict, *, owner: str) -> None:
             await run_service.record_outputs(run_id, [vcf.id], owner=vcf.owner)
 
 
+def sv_provenance(result: dict) -> dict:
+    """The facts a structural variant calling run stamps onto the VCF it
+    produced. Mirrors `variant_provenance`, minus a caller field: Sniffles2
+    is the only SV caller this pipeline runs."""
+    return {
+        "variants_called_by": "sniffles2",
+        "variant_caller_version": result.get("tool_version"),
+        "variant_params": result.get("params") or {},
+    }
+
+
+async def _apply_call_structural_variants(result: dict, *, owner: str) -> None:
+    """Turn a finished structural variant calling run into a VCF object and
+    its index. Mirrors `_apply_call_variants`: the VCF descends from both the
+    BAM and the reference, and the `.tbi` is a sidecar of the VCF.
+    """
+    from app.services import object_service, run_service
+
+    output = result.get("output")
+    bam_id = result.get("bam_object_id")
+    if not output or not bam_id:
+        return
+
+    bam = await DataObject.get(PydanticObjectId(bam_id))
+    if bam is None:
+        log.warning("call_structural_variants_parent_missing", object_id=bam_id)
+        return
+
+    parents = [bam.id]
+    reference_id = result.get("reference_object_id")
+    if reference_id:
+        parents.append(PydanticObjectId(reference_id))
+
+    job_id = result.get("job_id")
+    try:
+        vcf = await object_service.ingest_local_file(
+            owner=bam.owner,
+            project_id=bam.project_id,
+            path=Path(output["tmp_path"]),
+            name=output["name"],
+            role=ObjectRole.VARIANTS,
+            derived_from=parents,
+            produced_by_job=PydanticObjectId(job_id) if job_id else None,
+            facts=sv_provenance(result),
+            # Sample-level metadata describes the biology, which calling
+            # does not change -- same reasoning as call_variants' copy.
+            metadata=dict(bam.metadata),
+        )
+    except Exception as e:  # noqa: BLE001
+        log.error("sv_vcf_ingest_failed", object_id=bam_id, error=str(e))
+        return
+
+    log.info("call_structural_variants_applied", bam_id=bam_id, vcf_id=str(vcf.id))
+
+    # The index is attached after the VCF exists, and its failure is logged
+    # rather than raised: the VCF is the deliverable, and an index can be
+    # rebuilt from it at any time.
+    index = result.get("index")
+    if index:
+        try:
+            await object_service.ingest_local_file(
+                owner=vcf.owner,
+                project_id=bam.project_id,
+                path=Path(index["tmp_path"]),
+                name=index["name"],
+                derived_from=[vcf.id],
+                produced_by_job=PydanticObjectId(job_id) if job_id else None,
+                sidecar_of=vcf.id,
+                sidecar_role=SidecarRole.TBI,
+            )
+        except Exception as e:  # noqa: BLE001
+            log.error("sv_tbi_ingest_failed", vcf_id=str(vcf.id), error=str(e))
+
+    if job_id:
+        run_id = await run_service.run_for_job(PydanticObjectId(job_id))
+        if run_id is not None:
+            await run_service.record_outputs(run_id, [vcf.id], owner=vcf.owner)
+
+
 def counts_provenance(result: dict) -> dict:
     """The facts a quantification stamps onto the counts file it produced.
 
@@ -3017,6 +3096,7 @@ _APPLIERS = {
     "align_reads": _apply_align_reads,
     "index_bam": _apply_index_bam,
     "call_variants": _apply_call_variants,
+    "call_structural_variants": _apply_call_structural_variants,
     "run_bam_stats": _apply_run_bam_stats,
     "run_transcript_qc": _apply_run_transcript_qc,
     "run_vcf_stats": _apply_run_vcf_stats,
