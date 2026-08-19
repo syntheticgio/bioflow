@@ -120,6 +120,38 @@ export interface QcFacts {
   qc_mean_quality?: number | null;
   qc_median_quality?: number | null;
   qc_nanoplot_report?: string;
+  /**
+   * Total bases per log-spaced read-length bin -- bases, not reads. Written
+   * by binning NanoPlot's `--raw` per-read TSV during the job; absent on
+   * long-read files QC'd before that existed, which is why the chart treats
+   * it as optional rather than assuming every NanoPlot object has one.
+   */
+  qc_length_bases_histogram?: {
+    bins_per_decade: number;
+    min_length: number;
+    bins: {
+      length_bin: number;
+      length_bin_end: number;
+      bases: number;
+      reads: number;
+    }[];
+    total_bases: number;
+    total_reads: number;
+  };
+  /**
+   * Read count per (length bin, quality bin) cell, from the same pass.
+   * Sparse: only occupied cells are present, as `[length_bin_start,
+   * quality_bin, count]` triples -- named keys on a grid this size would be
+   * most of the fact's document size.
+   */
+  qc_length_quality_density?: {
+    bins_per_decade: number;
+    min_length: number;
+    quality_bins: number;
+    cells: [number, number, number][];
+    max_count: number;
+    total_reads: number;
+  };
   /** Inferred by qc_stats.infer_chemistry; see ReadChemistry on the backend. */
   qc_read_chemistry?: string;
   qc_read_chemistry_reason?: string;
