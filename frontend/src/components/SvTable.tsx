@@ -13,9 +13,11 @@ const PAGE_SIZE = 50;
 export function SvTable({
   objectId,
   typeCounts,
+  samples = [],
 }: {
   objectId: string;
   typeCounts: Record<string, number>;
+  samples?: string[];
 }) {
   const [page, setPage] = useState(0);
   const [contig, setContig] = useState("");
@@ -23,6 +25,7 @@ export function SvTable({
   const [filterValue, setFilterValue] = useState("");
   const [minLengthInput, setMinLengthInput] = useState("");
   const [maxLengthInput, setMaxLengthInput] = useState("");
+  const [sampleIdx, setSampleIdx] = useState(0);
   // Holds the last known total across a skip_count page turn, so the row
   // count does not flash to nothing while only the page changed.
   const [lastTotal, setLastTotal] = useState<number | null>(null);
@@ -147,6 +150,22 @@ export function SvTable({
             style={{ width: 80 }}
           />
         </label>
+
+        {samples.length > 1 && (
+          <label style={{ display: "flex", flexDirection: "column", gap: 3 }}>
+            <span style={{ color: "var(--text-faint)" }}>Sample</span>
+            <select
+              value={sampleIdx}
+              onChange={(e) => setSampleIdx(Number(e.target.value))}
+            >
+              {samples.map((s, i) => (
+                <option key={s} value={i}>
+                  {s}
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
       </div>
 
       {isLoading && !data ? (
@@ -198,7 +217,7 @@ export function SvTable({
                   <td style={{ textAlign: "right" }}>
                     {row.support == null ? "—" : row.support}
                   </td>
-                  <td className="mono">{row.gt}</td>
+                  <td className="mono">{genotypeFor(row.gt, sampleIdx)}</td>
                 </tr>
               ))}
             </tbody>
@@ -246,3 +265,10 @@ export function SvTable({
     </div>
   );
 }
+
+function genotypeFor(gt: string, sampleIdx: number): string {
+  if (!gt) return "—";
+  const parts = gt.split("\t");
+  return parts[sampleIdx] ?? parts[0] ?? gt;
+}
+

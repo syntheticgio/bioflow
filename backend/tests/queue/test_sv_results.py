@@ -16,7 +16,7 @@ from unittest.mock import patch
 import pytest
 
 from app.config import settings
-from app.models import DataObject, ObjectRole
+from app.models import DataObject, ObjectRole, SidecarRole
 from app.queue import results
 from app.services import object_service, project_service
 
@@ -181,3 +181,90 @@ class TestSvDbMove:
             DataObject.derived_from == bam.id, DataObject.owner == OWNER
         ).to_list()
         assert [p.name for p in produced] == ["calls.sniffles.vcf.gz"]
+
+
+    async def test_snf_sidecar_is_ingested(self, tmp_path, monkeypatch):
+        bam = await _bam(OWNER)
+        vcf_out = _scratch_file(suffix=".vcf.gz")
+        snf_out = _scratch_file(suffix=".snf")
+        vcf_name = f"calls-{uuid.uuid4().hex}.vcf.gz"
+
+        errors = []
+        monkeypatch.setattr(
+            results.log, "error", lambda event, **kw: errors.append((event, kw))
+        )
+
+        sv_stats_root = tmp_path / "sv_stats"
+        with patch.object(type(settings), "sv_stats_dir", property(lambda self: sv_stats_root)):
+            await results._apply_call_structural_variants(
+                {
+                    "bam_object_id": str(bam.id),
+                    "output": {"tmp_path": str(vcf_out), "name": vcf_name},
+                    "snf": {"tmp_path": str(snf_out), "name": "calls.sniffles.snf"},
+                },
+                owner=OWNER,
+            )
+
+        assert errors == []
+        vcf = await DataObject.find_one(DataObject.name == vcf_name)
+        assert vcf is not None
+        snf = await DataObject.find_one(
+            DataObject.sidecar_of == vcf.id,
+            DataObject.sidecar_role == SidecarRole.SNF,
+        )
+        assert snf is not None
+        assert snf.name == "calls.sniffles.snf"
+
+
+class TestMergeSvApplier:
+    async def test_apply_merge_structural_variants(self, tmp_path):
+        bam = await _bam(OWNER)
+        vcf_out = _scratch_file(suffix=".vcf.gz")
+        snf1 = await object_service.ingest_local_file(
+            owner=OWNER,
+            project_id=bam.project_id,
+            path=_scratch_file(suffix=".snf"),
+            name="sample1.snf",
+            role=ObjectRole.VARIANTS,
+            sidecar_role="snf",
+        )
+        snf2 = await object_service.ingest_local_file(
+            owner=OWNER,
+            project_id=bam.project_id,
+            path=_scratch_file(suffix=".snf"),
+            name="sample2.snf",
+            role=ObjectRole.VARIANTS,
+            sidecar_role="snf",
+        )
+
+        scratch_dir = tmp_path / "merge-scratch" / "out"
+        scratch_dir.mkdir(parents=True)
+        scratch_db = scratch_dir / "sv.db"
+        scratch_db.write_bytes(b"joint-sqlite-bytes")
+
+        vcf_out = _scratch_file(suffix=".vcf.gz")
+        tbi_out = _scratch_file(suffix=".vcf.gz.tbi")
+
+        sv_stats_root = tmp_path / "sv_stats"
+        with patch.object(type(settings), "sv_stats_dir", property(lambda self: sv_stats_root)):
+            await results._apply_merge_structural_variants(
+                {
+                    "snf_object_ids": [str(snf1.id), str(snf2.id)],
+                    "output": {"tmp_path": str(vcf_out), "name": "joint_calls.sniffles.vcf.gz"},
+                    "index": {
+                        "tmp_path": str(tbi_out),
+                        "name": "joint_calls.sniffles.vcf.gz.tbi",
+                    },
+                    "sv_db_path": str(scratch_db),
+                },
+                owner=OWNER,
+            )
+
+        joint_vcf = await DataObject.find_one(DataObject.name == "joint_calls.sniffles.vcf.gz")
+        assert joint_vcf is not None
+        assert joint_vcf.role == ObjectRole.VARIANTS
+
+        dest = sv_stats_root / str(joint_vcf.id) / "sv.db"
+        assert dest.is_file()
+        assert dest.read_bytes() == b"joint-sqlite-bytes"
+

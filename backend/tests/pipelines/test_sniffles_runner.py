@@ -82,3 +82,33 @@ def test_clr_is_allowed_even_though_small_variant_calling_refuses_it():
 )
 def test_short_and_unknown_are_refused(chemistry):
     assert sniffles_runner.sv_calling_allowed_for(chemistry) is False
+
+
+def test_snf_output_passed_when_set():
+    argv = sniffles_runner.build_sniffles_command(
+        sniffles_path="sniffles",
+        bam=Path("/data/s.bam"),
+        reference=Path("/data/r.fa"),
+        output=Path("/out/s.vcf.gz"),
+        params=sniffles_runner.SnifflesParams(),
+        snf_output=Path("/out/s.snf"),
+    )
+    assert "--snf" in argv
+    assert argv[argv.index("--snf") + 1] == "/out/s.snf"
+
+
+def test_combine_command_assembly():
+    argv = sniffles_runner.build_sniffles_combine_command(
+        sniffles_path="sniffles",
+        snf_inputs=[Path("/data/s1.snf"), Path("/data/s2.snf")],
+        output=Path("/out/combined.vcf.gz"),
+        threads=8,
+    )
+    assert argv[0] == "sniffles"
+    assert "--input" in argv
+    idx = argv.index("--input")
+    assert argv[idx + 1] == "/data/s1.snf"
+    assert argv[idx + 2] == "/data/s2.snf"
+    assert "--vcf" in argv and "/out/combined.vcf.gz" in argv
+    assert "--threads" in argv and "8" in argv
+

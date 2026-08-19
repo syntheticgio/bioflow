@@ -1257,6 +1257,13 @@ export const api = {
   structuralVariantSummary: (objectId: string) =>
     request<SvSummary>(`/pipelines/structural_variants/summary/${objectId}`),
 
+  /** Merge per-sample .snf callsets into a joint SV callset. */
+  mergeStructuralVariants: (body: { snf_object_ids: string[]; output_name?: string }) =>
+    request<JobOut>("/pipelines/merge_structural_variants", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+
   /** One page of a protein FASTA's records, optionally filtered.
    *
    *  `q` matches identifier or description: a user does not know which field

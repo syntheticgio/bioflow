@@ -25,9 +25,10 @@ OTHER_ID = "507f191e810c19729de860ea"
 
 # Minimal VCF data lines: CHROM POS ID REF ALT QUAL FILTER INFO FORMAT SAMPLE
 SV_LINES = [
-    "chr1\t1000\t.\tN\t<DEL>\t50.0\tPASS\tSVTYPE=DEL;SVLEN=-200;END=1200;SUPPORT=10\tGT\t0/1",
-    "chr1\t5000\t.\tN\t<INS>\t30.0\tq5\tSVTYPE=INS;SVLEN=150;SUPPORT=4\tGT\t1/1",
-    "chr2\t2000\t.\tN\t<DUP>\t80.0\tPASS\tSVTYPE=DUP;SVLEN=50000;END=52000;SUPPORT=15\tGT\t0/1",
+    "#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\tFORMAT\tSample_1\tSample_2",
+    "chr1\t1000\t.\tN\t<DEL>\t50.0\tPASS\tSVTYPE=DEL;SVLEN=-200;END=1200;SUPPORT=10\tGT\t0/1\t0/0",
+    "chr1\t5000\t.\tN\t<INS>\t30.0\tq5\tSVTYPE=INS;SVLEN=150;SUPPORT=4\tGT\t1/1\t0/1",
+    "chr2\t2000\t.\tN\t<DUP>\t80.0\tPASS\tSVTYPE=DUP;SVLEN=50000;END=52000;SUPPORT=15\tGT\t0/1\t1/1",
 ]
 
 
@@ -124,6 +125,7 @@ class TestSummary:
         assert body["type_counts"] == {"DEL": 1, "INS": 1, "DUP": 1}
         assert len(body["length_histogram"]) == 6
         assert sum(b["count"] for b in body["length_histogram"]) == 3
+        assert body["samples"] == ["Sample_1", "Sample_2"]
 
 
 class TestMissingDatabase:

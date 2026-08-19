@@ -177,6 +177,19 @@ async def _launch_structural_variant_calling(*, inputs: dict, params: dict, owne
     )
 
 
+async def _launch_merge_structural_variants(*, inputs: dict, params: dict, owner: str):
+    snf_ids = inputs.get("snf_callsets")
+    if isinstance(snf_ids, list):
+        ids = snf_ids
+    elif snf_ids is not None:
+        ids = [snf_ids]
+    else:
+        ids = []
+    return await pipeline_service.launch_merge_structural_variants(
+        snf_object_ids=ids, owner=owner
+    )
+
+
 async def _launch_annotation(*, inputs: dict, params: dict, owner: str):
     return await pipeline_service.launch_annotation(
         object_id=inputs["variants"], owner=owner
@@ -511,6 +524,24 @@ NODE_TYPES: dict[str, NodeTypeSpec] = {
                 "reference",
                 PortType(format=FormatKind.FASTA, role=ObjectRole.REFERENCE),
                 required=False,
+            ),
+        ),
+        outputs=(
+            PortSpec(
+                "variants",
+                PortType(format=FormatKind.VCF, role=ObjectRole.VARIANTS),
+            ),
+        ),
+    ),
+    "merge_structural_variants": NodeTypeSpec(
+        label="Merge structural variants",
+        launch_name="pipeline_service.launch_merge_structural_variants",
+        launch=_launch_merge_structural_variants,
+        run_kind=RunKind.STRUCTURAL_VARIANT_CALLING,
+        inputs=(
+            PortSpec(
+                "snf_callsets",
+                PortType(format=FormatKind.UNKNOWN, role=None),
             ),
         ),
         outputs=(

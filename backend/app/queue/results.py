@@ -2837,6 +2837,23 @@ async def _apply_call_structural_variants(result: dict, *, owner: str) -> None:
         except Exception as e:  # noqa: BLE001
             log.error("sv_tbi_ingest_failed", vcf_id=str(vcf.id), error=str(e))
 
+    snf = result.get("snf")
+    if snf:
+        try:
+            await object_service.ingest_local_file(
+                owner=vcf.owner,
+                project_id=bam.project_id,
+                path=Path(snf["tmp_path"]),
+                name=snf["name"],
+                role=ObjectRole.VARIANTS,
+                derived_from=[vcf.id],
+                produced_by_job=PydanticObjectId(job_id) if job_id else None,
+                sidecar_of=vcf.id,
+                sidecar_role=SidecarRole.SNF,
+            )
+        except Exception as e:  # noqa: BLE001
+            log.error("sv_snf_ingest_failed", vcf_id=str(vcf.id), error=str(e))
+
     # The SV index was built by the handler under a transient path inside
     # the job's own scratch workdir (the VCF had no object id yet -- ingest
     # above is what assigns one). Move it now to sv_stats_dir/<vcf_id>/sv.db,
@@ -2863,6 +2880,77 @@ async def _apply_call_structural_variants(result: dict, *, owner: str) -> None:
         run_id = await run_service.run_for_job(PydanticObjectId(job_id))
         if run_id is not None:
             await run_service.record_outputs(run_id, [vcf.id], owner=vcf.owner)
+
+
+async def _apply_merge_structural_variants(result: dict, *, owner: str) -> None:
+    """Turn a finished structural variant merging run into a joint VCF object and its index."""
+    from app.services import object_service, run_service
+
+    output = result.get("output")
+    snf_ids = result.get("snf_object_ids") or []
+    if not output or not snf_ids:
+        return
+
+    parents = [PydanticObjectId(sid) for sid in snf_ids]
+    reference_id = result.get("reference_object_id")
+    if reference_id:
+        parents.append(PydanticObjectId(reference_id))
+
+    first_snf = await DataObject.get(parents[0])
+    if first_snf is None:
+        log.warning("merge_structural_variants_parent_missing", object_id=str(parents[0]))
+        return
+
+    job_id = result.get("job_id")
+    try:
+        vcf = await object_service.ingest_local_file(
+            owner=first_snf.owner,
+            project_id=first_snf.project_id,
+            path=Path(output["tmp_path"]),
+            name=output["name"],
+            role=ObjectRole.VARIANTS,
+            derived_from=parents,
+            produced_by_job=PydanticObjectId(job_id) if job_id else None,
+            facts=sv_provenance(result),
+            metadata=dict(first_snf.metadata),
+        )
+    except Exception as e:  # noqa: BLE001
+        log.error("merge_sv_vcf_ingest_failed", error=str(e))
+        return
+
+    log.info("merge_structural_variants_applied", vcf_id=str(vcf.id))
+
+    index = result.get("index")
+    if index:
+        try:
+            await object_service.ingest_local_file(
+                owner=vcf.owner,
+                project_id=first_snf.project_id,
+                path=Path(index["tmp_path"]),
+                name=index["name"],
+                derived_from=[vcf.id],
+                produced_by_job=PydanticObjectId(job_id) if job_id else None,
+                sidecar_of=vcf.id,
+                sidecar_role=SidecarRole.TBI,
+            )
+        except Exception as e:  # noqa: BLE001
+            log.error("merge_sv_tbi_ingest_failed", vcf_id=str(vcf.id), error=str(e))
+
+    sv_db_path = result.get("sv_db_path")
+    if sv_db_path:
+        try:
+            src = Path(sv_db_path)
+            dest_dir = settings.sv_stats_dir / str(vcf.id)
+            dest_dir.mkdir(parents=True, exist_ok=True)
+            shutil.move(str(src), str(dest_dir / "sv.db"))
+        except OSError as e:
+            log.error("merge_sv_db_move_failed", vcf_id=str(vcf.id), error=str(e))
+
+    if job_id:
+        run_id = await run_service.run_for_job(PydanticObjectId(job_id))
+        if run_id is not None:
+            await run_service.record_outputs(run_id, [vcf.id], owner=vcf.owner)
+
 
 
 def counts_provenance(result: dict) -> dict:
@@ -3121,6 +3209,7 @@ _APPLIERS = {
     "index_bam": _apply_index_bam,
     "call_variants": _apply_call_variants,
     "call_structural_variants": _apply_call_structural_variants,
+    "merge_structural_variants": _apply_merge_structural_variants,
     "run_bam_stats": _apply_run_bam_stats,
     "run_transcript_qc": _apply_run_transcript_qc,
     "run_vcf_stats": _apply_run_vcf_stats,

@@ -3778,6 +3778,124 @@ async def launch_structural_variant_calling(
     return job
 
 
+def _sv_merge_dedup_key(*, snf_ids: list[PydanticObjectId]) -> str:
+    sorted_ids = sorted(str(i) for i in snf_ids)
+    return f"merge_structural_variants:{','.join(sorted_ids)}"
+
+
+async def launch_merge_structural_variants(
+    *,
+    snf_object_ids: list[PydanticObjectId],
+    owner: str,
+    output_name: str | None = None,
+    resource_override: bool = False,
+):
+    """Queue a Sniffles2 --combine run across N single-sample .snf callsets."""
+    from app.queue import queue
+    from app.services import object_service
+
+    if not snf_object_ids or len(snf_object_ids) < 2:
+        raise ValidationError("At least two .snf callsets are required for merging")
+
+    refuse_if_over_budget(
+        declared_mb=STRUCTURAL_VARIANT_CALLING_MEM_MB,
+        budget_mb=await current_admission_budget_mb(),
+        resource_override=resource_override,
+    )
+
+    snf_objects: list[DataObject] = []
+    for sid in snf_object_ids:
+        obj = await object_service.get_object(sid, owner=owner)
+        if obj.sidecar_role != SidecarRole.SNF:
+            raise ValidationError(f"{obj.name!r} is not an SNF sidecar file")
+        snf_objects.append(obj)
+
+    project_id = snf_objects[0].project_id
+    for obj in snf_objects[1:]:
+        if obj.project_id != project_id:
+            raise ValidationError("All .snf callsets must belong to the same project")
+
+    references: dict[str, tuple[str, PydanticObjectId]] = {}
+    for obj in snf_objects:
+        parent_vcf = await DataObject.get(obj.sidecar_of) if obj.sidecar_of else None
+        ref_obj = None
+        if parent_vcf and parent_vcf.derived_from:
+            for p_id in parent_vcf.derived_from:
+                p = await DataObject.get(p_id)
+                if p and p.role == ObjectRole.REFERENCE:
+                    ref_obj = p
+                    break
+        if ref_obj is not None:
+            references[obj.name] = (ref_obj.name, ref_obj.id)
+
+    ref_ids = {r[1] for r in references.values()}
+    if len(ref_ids) > 1:
+        ref_details = ", ".join(f"'{name}': reference '{ref[0]}'" for name, ref in references.items())
+        raise ValidationError(
+            f"Cannot merge SV callsets across differing reference assemblies: {ref_details}.",
+            details={"references": {name: str(ref[1]) for name, ref in references.items()}},
+        )
+
+    ref_id = next(iter(ref_ids)) if ref_ids else None
+
+    tools.require(tools.sniffles())
+
+    snf_blobs: list[str] = []
+    snf_names: list[str] = []
+    for obj in snf_objects:
+        _, path = await _resolve_readable(obj)
+        if path:
+            snf_blobs.append(path)
+            snf_names.append(obj.name)
+
+    payload = {
+        "snf_object_ids": [str(i) for i in snf_object_ids],
+        "reference_object_id": str(ref_id) if ref_id else None,
+        "project_id": str(project_id),
+        "snf_blobs": snf_blobs,
+        "snf_names": snf_names,
+        "output_name": output_name or "joint_calls.sniffles.vcf.gz",
+    }
+
+    run = await run_service.create_run(
+        kind=RunKind.STRUCTURAL_VARIANT_CALLING,
+        project_id=project_id,
+        label=f"Merge {len(snf_objects)} SV callsets",
+        inputs=[
+            RunInput(object_id=obj.id, name=obj.name, role=RunInputRole.VARIANTS)
+            for obj in snf_objects
+        ],
+        params={},
+        owner=owner,
+        tool="sniffles2",
+    )
+
+    job = await queue.enqueue(
+        "merge_structural_variants",
+        owner=owner,
+        payload=payload,
+        job_class=JobClass.COMPUTE,
+        resources=JobResources(
+            cpu=4, mem_mb=STRUCTURAL_VARIANT_CALLING_MEM_MB, io=IoClass.HEAVY
+        ),
+        max_attempts=2,
+        dedup_key=_sv_merge_dedup_key(snf_ids=snf_object_ids),
+        project_id=project_id,
+        object_id=snf_objects[0].id,
+        resource_override=resource_override,
+    )
+    if job is None:
+        await run_service.discard_run(run.id, owner=run.owner)
+        raise ConflictError(
+            "An identical SV merge run is already queued or running",
+            details={"snf_ids": [str(i) for i in snf_object_ids]},
+        )
+
+    await run_service.link_job(run.id, job.id, RunJobRole.CALL_VARIANTS)
+    log.info("merge_structural_variants_launched", job_id=str(job.id), count=len(snf_objects))
+    return job
+
+
 # --- Consequence annotation --------------------------------------------------
 
 # ObjectRole.ANNOTATION spans GFF3, GTF and BED -- the role records intent

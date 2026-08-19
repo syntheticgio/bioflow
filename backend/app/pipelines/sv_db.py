@@ -13,6 +13,7 @@ not apply here, since an SV callset is typically thousands of records. The
 shape is copied for consistency and because it costs nothing.
 """
 
+import json
 import sqlite3
 from dataclasses import dataclass
 from pathlib import Path
@@ -180,12 +181,28 @@ def build_sv_db(*, rows, db_path: Path) -> int:
             )
             """
         )
+        con.execute(
+            """
+            CREATE TABLE meta (
+              key   TEXT PRIMARY KEY,
+              value TEXT
+            )
+            """
+        )
 
         inserted = 0
         skipped = 0
+        samples: list[str] = []
         batch: list[tuple] = []
         for line in rows:
-            if not line or line.startswith("#"):
+            if not line:
+                continue
+            if line.startswith("#CHROM"):
+                parts = line.rstrip("\n").split("\t")
+                if len(parts) > 9:
+                    samples = parts[9:]
+                continue
+            if line.startswith("#"):
                 continue
             rec = parse_sv_record(line)
             if rec is None:
@@ -216,6 +233,12 @@ def build_sv_db(*, rows, db_path: Path) -> int:
             con.executemany("INSERT INTO svs VALUES (?,?,?,?,?,?,?,?,?,?)", batch)
             inserted += len(batch)
 
+        if samples:
+            con.execute(
+                "INSERT OR REPLACE INTO meta (key, value) VALUES ('samples', ?)",
+                (json.dumps(samples),),
+            )
+
         con.execute("CREATE INDEX ix_svs_locus ON svs(chrom, pos)")
         con.execute("CREATE INDEX ix_svs_svtype ON svs(svtype)")
         con.execute("CREATE INDEX ix_svs_filter ON svs(filter)")
@@ -226,6 +249,22 @@ def build_sv_db(*, rows, db_path: Path) -> int:
     if skipped:
         log.warning("sv_db_skipped_lines", count=skipped, db=str(db_path))
     return inserted
+
+
+def sample_names(db_path: Path) -> list[str]:
+    """Retrieve sample names stored in sv.db metadata table."""
+    con = sqlite3.connect(db_path)
+    try:
+        cur = con.execute("SELECT value FROM meta WHERE key = 'samples'")
+        row = cur.fetchone()
+        if row and row[0]:
+            return json.loads(row[0])
+        return []
+    except sqlite3.OperationalError:
+        return []
+    finally:
+        con.close()
+
 
 
 def _where(filters: SvFilters) -> tuple[str, list]:

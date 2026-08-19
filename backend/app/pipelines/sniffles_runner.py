@@ -103,6 +103,7 @@ def build_sniffles_command(
     reference: Path,
     output: Path,
     params: SnifflesParams,
+    snf_output: Path | None = None,
 ) -> list[str]:
     """Assemble the Sniffles invocation.
 
@@ -123,8 +124,32 @@ def build_sniffles_command(
         "--minsvlen",
         str(params.min_sv_length),
     ]
+    if snf_output is not None:
+        argv += ["--snf", str(snf_output)]
     if params.min_support is not None:
         argv += ["--minsupport", str(params.min_support)]
     if params.tandem_repeats:
         argv += ["--tandem-repeats", params.tandem_repeats]
     return argv
+
+
+def build_sniffles_combine_command(
+    *,
+    sniffles_path: str,
+    snf_inputs: list[Path],
+    output: Path,
+    threads: int = 4,
+) -> list[str]:
+    """Assemble the Sniffles2 combine invocation across multiple per-sample .snf callsets."""
+    if not snf_inputs:
+        raise ValidationError("At least one .snf input is required for merging")
+    return [
+        sniffles_path,
+        "--input",
+        *[str(p) for p in snf_inputs],
+        "--vcf",
+        str(output),
+        "--threads",
+        str(threads),
+    ]
+

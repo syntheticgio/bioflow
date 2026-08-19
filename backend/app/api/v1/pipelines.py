@@ -2035,6 +2035,12 @@ class StructuralVariantRequest(BaseModel):
     resource_override: bool = False
 
 
+class MergeStructuralVariantsRequest(BaseModel):
+    snf_object_ids: list[PydanticObjectId]
+    output_name: str | None = None
+    resource_override: bool = False
+
+
 @router.post(
     "/structural_variants", response_model=JobOut, status_code=status.HTTP_201_CREATED
 )
@@ -2047,6 +2053,22 @@ async def launch_structural_variant_calling(
         bam_id=body.bam_id,
         params=body.params,
         owner=owner,
+        resource_override=body.resource_override,
+    )
+    return JobOut.of(job)
+
+
+@router.post(
+    "/merge_structural_variants", response_model=JobOut, status_code=status.HTTP_201_CREATED
+)
+async def launch_merge_structural_variants(
+    body: MergeStructuralVariantsRequest, owner: OwnerDep
+) -> JobOut:
+    """Queue a Sniffles2 --combine run to merge per-sample .snf callsets into a joint VCF."""
+    job = await pipeline_service.launch_merge_structural_variants(
+        snf_object_ids=body.snf_object_ids,
+        owner=owner,
+        output_name=body.output_name,
         resource_override=body.resource_override,
     )
     return JobOut.of(job)
@@ -2118,7 +2140,9 @@ async def get_structural_variant_summary(
     return {
         "type_counts": sv_db.type_counts(db_path),
         "length_histogram": sv_db.length_histogram(db_path),
+        "samples": sv_db.sample_names(db_path),
     }
+
 
 
 class QuantifyRequest(BaseModel):

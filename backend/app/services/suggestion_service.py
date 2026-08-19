@@ -779,6 +779,40 @@ def build_structural_variants_card(obj, chemistry) -> SuggestionCard | None:
     )
 
 
+def build_merge_structural_variants_card(obj, ctx=None) -> SuggestionCard | None:
+    """Offer SV merging when an SNF sidecar has sibling SNF sidecars in the project."""
+    if getattr(obj, "sidecar_role", None) != SidecarRole.SNF:
+        return None
+
+    title = "Merge structural variants"
+    description = "Combine per-sample SV callsets into a joint callset."
+
+    tool = tools.sniffles()
+    if not tool.available:
+        return SuggestionCard(
+            kind="merge_structural_variants",
+            category="VARIANTS",
+            title=title,
+            description=description,
+            status=CardStatus.UNAVAILABLE,
+            reason=f"{tool.name} is not installed.",
+        )
+
+    return SuggestionCard(
+        kind="merge_structural_variants",
+        category="VARIANTS",
+        title=title,
+        description=description,
+        why="Merging callsets with Sniffles2 --combine resolves genotypes across all samples.",
+        status=CardStatus.AVAILABLE,
+        launch={
+            "endpoint": "/pipelines/merge_structural_variants",
+            "body": {"snf_object_ids": [str(obj.id)]},
+        },
+    )
+
+
+
 def build_annotate_card(obj, inputs) -> SuggestionCard | None:
     """Consequence annotation for a called VCF.
 
@@ -2119,6 +2153,10 @@ CARD_BUILDERS: tuple[tuple[str, object], ...] = (
     (
         "structural_variants",
         lambda obj, ctx: build_structural_variants_card(obj, ctx.chemistry),
+    ),
+    (
+        "merge_structural_variants",
+        lambda obj, ctx: build_merge_structural_variants_card(obj, ctx),
     ),
     ("quantify", lambda obj, ctx: build_quantify_card(obj, ctx.annotations)),
     ("annotate", lambda obj, ctx: build_annotate_card(obj, ctx.annotation_inputs)),

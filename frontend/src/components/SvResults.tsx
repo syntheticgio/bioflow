@@ -130,7 +130,11 @@ export function SvResults({ obj }: { obj: ObjectDetailData }) {
             <SvLengthChart buckets={summary.length_histogram} />
           </div>
 
-          <SvTable objectId={obj.id} typeCounts={summary.type_counts} />
+          <SvTable
+            objectId={obj.id}
+            typeCounts={summary.type_counts}
+            samples={summary.samples ?? []}
+          />
         </>
       )}
     </>

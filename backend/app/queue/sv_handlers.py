@@ -135,6 +135,7 @@ def call_structural_variants(ctx: JobContext) -> dict:
 
     output_name = ctx.payload.get("output_name") or f"{Path(bam_name).stem}.sniffles.vcf.gz"
     vcf = out_dir / output_name
+    snf = out_dir / f"{Path(bam_name).stem}.snf"
 
     ctx.progress(phase="starting", pct=None, message="starting Sniffles2")
     cmd = sniffles_runner.build_sniffles_command(
@@ -143,6 +144,7 @@ def call_structural_variants(ctx: JobContext) -> dict:
         reference=materialized.reference,
         output=vcf,
         params=params,
+        snf_output=snf,
     )
     log.info("sniffles_started", job_id=ctx.job_id)
 
@@ -156,14 +158,6 @@ def call_structural_variants(ctx: JobContext) -> dict:
     tbi = _index_vcf(ctx, vcf, log_path)
 
     ctx.progress(phase="db", pct=0.9, message="building the SV index")
-    # Built under the job's own scratch dir, not `sv_stats_dir` -- the VCF
-    # does not have an object id yet at this point in a SUBPROCESS handler;
-    # ingest happens later, in `_apply_call_structural_variants`, which is
-    # what assigns one. That applier moves this file to its permanent,
-    # VCF-keyed home (matching every sibling report directory's convention:
-    # vcf_stats_dir, bam_stats_dir, etc. are all keyed by the object the
-    # report is *about*) once the VCF's real id is known. This path is
-    # therefore transient scratch, not the database's final location.
     db_path = _build_sv_index(ctx, vcf, out_dir)
 
     ctx.progress(phase="done", pct=1.0, message="structural variant calling complete")
@@ -173,7 +167,7 @@ def call_structural_variants(ctx: JobContext) -> dict:
         output=vcf.name,
     )
 
-    return {
+    res = {
         "bam_object_id": ctx.payload.get("bam_object_id"),
         "reference_object_id": ctx.payload.get("reference_object_id"),
         "project_id": ctx.payload.get("project_id"),
@@ -182,9 +176,94 @@ def call_structural_variants(ctx: JobContext) -> dict:
         "index": {"tmp_path": str(tbi), "name": tbi.name, "role": "tbi"},
         "tool_version": tool.version,
         "params": ctx.payload.get("params") or {},
-        # Transient scratch path, inside the job's own workdir.
-        # `_apply_call_structural_variants` moves it to
-        # `sv_stats_dir/<vcf_object_id>/sv.db` once the VCF is ingested.
+        "sv_db_path": str(db_path),
+        "workdir": str(work),
+    }
+    if snf.exists() and snf.stat().st_size > 0:
+        res["snf"] = {"tmp_path": str(snf), "name": snf.name, "role": "snf"}
+    return res
+
+
+def _validate_merge_payload(payload: dict) -> None:
+    if not payload.get("snf_blobs") or not isinstance(payload.get("snf_blobs"), list):
+        raise PermanentError(
+            "merge_structural_variants requires a list of 'snf_blobs'"
+        )
+
+
+@handler(
+    "merge_structural_variants",
+    mode=HandlerMode.SUBPROCESS,
+    job_class=JobClass.COMPUTE,
+    resources=JobResources(cpu=4, mem_mb=8192, io=IoClass.HEAVY),
+    max_attempts=2,
+)
+def merge_structural_variants(ctx: JobContext) -> dict:
+    """Merge per-sample .snf callsets into a joint callset using sniffles --combine."""
+    _validate_merge_payload(ctx.payload)
+
+    tool = tools.require(tools.sniffles())
+    work = _prepare_workdir(ctx, "sv_merge")
+
+    snf_blobs = ctx.payload.get("snf_blobs") or []
+    snf_names = ctx.payload.get("snf_names") or []
+    if not snf_blobs or len(snf_blobs) < 2:
+        raise PermanentError("At least two .snf blobs are required for merging")
+
+    snf_paths: list[Path] = []
+    for i, blob_path_str in enumerate(snf_blobs):
+        name = snf_names[i] if i < len(snf_names) else f"sample_{i+1}.snf"
+        p = work / name
+        p.unlink(missing_ok=True)
+        p.symlink_to(Path(blob_path_str))
+        snf_paths.append(p)
+
+    out_dir = work / "out"
+    out_dir.mkdir(exist_ok=True)
+
+    log_path = settings.logs_dir / f"{ctx.job_id}.log"
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+
+    output_name = ctx.payload.get("output_name") or "joint_calls.sniffles.vcf.gz"
+    vcf = out_dir / output_name
+
+    ctx.progress(phase="starting", pct=None, message="merging SV callsets with Sniffles2")
+    cmd = sniffles_runner.build_sniffles_combine_command(
+        sniffles_path=tool.path,
+        snf_inputs=snf_paths,
+        output=vcf,
+        threads=4,
+    )
+    log.info("sniffles_combine_started", job_id=ctx.job_id, snf_count=len(snf_paths))
+
+    code = run_subprocess(ctx, cmd, log_path=str(log_path))
+    if code != 0:
+        raise _failure(code, log_path, "sniffles2 combine")
+
+    if not vcf.exists() or vcf.stat().st_size == 0:
+        raise RetryableError("Sniffles2 combine exited 0 but produced no VCF")
+
+    tbi = _index_vcf(ctx, vcf, log_path)
+
+    ctx.progress(phase="db", pct=0.9, message="building the SV index")
+    db_path = _build_sv_index(ctx, vcf, out_dir)
+
+    ctx.progress(phase="done", pct=1.0, message="structural variant merging complete")
+    log.info(
+        "merge_structural_variants_finished",
+        job_id=ctx.job_id,
+        output=vcf.name,
+    )
+
+    return {
+        "snf_object_ids": ctx.payload.get("snf_object_ids"),
+        "reference_object_id": ctx.payload.get("reference_object_id"),
+        "project_id": ctx.payload.get("project_id"),
+        "job_id": ctx.job_id,
+        "output": {"tmp_path": str(vcf), "name": vcf.name},
+        "index": {"tmp_path": str(tbi), "name": tbi.name, "role": "tbi"},
+        "tool_version": tool.version,
+        "params": ctx.payload.get("params") or {},
         "sv_db_path": str(db_path),
         "workdir": str(work),
     }
@@ -215,31 +294,19 @@ def _index_vcf(ctx: JobContext, vcf: Path, log_path: Path) -> Path:
 
 
 def _build_sv_index(ctx: JobContext, vcf: Path, out_dir: Path) -> Path:
-    """Build the SQLite table the SV Results view queries, from the VCF's own
-    data lines.
+    """Build the SQLite table the SV Results view queries, from the VCF data and header lines.
 
-    `bcftools view -H` writes the data lines (no header) to `log_path` via
-    `run_subprocess`, the same way `variant_handlers.run_vcf_stats` writes
-    `bcftools query` to a file rather than piping it: the kernel copies the
-    bytes and the job stays cancellable mid-stream, which a hand-rolled
-    `subprocess.Popen` pipe would not be. The file is then read back as an
-    iterator of lines, the shape `sv_db.build_sv_db` expects -- one VCF data
-    line per row -- without materializing them in memory.
-
-    Built inside `out_dir` -- the job's own scratch space, cleaned up as part
-    of normal job lifecycle -- rather than under `settings.sv_stats_dir`. The
-    VCF has no object id yet at this point (ingest, which assigns one,
-    happens later in `_apply_call_structural_variants`), and `sv_stats_dir`
-    is a *permanent* report root that `_REPORT_ROOTS` sweeps on delete/share:
-    building there under a transient, BAM-keyed name would leave a stray,
-    permanent-looking, empty directory behind after every successful move.
+    `bcftools view` writes the header and data lines to `log_path` via
+    `run_subprocess`. The file is then read back as an iterator of lines, the shape
+    `sv_db.build_sv_db` expects, extracting sample names from `#CHROM` header and
+    building indexed tables.
     """
     bcftools = tools.require(tools.bcftools())
 
     rows_path = out_dir / "sv_rows.txt"
     code = run_subprocess(
         ctx,
-        [bcftools.path, "view", "-H", str(vcf)],
+        [bcftools.path, "view", str(vcf)],
         log_path=str(rows_path),
     )
     if code != 0:
@@ -250,3 +317,4 @@ def _build_sv_index(ctx: JobContext, vcf: Path, out_dir: Path) -> Path:
         sv_db.build_sv_db(rows=fh, db_path=db_path)
 
     return db_path
+

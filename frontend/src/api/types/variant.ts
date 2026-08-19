@@ -201,4 +201,5 @@ export interface SvLengthBucket {
 export interface SvSummary {
   type_counts: Record<string, number>;
   length_histogram: SvLengthBucket[];
+  samples?: string[];
 }

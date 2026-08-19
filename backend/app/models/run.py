@@ -112,6 +112,8 @@ class RunInputRole(StrEnum):
     # An additional read set's mate, concatenated into the alignment's R2
     # stream -- to EXTRA_READS what MATE is to READS.
     EXTRA_MATE = "extra_mate"
+    # A single-sample variant callset (.vcf or .snf) going into a joint callset merge.
+    VARIANTS = "variants"
 
 
 class RunInput(BaseModel):

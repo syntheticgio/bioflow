@@ -158,3 +158,12 @@ def test_build_sv_db_flushes_interior_batches(tmp_path: Path):
     inserted = sv_db.build_sv_db(rows=make_rows(), db_path=db)
     assert inserted == row_count
     assert sv_db.count_svs(db, sv_db.SvFilters()) == row_count
+
+
+def test_sample_names_extracted_from_header(tmp_path: Path):
+    db = tmp_path / "sv.sqlite"
+    header = "#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\tFORMAT\tSample_A\tSample_B"
+    rows = [header, DEL, INS]
+    sv_db.build_sv_db(rows=iter(rows), db_path=db)
+    assert sv_db.sample_names(db) == ["Sample_A", "Sample_B"]
+
