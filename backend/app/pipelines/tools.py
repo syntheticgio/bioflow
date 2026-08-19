@@ -829,6 +829,14 @@ def featurecounts() -> Tool:
 
 
 @lru_cache(maxsize=1)
+def salmon() -> Tool:
+    # `salmon --version` exits zero and prints a bare "salmon 1.10.2" to
+    # stdout, so none of featureCounts' special-casing applies. Verified
+    # against the Debian trixie binary (1.10.2+ds1-1+b5) rather than recalled.
+    return _probe("salmon", settings.salmon_path, ["--version"])
+
+
+@lru_cache(maxsize=1)
 def pydeseq2() -> Tool:
     """The differential expression engine.
 
@@ -893,6 +901,7 @@ def all_tools() -> list[Tool]:
         prefetch(),
         datasets(),
         featurecounts(),
+        salmon(),
         pydeseq2(),
         quast(),
         craq(),
@@ -2608,6 +2617,7 @@ def reset_cache() -> None:
     prefetch.cache_clear()
     datasets.cache_clear()
     featurecounts.cache_clear()
+    salmon.cache_clear()
     pydeseq2.cache_clear()
     quast.cache_clear()
     craq.cache_clear()

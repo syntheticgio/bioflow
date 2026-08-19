@@ -152,6 +152,7 @@ class Settings(BaseSettings):
     # From the `subread` package. featureCounts is the only binary in it this
     # application invokes.
     featurecounts_path: str = "featureCounts"
+    salmon_path: str = "salmon"
     # The de novo assembler, for long reads only. Debian ships it depending on
     # minimap2 and samtools, both of which this image already carries, so it
     # costs ~37MB rather than a toolchain.
