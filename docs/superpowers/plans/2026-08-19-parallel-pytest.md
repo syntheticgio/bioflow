@@ -561,6 +561,36 @@ git commit -m "test(backend): serialize shared-/data and fixed-port tests under 
 
 No file changes — this is the spec's R1/R10 evidence. Record all counts in the PR description.
 
+**Outcome (2026-08-19).** Baseline 6,289 passed / 3 pre-existing failures in
+140s; `-n 4` reproduced that count in ~53s (2.6x) across three runs. The
+two-simultaneous-suites check earned its place in this protocol — it was the
+only step that failed, and it failed on three separate defects a single
+parallel run cannot expose:
+
+1. The stale sweep dropped databases with no `_run_meta` marker, but an
+   unstamped database is one being *born*. A concurrent run lost the race as
+   `OperationFailure` out of `init_beanie`'s index build. Fixed by leaving
+   unmarked databases alone and stamping the marker before anything else
+   touches the database.
+2. `test_object_deletion.py` drove the real `/data` report roots, where
+   `reap_report_dirs` deletes any directory it has no database row for —
+   including a concurrent run's live fixtures. The `xdist_group` mark from
+   Task 5 only orders workers *within* one run, so it could not help. Fixed
+   with private per-module roots.
+3. `test_leaves_no_temp_file_behind` asserted on a fixed filename in a shared
+   staging directory, reading a concurrent run's in-flight merge.
+
+A fourth defect surfaced at the leftover-database check: drop-on-green keyed
+on `exitstatus == 0`, so a suite carrying any long-standing red test never
+cleaned up — 51 databases had accumulated. Re-keyed on `session.testsfailed`.
+
+The three pre-existing failures (`test_config.py::TestAgentSettings::test_defaults`,
+`test_sra_download.py::TestDiskPreflight::test_passes_when_there_is_room`,
+`test_provenance_verbs.py::test_every_registered_handler_is_classified` —
+filed as #692) are unrelated to this work and fail identically on a clean
+tree; they are the reason "identical to baseline" rather than "zero failures"
+is the bar here.
+
 - [ ] **Step 1: Sequential baseline**
 
 ```bash
