@@ -12,7 +12,7 @@ from pathlib import Path
 import pytest
 
 from app.errors import ValidationError
-from app.pipelines import salmon_runner
+from app.pipelines import counts_runner, salmon_runner
 
 # A real quant.sf header plus three rows. Columns are Name, Length,
 # EffectiveLength, TPM, NumReads -- NumReads last, and fractional, which is
@@ -242,3 +242,25 @@ class TestPaths:
         assert salmon_runner.command_line(["salmon", "quant", "-i", "/a b"]) == (
             "salmon quant -i '/a b'"
         )
+
+
+class TestFormatCounts:
+    def test_output_round_trips_through_the_featurecounts_parser(self):
+        # The contract that matters. de_runner reads every counts object with
+        # counts_runner.parse_counts, so Salmon output that this parser cannot
+        # read is silently unusable for differential expression.
+        counts = {"YAL068C": 340, "YAL067C": 0, "YAL066W": 12}
+        text = salmon_runner.format_counts(counts)
+        parsed, facts = counts_runner.parse_counts(text)
+        assert parsed == counts
+        assert facts["genes_in_annotation"] == 3
+        assert facts["genes_detected"] == 2
+
+    def test_rows_are_sorted_for_reproducibility(self):
+        text = salmon_runner.format_counts({"zzz": 1, "aaa": 2})
+        body = [ln for ln in text.splitlines() if not ln.startswith(("#", "Geneid"))]
+        assert body[0].startswith("aaa")
+
+    def test_empty_counts_still_produce_a_readable_header(self):
+        parsed, _ = counts_runner.parse_counts(salmon_runner.format_counts({}))
+        assert parsed == {}
