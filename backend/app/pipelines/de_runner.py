@@ -302,7 +302,13 @@ def run_deseq2(
     results = stats.results_df
 
     phase("clustering", 0.85, "projecting samples")
-    pca = _sample_pca(dds, matrix)
+    # One matrix, both plots. Computing the top-variance selection once is what
+    # guarantees the projection and the correlation heatmap describe the same
+    # genes -- if one used all genes and the other a subset they could disagree,
+    # and a reader would have no way to tell which to believe.
+    selected = _expression_matrix(dds)
+    pca = _sample_pca(selected, matrix)
+    correlation = _sample_correlation(selected, matrix)
 
     phase("writing", 0.9, "collecting results")
 
@@ -327,18 +333,52 @@ def run_deseq2(
     facts = _facts(rows, matrix, test, reference, alpha)
     if pca is not None:
         facts["sample_pca"] = pca
+    if correlation is not None:
+        facts["sample_correlation"] = correlation
 
     return DEResult(rows=rows, facts=facts)
 
 
-# Genes used for the sample projection, chosen by variance. DESeq2's own plotPCA
+# Genes used for the sample plots, chosen by variance. DESeq2's own plotPCA
 # uses 500 and the number is not critical: enough that the projection reflects
 # real structure, few enough that housekeeping genes carrying no signal do not
 # dominate it.
 PCA_TOP_GENES = 500
 
+# Below this a correlation matrix is not worth drawing. Three samples give
+# three off-diagonal numbers, which is the fewest that can show one sample
+# disagreeing with two that agree; two samples give a single number beside a
+# diagonal of 1.0, which says nothing a scalar would not have said.
+MIN_CORRELATION_SAMPLES = 3
 
-def _sample_pca(dds, matrix: CountMatrix) -> list[dict] | None:
+
+def _expression_matrix(dds):
+    """The log-normalised top-variance matrix both sample plots are read from.
+
+    Returns a samples x genes array, or None if the fit does not carry what is
+    expected here. Shared by `_sample_pca` and `_sample_correlation` so the two
+    provably describe the same genes.
+    """
+    try:
+        import numpy as np
+
+        counts = np.asarray(dds.layers["normed_counts"], dtype=float)
+        # log2(x+1) before either plot: raw counts span several orders of
+        # magnitude, and without it both end up describing which genes are
+        # highly expressed rather than how the samples differ.
+        logged = np.log2(counts + 1.0)
+
+        variances = logged.var(axis=0)
+        if variances.size == 0:
+            return None
+        top = np.argsort(variances)[::-1][:PCA_TOP_GENES]
+        return logged[:, top]
+    except Exception as e:  # noqa: BLE001
+        log.warning("expression_matrix_failed", error=str(e))
+        return None
+
+
+def _sample_pca(selected, matrix: CountMatrix) -> list[dict] | None:
     """Samples projected onto their first two principal components.
 
     The plot worth having, and the reason it is computed here rather than in
@@ -354,20 +394,10 @@ def _sample_pca(dds, matrix: CountMatrix) -> list[dict] | None:
     expected here. A missing plot is a worse results tab; an exception is no
     results tab at all, after the expensive part already succeeded.
     """
+    if selected is None:
+        return None
     try:
         import numpy as np
-
-        counts = np.asarray(dds.layers["normed_counts"], dtype=float)
-        # log2(x+1) before projecting: raw counts span several orders of
-        # magnitude, and without it the projection describes which genes are
-        # highly expressed rather than how the samples differ.
-        logged = np.log2(counts + 1.0)
-
-        variances = logged.var(axis=0)
-        if variances.size == 0:
-            return None
-        top = np.argsort(variances)[::-1][:PCA_TOP_GENES]
-        selected = logged[:, top]
 
         centered = selected - selected.mean(axis=0)
         # SVD rather than sklearn's PCA: the projection is three lines this
@@ -392,6 +422,68 @@ def _sample_pca(dds, matrix: CountMatrix) -> list[dict] | None:
         ]
     except Exception as e:  # noqa: BLE001
         log.warning("sample_pca_failed", error=str(e))
+        return None
+
+
+def _sample_correlation(selected, matrix: CountMatrix) -> dict | None:
+    """Sample-to-sample correlation over the same genes the projection uses.
+
+    Spearman rather than Pearson, and the choice matters enough that the chart
+    labels it. Even after log2, a handful of very highly expressed genes carry
+    most of the remaining spread, and Pearson lets those few genes set the
+    correlation for the whole pair. Ranking first bounds every gene's
+    contribution, so the number answers "do these samples order their genes the
+    same way" rather than "do their loudest genes agree". A reader comparing
+    against another tool needs to know which of the two they are looking at,
+    hence `method` travelling with the matrix.
+
+    Answers what the projection cannot: how strongly replicates actually agree
+    (two samples can sit adjacent on PC1/PC2 while correlating poorly, since
+    the first two components may carry only a modest share of the variance),
+    whether there is block structure orthogonal to those components, and which
+    specific pair an outlier is and is not similar to.
+
+    Bounded output: N samples means N^2 values, a few hundred numbers for any
+    realistic DE design, so it goes in `facts` alongside the projection.
+
+    Returns None rather than raising, matching `_sample_pca` -- a missing plot
+    is a worse results tab, an exception is no results tab at all.
+    """
+    if selected is None:
+        return None
+    if len(matrix.samples) < MIN_CORRELATION_SAMPLES:
+        return None
+    try:
+        import numpy as np
+
+        # Rank each sample's genes against each other (axis 1), so a value
+        # becomes that gene's standing within its own sample. Correlating those
+        # ranks is what makes this Spearman rather than Pearson, and ranking
+        # within the sample -- not down each gene -- is what makes the pairwise
+        # number a comparison of two expression profiles.
+        order = selected.argsort(axis=1).argsort(axis=1).astype(float)
+
+        centered = order - order.mean(axis=1, keepdims=True)
+        norms = np.sqrt((centered**2).sum(axis=1))
+        # A sample whose genes all tie has no spread to correlate. It cannot
+        # happen in a real fit, but a zero norm would divide to NaN and blank
+        # the plot rather than one row of it.
+        if not np.all(norms > 0):
+            return None
+
+        corr = (centered @ centered.T) / np.outer(norms, norms)
+        # Clip: the products above can land a hair outside [-1, 1] on floating
+        # point, and a 1.0000000002 on the diagonal reads as a bug.
+        corr = np.clip(corr, -1.0, 1.0)
+
+        return {
+            "method": "spearman",
+            "samples": list(matrix.samples),
+            "conditions": list(matrix.conditions),
+            "matrix": [[round(float(v), 4) for v in row] for row in corr],
+        }
+    except Exception as e:  # noqa: BLE001
+        log.warning("sample_correlation_failed", error=str(e))
         return None
 
 
