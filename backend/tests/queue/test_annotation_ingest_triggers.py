@@ -20,14 +20,15 @@ from app.models.object import (
     ObjectStatus,
 )
 from app.queue import results as results_mod
+from tests._mongo_isolation import direct_mongo_url, worker_db_name
 
 PROJECT = "507f1f77bcf86cd799439011"
 
 
 @pytest.fixture
 async def _db():
-    client = AsyncMongoClient(settings.mongo_url, tz_aware=True)
-    db = client["biopipe_test"]
+    client = AsyncMongoClient(direct_mongo_url(settings.mongo_url), tz_aware=True)
+    db = client[worker_db_name()]
     await init_beanie(database=db, document_models=[DataObject])
     await DataObject.delete_all()
     yield db

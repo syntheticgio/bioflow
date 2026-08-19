@@ -12,6 +12,7 @@ from pymongo import AsyncMongoClient
 from app.config import settings
 from app.models import ALL_MODELS, JobState
 from app.models.job import Job, JobError
+from tests._mongo_isolation import direct_mongo_url, worker_db_name
 from tests.queue.test_lifecycle import LEASE_MS, NOW_MS, claim
 
 
@@ -31,8 +32,8 @@ async def _init_beanie_models(monkeypatch):
     `update_one`), so that is patched to the same throwaway database rather
     than standing up the app's real connection singleton in a test.
     """
-    client = AsyncMongoClient(settings.mongo_url, tz_aware=True)
-    db = client["biopipe_test"]
+    client = AsyncMongoClient(direct_mongo_url(settings.mongo_url), tz_aware=True)
+    db = client[worker_db_name()]
     await init_beanie(database=db, document_models=ALL_MODELS)
     monkeypatch.setattr("app.db.client.get_db", lambda: db)
     yield

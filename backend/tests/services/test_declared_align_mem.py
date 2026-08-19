@@ -14,12 +14,13 @@ from app.models.timing import JobRunTiming, RunOutcome, RunResources
 from app.pipelines.aligners import Aligner
 from app.services import pipeline_service
 from app.services.pipeline_service import MIN_DECLARED_MEM_MB
+from tests._mongo_isolation import direct_mongo_url, worker_db_name
 
 
 @pytest.fixture(autouse=True)
 async def _init_beanie_models():
-    client = AsyncMongoClient(settings.mongo_url, tz_aware=True)
-    db = client["biopipe_test"]
+    client = AsyncMongoClient(direct_mongo_url(settings.mongo_url), tz_aware=True)
+    db = client[worker_db_name()]
     await db[JobRunTiming.Settings.name].drop()
     await init_beanie(database=db, document_models=ALL_MODELS)
     yield

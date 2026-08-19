@@ -13,6 +13,7 @@ from pymongo import AsyncMongoClient
 from app.config import settings
 from app.models import ALL_MODELS, ObjectRole, SidecarRole
 from app.models.object import DataObject
+from tests._mongo_isolation import direct_mongo_url, worker_db_name
 
 
 @pytest.fixture(scope="module")
@@ -27,8 +28,8 @@ async def beanie_models():
     """
     from app.db.index_reconcile import reconcile_indexes
 
-    client = AsyncMongoClient(settings.mongo_url, tz_aware=True)
-    db = client["biopipe_test"]
+    client = AsyncMongoClient(direct_mongo_url(settings.mongo_url), tz_aware=True)
+    db = client[worker_db_name()]
     for model in ALL_MODELS:
         model_settings = model.Settings
         coll_name = getattr(model_settings, "name", model.__name__.lower())

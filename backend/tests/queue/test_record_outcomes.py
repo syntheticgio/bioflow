@@ -15,6 +15,7 @@ from app.models import ALL_MODELS
 from app.models.timing import JobRunTiming, RunOutcome
 from app.services import timing_service
 from app.services.timing_service import MIN_SAMPLES
+from tests._mongo_isolation import direct_mongo_url, worker_db_name
 
 # No `pytestmark = pytest.mark.asyncio` needed: pyproject.toml sets
 # `asyncio_mode = "auto"`, so bare `async def` tests are collected.
@@ -35,8 +36,8 @@ async def _init_beanie_models():
     for `job_type="align_reads"`, and leftover rows from an earlier test in
     this file would corrupt those counts without per-test isolation.
     """
-    client = AsyncMongoClient(settings.mongo_url, tz_aware=True)
-    db = client["biopipe_test"]
+    client = AsyncMongoClient(direct_mongo_url(settings.mongo_url), tz_aware=True)
+    db = client[worker_db_name()]
     await db[JobRunTiming.Settings.name].drop()
     await init_beanie(database=db, document_models=ALL_MODELS)
     yield

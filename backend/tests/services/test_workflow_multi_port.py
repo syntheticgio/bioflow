@@ -24,6 +24,7 @@ from app.pipelines.node_types import NODE_TYPES, PortSpec
 from app.services import workflow_orchestrator as orch
 from app.services.workflow_binding import OutputCandidate, bind_downstream_inputs
 from app.services.workflow_service import validate_definition
+from tests._mongo_isolation import direct_mongo_url, worker_db_name
 
 OWNER = "tester"
 
@@ -43,8 +44,8 @@ async def _fresh_beanie(monkeypatch):
     exact trap CLAUDE.md's AI-feature section describes for the same reason).
     A dedicated per-test connection avoids the mismatch entirely.
     """
-    client = AsyncMongoClient(settings.mongo_url, tz_aware=True)
-    db = client["biopipe_test"]
+    client = AsyncMongoClient(direct_mongo_url(settings.mongo_url), tz_aware=True)
+    db = client[worker_db_name()]
     await init_beanie(database=db, document_models=ALL_MODELS)
     monkeypatch.setattr("app.db.client.get_db", lambda: db)
     yield

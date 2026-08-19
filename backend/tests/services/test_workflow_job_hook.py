@@ -28,6 +28,7 @@ from app.models.workflow import (
     WorkflowRun,
 )
 from app.services import workflow_hook
+from tests._mongo_isolation import direct_mongo_url, worker_db_name
 
 OWNER = "tester"
 
@@ -68,8 +69,8 @@ async def redis(monkeypatch):
 
 @pytest.fixture(autouse=True)
 async def _init_beanie_models(monkeypatch):
-    client = AsyncMongoClient(settings.mongo_url, tz_aware=True)
-    db = client["biopipe_test"]
+    client = AsyncMongoClient(direct_mongo_url(settings.mongo_url), tz_aware=True)
+    db = client[worker_db_name()]
     await init_beanie(database=db, document_models=ALL_MODELS)
     monkeypatch.setattr("app.db.client.get_db", lambda: db)
     yield
