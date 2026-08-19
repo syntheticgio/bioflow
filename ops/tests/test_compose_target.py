@@ -58,6 +58,10 @@ BLOCKED = [
     "docker   compose   up",
     # A compose call inside an explicit host shell is still a host call.
     "bash -c 'docker compose up -d'",
+    # A real call after a heredoc is still a call (#648): dropping the body
+    # must not swallow what comes after the terminator.
+    "cat > /tmp/s.md <<'SPEC'\nprose only\nSPEC\ndocker compose up -d",
+    "cat > /tmp/s.md <<'SPEC'\nprose only\nSPEC\n&& docker compose up -d",
 ]
 
 
@@ -72,6 +76,17 @@ ALLOWED_MENTIONS = [
     # #549 case 3: a heredoc file write whose body mentions compose.
     "cat > test_foo.py <<'EOF'\n\"\"\"Checks docker compose up behaviour.\"\"\"\nEOF",
     'cat > notes.md <<EOF\nRun docker compose up -d to start.\nEOF',
+    # #648: heredoc prose that carries a shell operator forms a segment that
+    # starts with `docker compose` in the token stream. The body is data.
+    "cat > /tmp/s.md <<'SPEC'\n"
+    "The stack (docker compose up -d from main) keeps running.\nSPEC",
+    "cat > /tmp/s.md <<'SPEC'\n"
+    "Build it; docker compose up -d --build api web worker applies the change.\nSPEC",
+    "cat > /tmp/s.md <<'SPEC'\n"
+    'Rebuild and restart: npm run build && docker compose up -d api.\nSPEC',
+    # The reported repro: a quoted command with its own quotes inside.
+    "cat > /tmp/example.md <<'EOF2'\n"
+    'Run `docker compose exec api python -c "..."` to check.\nEOF2',
     # #549 case 4: filing an issue whose body quotes the phrase.
     'gh issue create --title x --body "the guard blocks docker compose up"',
     "gh pr comment 1 --body 'docker-compose is mentioned here'",
