@@ -317,6 +317,13 @@ offers the tool; it does not guess that this assembly is a bacterial isolate.
 The dialog notes that ONT labels the bacterial model a research release with
 minimal support, so the opt-in is informed.
 
+**Deferred:** the launch dialog described above was not built as part of this
+implementation -- the implementation plan carried no frontend scope. `--bacteria`
+is fully wired end-to-end (API route, launcher, handler, argv construction) and
+is reachable today from the pipeline builder and the raw `/pipelines/polish-long`
+API, but not yet from the Actions-tab card. Building the dialog is tracked as a
+follow-up: https://github.com/syntheticgio/bioflow/issues/663
+
 ## Registries
 
 Per `CLAUDE.md`'s note on hand-maintained registries keyed by an enum, this

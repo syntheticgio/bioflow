@@ -655,7 +655,13 @@ RUN mkdir -p app && touch app/__init__.py \
 # this ENV line used to sit right after the Medaka layer near the top of the
 # file, which pulled pandas/scipy/pyarrow and eventually the entire backend
 # dependency tree into Medaka's isolated env and inflated /opt/medaka from
-# tens of MB to multiple GB with no error anywhere.
+# tens of MB to multiple GB with no error anywhere. This line is also not
+# just a build-ordering convenience that later becomes safe to delete once
+# config.py resolves medaka_path/medaka_binary_path by absolute path:
+# medaka_consensus itself calls `medaka` and `mini_align` by bare name
+# internally, so removing this from PATH would break every real polish job
+# the moment it reaches those internal calls, with nothing catching it short
+# of a real run failing.
 ENV PATH="/opt/medaka/env/bin:${PATH}"
 
 COPY app ./app
