@@ -2383,6 +2383,47 @@ TOOL_META: dict[str, ToolMeta] = {
             "counts rather than failing."
         ),
     ),
+    "salmon": ToolMeta(
+        pipelines=(PipelineType.EXPRESSION,),
+        one_liner="Quantifies transcript abundance without aligning",
+        summary=(
+            "Estimates how much of each transcript is present directly from "
+            "reads, using selective alignment against a transcriptome rather "
+            "than aligning to a genome first. Reaches the same differential "
+            "expression test as the align-and-count path, in a fraction of "
+            "the time, for users who want expression numbers and nothing else."
+        ),
+        strengths=(
+            "No alignment step: minutes rather than hours on a typical sample",
+            "Corrects for GC and positional bias that naive counting ignores",
+            "Distributes multi-mapping reads instead of discarding them",
+            "Detects the library's strandedness itself, so there is no flag to get wrong",
+        ),
+        homepage="https://combine-lab.github.io/salmon",
+        repository="https://github.com/COMBINE-lab/salmon",
+        citation=(
+            "Patro R, Duggal G, Love MI, Irizarry RA, Kingsford C. Salmon "
+            "provides fast and bias-aware quantification of transcript "
+            "expression. Nature Methods. 2017;14(4):417-419."
+        ),
+        citation_url="https://doi.org/10.1038/nmeth.4197",
+        # Verified 2026-08-18 against the upstream repository via
+        # `gh api repos/COMBINE-lab/salmon`, not recalled.
+        license="BSD-3-Clause",
+        usage=(
+            "Runs one sample at a time against a transcriptome index, which is "
+            "built once per transcriptome and reused across every sample in "
+            "the project. Transcript-level estimates are summed to genes "
+            "before they are stored, so the result is an ordinary counts file "
+            "that the differential expression test accepts alongside "
+            "featureCounts output -- though not mixed into the same "
+            "comparison, since the two describe different gene universes. "
+            "The library's strandedness is detected automatically rather than "
+            "asked for. Note that a CDS reference (what an NCBI genome "
+            "download provides) covers coding sequences only: UTRs and "
+            "non-coding transcripts are absent from the estimates."
+        ),
+    ),
     "pydeseq2": ToolMeta(
         pipelines=(PipelineType.EXPRESSION,),
         one_liner="Differential expression testing on count data",
