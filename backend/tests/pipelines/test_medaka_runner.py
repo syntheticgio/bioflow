@@ -17,6 +17,21 @@ from pathlib import Path
 from app.pipelines import medaka_runner as runner
 
 
+# Medaka announces its model choice on stderr before inference. The two
+# shapes below are what distinguish a run that read basecaller metadata
+# from one that fell back -- a distinction invisible in the consensus.
+AUTO_RESOLVED_STDERR = """
+[13:22:04 - MdlStore] Model r1041_e82_400bps_sup_v5.0.0 resolved from input file.
+[13:22:04 - Predict] Setting tensorflow threads to 8.
+"""
+
+FALLBACK_STDERR = """
+[13:22:04 - MdlStore] Could not resolve model from input data.
+[13:22:04 - MdlStore] Using default consensus model r1041_e82_400bps_sup_v4.2.0.
+[13:22:04 - Predict] Setting tensorflow threads to 8.
+"""
+
+
 class TestConsensusCommand:
     def test_force_flag_is_always_present(self):
         """Without -f, medaka reuses stale outputs and exits zero.
@@ -95,3 +110,26 @@ class TestConsensusCommand:
         assert "-x" not in argv
         assert "map-ont" not in joined
         assert "minimap2" not in joined
+
+
+class TestModelLine:
+    def test_auto_resolved_model_is_named(self):
+        facts = runner.parse_model_line(AUTO_RESOLVED_STDERR)
+        assert facts["polish_model"] == "r1041_e82_400bps_sup_v5.0.0"
+        assert facts["polish_model_auto_resolved"] is True
+
+    def test_fallback_model_is_flagged(self):
+        """A fallback succeeds with worse output and no error.
+
+        The consensus alone cannot show it happened, so if this flag is
+        wrong the run is undiagnosable after the fact.
+        """
+        facts = runner.parse_model_line(FALLBACK_STDERR)
+        assert facts["polish_model"] == "r1041_e82_400bps_sup_v4.2.0"
+        assert facts["polish_model_auto_resolved"] is False
+
+    def test_unparseable_returns_empty(self):
+        """A missed fact is a blank field; raising would discard a
+        consensus that already exists on disk."""
+        assert runner.parse_model_line("no model information here") == {}
+        assert runner.parse_model_line("") == {}
