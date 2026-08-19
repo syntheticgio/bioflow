@@ -21,7 +21,7 @@ from app.errors import PermanentError
 from app.logging import get_logger
 from app.models import IoClass, JobClass, JobResources
 from app.pipelines import counts_runner, de_runner, salmon_runner, tools
-from app.queue.align_handlers import _resolve_blob
+from app.queue.align_handlers import _resolve_blob, _resolve_digest_or_path
 from app.queue.executor import run_subprocess
 from app.queue.pipeline_handlers import _failure, _prepare_workdir
 from app.queue.registry import HandlerMode, JobContext, handler
@@ -350,14 +350,28 @@ def salmon_quantify(ctx: JobContext) -> dict:
     transcriptome.symlink_to(_resolve_blob(ctx.payload, "transcriptome"))
 
     reads: list[Path] = []
-    for key, default in (("reads", "reads_1.fastq.gz"), ("reads2", "reads_2.fastq.gz")):
-        if key == "reads2" and not ctx.payload.get("reads2_blob_id"):
-            continue
-        name = Path(ctx.payload.get(f"{key}_name") or default).name
-        link = work / name
-        link.unlink(missing_ok=True)
-        link.symlink_to(_resolve_blob(ctx.payload, key))
-        reads.append(link)
+    reads_name = Path(ctx.payload.get("reads_name") or "reads_1.fastq.gz").name
+    reads_link = work / reads_name
+    reads_link.unlink(missing_ok=True)
+    reads_link.symlink_to(_resolve_blob(ctx.payload, "reads"))
+    reads.append(reads_link)
+
+    # Paired-end detection mirrors assembly_handlers.payload_has_mate: a
+    # second read file is addressed by mate_sha256/mate_path, not by the
+    # {key}_sha256/{key}_path shape _resolve_blob expects, so it is resolved
+    # directly through _resolve_digest_or_path.
+    if ctx.payload.get("mate_sha256") or ctx.payload.get("mate_path"):
+        mate_name = Path(ctx.payload.get("mate_name") or "reads_2.fastq.gz").name
+        mate_link = work / mate_name
+        mate_link.unlink(missing_ok=True)
+        mate_link.symlink_to(
+            _resolve_digest_or_path(
+                ctx.payload.get("mate_sha256"),
+                ctx.payload.get("mate_path"),
+                missing_message="Job requires 'mate_sha256' or 'mate_path'",
+            )
+        )
+        reads.append(mate_link)
 
     log_path = settings.logs_dir / f"{ctx.job_id}.log"
     log_path.parent.mkdir(parents=True, exist_ok=True)
