@@ -144,3 +144,61 @@ export interface VariantQuery {
   consequence?: string;
   skipCount?: boolean;
 }
+
+// --- Structural variant results (Sniffles2) ---
+
+/** One row of the SV table. Mirrors app.pipelines.sv_db.SvRecord field for
+ *  field, including its casing -- the route returns the SQLite row as-is. */
+export interface SvRecord {
+  chrom: string;
+  pos: number;
+  /** Null for a breakend, which joins two loci rather than spanning one. */
+  end: number | null;
+  svtype: string;
+  /** A magnitude, never negative -- the sign a deletion's SVLEN carries in
+   *  the VCF is redundant with svtype and is stripped by sv_db. Null for a
+   *  breakend, which has no length. */
+  svlen: number | null;
+  qual: number | null;
+  filter: string;
+  /** Read support for the call. Null when Sniffles2 did not report SUPPORT. */
+  support: number | null;
+  gt: string;
+  /** The paired breakend's ID, for a BND record. Null otherwise. */
+  mate: string | null;
+}
+
+export interface SvsPage {
+  /** Null when the request set skip_count -- the caller keeps its previous
+   *  total, matching VariantsPage. */
+  total: number | null;
+  rows: SvRecord[];
+}
+
+export interface SvQuery {
+  offset: number;
+  limit: number;
+  contig?: string;
+  posMin?: number;
+  posMax?: number;
+  svtype?: string;
+  minLength?: number;
+  maxLength?: number;
+  filterValue?: string;
+  minQual?: number;
+  skipCount?: boolean;
+}
+
+/** One log-scaled length bin. `min_length` is the bin's inclusive lower
+ *  bound, so an axis can be labelled without knowing the bin width -- the
+ *  bins are not equal width, unlike VariantResults' HistogramBucket. */
+export interface SvLengthBucket {
+  label: string;
+  min_length: number;
+  count: number;
+}
+
+export interface SvSummary {
+  type_counts: Record<string, number>;
+  length_histogram: SvLengthBucket[];
+}

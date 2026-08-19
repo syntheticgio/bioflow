@@ -58,6 +58,7 @@ import { AlignDialog } from "./AlignDialog";
 import { BamResults } from "./BamResults";
 import { ExpressionResults } from "./ExpressionResults";
 import { VariantResults } from "./VariantResults";
+import { SvResults } from "./SvResults";
 import { AnnotationResults } from "./AnnotationResults";
 import { IndexStatus } from "./IndexStatus";
 import { PipelineToolSelector } from "./PipelineToolSelector";
@@ -956,6 +957,12 @@ function ObjectDetail({ id }: { id: string }) {
               obj.format.kind === "bed" ||
               obj.format.kind === "genbank" ? (
               <AnnotationResults obj={obj} />
+            ) : obj.facts.variants_called_by === "sniffles2" ? (
+              // A structural variant VCF is still role "variants" like an
+              // ordinary called VCF (see sv_provenance in results.py), so
+              // the caller fact is what tells the two apart -- SvResults
+              // reads sv_stats_dir's SQLite table, not vcf_stats_dir's.
+              <SvResults obj={obj} />
             ) : (
               <VariantResults obj={obj} />
             )}
