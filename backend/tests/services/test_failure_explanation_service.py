@@ -64,8 +64,33 @@ class TestGetOrGenerate:
     async def test_a_cache_hit_does_not_call_the_model_again(
         self, monkeypatch, beanie_models
     ):
-        # Reuses the row written by the previous test -- same code/message,
-        # so this must be a cache hit.
+        # Seeds its own row rather than reusing the one the previous test
+        # wrote: under xdist the two land on different workers, each with its
+        # own database, so an inherited row is not there to hit.
+        from app.models import FailureExplanation, normalize_failure
+
+        # Upsert, not insert: when this test and the one above happen to run
+        # on the same worker, the row already exists and the unique index
+        # would reject a second insert.
+        key = normalize_failure("CalledProcessError", "exit status 1")
+        await FailureExplanation.find_one(FailureExplanation.failure_key == key).upsert(
+            {
+                "$set": {
+                    "code": "CalledProcessError",
+                    "message": "exit status 1",
+                    "text": "The process could not find one of its input files.",
+                    "model": "test-model",
+                }
+            },
+            on_insert=FailureExplanation(
+                failure_key=key,
+                code="CalledProcessError",
+                message="exit status 1",
+                text="The process could not find one of its input files.",
+                model="test-model",
+            ),
+        )
+
         monkeypatch.setattr(failure_explanation_service.ai_router, "resolve", _provider)
 
         def must_not_run(*a, **k):
