@@ -66,6 +66,7 @@ ENDPOINT_JOB_TYPES: dict[str, frozenset[str]] = {
     "/pipelines/feature-coverage": frozenset({"feature_coverage"}),
     "/pipelines/salmon-quantify": frozenset({"salmon_quantify"}),
     "/pipelines/structural_variants": frozenset({"call_structural_variants"}),
+    "/pipelines/merge_structural_variants": frozenset({"merge_structural_variants"}),
     # Offered by the kmer_spectra and repeat_density cards. One route serves
     # both, since the handler runs both analyses in a single job.
     "/pipelines/meryl-analysis": frozenset({"analyze_meryl_tracks"}),
