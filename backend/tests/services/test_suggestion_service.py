@@ -23,6 +23,7 @@ from app.services.suggestion_service import (
     build_feature_coverage_card,
     build_preprocess_card,
     build_quantify_card,
+    build_salmon_quantify_card,
     build_structural_variants_card,
     build_variants_card,
     is_eukaryotic,
@@ -1344,6 +1345,13 @@ def _as_reference(ref, *, kind=FormatKind.FASTA, role=ObjectRole.REFERENCE):
     `_ref` deliberately carries only what `resolve_reference` reads; the
     filter above it reads `format.kind` and `role`. Both are overridable so a
     test can hand the filter something it must reject.
+
+    `status` defaults to READY: `stub_db`'s `list_objects` patch is shared by
+    every listing `suggestions_for` makes, including
+    `transcriptomes_for_project` (`pipeline_service.py`), which -- unlike the
+    align card's own reference filter -- does not push `status=READY` into
+    the query and instead filters client-side, so it reads `.status` on
+    whatever `list_objects` returns.
     """
     from types import SimpleNamespace
     return SimpleNamespace(
@@ -1351,6 +1359,7 @@ def _as_reference(ref, *, kind=FormatKind.FASTA, role=ObjectRole.REFERENCE):
         name=ref.name,
         format=SimpleNamespace(kind=kind),
         role=role,
+        status=ObjectStatus.READY,
     )
 
 
@@ -1380,7 +1389,9 @@ class TestSuggestionsFor:
                    return_value=_FakeTool(True)), stub_db(
                        references=[_ref("aaa", "ref.fna")]):
             cards = await suggestions_for(_fake_obj())
-        assert [c["kind"] for c in cards] == ["preprocess", "align", "assemble"]
+        assert [c["kind"] for c in cards] == [
+            "preprocess", "align", "assemble", "salmon_quantify",
+        ]
 
     async def test_a_launchable_card_with_a_dialog_carries_configure(self):
         """The preprocess card opens TrimDialog, so it offers Adjust."""
@@ -1457,7 +1468,9 @@ class TestSuggestionsFor:
                    return_value=_FakeTool(True)), stub_db(references=[]):
             # No reference, so align is unavailable and assemble always is.
             cards = await suggestions_for(_fake_obj())
-        assert [c["kind"] for c in cards] == ["preprocess", "align", "assemble"]
+        assert [c["kind"] for c in cards] == [
+            "preprocess", "align", "assemble", "salmon_quantify",
+        ]
         assert cards[1]["status"] == "unavailable"
 
     async def test_protein_and_transcript_fasta_are_not_counted_as_references(self):
@@ -1499,6 +1512,54 @@ class TestSuggestionsFor:
         assert align["status"] == "available"
         assert align["launch"]["body"]["reference_id"] == "aaa"
 
+    async def test_salmon_card_is_fed_transcriptomes_for_project_not_protein(self):
+        """`suggestions_for`'s own listing for the salmon card, mirroring
+        `test_protein_and_transcript_fasta_are_not_counted_as_references`
+        above. `transcriptomes_for_project` filters by
+        `role is ObjectRole.TRANSCRIPT`, so `protein.faa` sitting in the same
+        project must not reach the card as a usable choice.
+        """
+        from types import SimpleNamespace
+
+        listed = [
+            SimpleNamespace(
+                id="ccc",
+                name="cds_from_genomic.fna",
+                status=ObjectStatus.READY,
+                format=SimpleNamespace(kind=FormatKind.FASTA),
+                role=ObjectRole.TRANSCRIPT,
+                blob_sha256="digest-cds",
+            ),
+            SimpleNamespace(
+                id="bbb",
+                name="protein.faa",
+                status=ObjectStatus.READY,
+                format=SimpleNamespace(kind=FormatKind.FASTA),
+                role=ObjectRole.PROTEIN,
+                blob_sha256="digest-protein",
+            ),
+        ]
+        with (
+            patch("app.services.object_service.list_objects", return_value=listed),
+            patch(
+                "app.services.pipeline_service.read_chemistry_for_alignment",
+                return_value=None,
+            ),
+            patch(
+                "app.services.suggestion_service.tools.fastp",
+                return_value=_FakeTool(True),
+            ),
+            installed_salmon(True),
+            _no_db(),
+        ):
+            cards = await suggestions_for(
+                _fake_obj(facts={"qc_read_chemistry": "short"})
+            )
+
+        salmon_card = next(c for c in cards if c["kind"] == "salmon_quantify")
+        assert salmon_card["status"] == "available"
+        assert salmon_card["launch"]["body"]["reads_id"] == "abc123"
+
     async def test_one_failing_builder_does_not_take_the_grid_with_it(self):
         """The grid is advisory -- every operation on it is also reachable
         through Computations -- so a contract drift in one card must not cost
@@ -1514,8 +1575,10 @@ class TestSuggestionsFor:
         ), stub_db(references=[_ref("aaa", "ref.fna")]):
             cards = await suggestions_for(_fake_obj())
 
-        # Align is gone; the other two survive in their usual order.
-        assert [c["kind"] for c in cards] == ["preprocess", "assemble"]
+        # Align is gone; the other cards survive in their usual order.
+        assert [c["kind"] for c in cards] == [
+            "preprocess", "assemble", "salmon_quantify",
+        ]
 
     async def test_every_card_is_a_plain_dict_with_the_full_key_set(self):
         """This goes out as JSON -- a SuggestionCard would not serialise, and
@@ -1605,14 +1668,26 @@ class TestSuggestionsFor:
 
     async def test_the_ready_filter_is_pushed_into_the_listing_query(self):
         """Filtering after the fact would let a project's non-ready objects
-        eat the result limit and drop references silently."""
+        eat the result limit and drop references silently.
+
+        Checks every call rather than just the last: a FASTQ click now also
+        triggers `transcriptomes_for_project`'s own listing (for the salmon
+        card), which -- by that function's own design -- filters `status`
+        client-side rather than pushing it into the query, so asserting on
+        `call_args` alone would make this test depend on which of the two
+        calls happens to run last rather than on what it is actually about,
+        the align card's reference query.
+        """
         with patch("app.services.suggestion_service.tools.fastp",
                    return_value=_FakeTool(True)):
             with patch("app.services.object_service.list_objects",
                        return_value=[]) as listing:
                 with _no_db():
                     await suggestions_for(_fake_obj())
-        assert listing.call_args.kwargs["status"] is ObjectStatus.READY
+        assert any(
+            call.kwargs.get("status") is ObjectStatus.READY
+            for call in listing.call_args_list
+        )
 
     async def test_every_card_carries_a_prior_runs_list(self):
         """Absent would make the frontend guard a field that is always sent;
@@ -1781,6 +1856,21 @@ def installed_bedtools(available=True):
         yield probe
 
 
+@contextmanager
+def installed_salmon(available=True):
+    """Pin the salmon probe the card reads.
+
+    Same seam shape as `installed_featurecounts` above: a plain module-
+    attribute lookup, patched so the card calls through it at call time
+    rather than a name bound at import.
+    """
+    with patch(
+        "app.services.suggestion_service.tools.salmon",
+        return_value=_FakeTool(available, name="salmon"),
+    ) as probe:
+        yield probe
+
+
 class TestFeatureCoverageCard:
     def test_the_probe_patch_actually_takes_effect(self):
         """Guards every test below it, for the reason CLAUDE.md spells out:
@@ -1825,6 +1915,130 @@ class TestFeatureCoverageCard:
     def test_a_vcf_gets_no_card_at_all(self):
         with installed_bedtools(True):
             assert build_feature_coverage_card(_vcf(), [_annotation()]) is None
+
+
+def _transcriptome_object(obj_id="cds1", blob_sha256="digest-cds1"):
+    """A stand-in transcriptome-role FASTA.
+
+    Carries `blob_sha256` because that is exactly what the card reads to
+    decide whether two candidates are the same reference registered twice --
+    unlike `_annotation`, which the quantify card never dedupes.
+    """
+    from types import SimpleNamespace
+    return SimpleNamespace(
+        id=obj_id,
+        format=SimpleNamespace(kind=FormatKind.FASTA),
+        role=ObjectRole.TRANSCRIPT,
+        blob_sha256=blob_sha256,
+    )
+
+
+def _protein_object(obj_id="protein1", blob_sha256="digest-protein1"):
+    """protein.faa's shape: FASTA with no byte-level way to tell it apart
+    from a transcriptome, distinguished only by role."""
+    from types import SimpleNamespace
+    return SimpleNamespace(
+        id=obj_id,
+        format=SimpleNamespace(kind=FormatKind.FASTA),
+        role=ObjectRole.PROTEIN,
+        blob_sha256=blob_sha256,
+    )
+
+
+class TestSalmonQuantifyCard:
+    """The two mistakes this repo has already made with reference-picking
+    rules, pinned so a third does not happen quietly: `protein.faa` counted
+    as a usable reference, and one reference stored twice counted as two.
+    """
+
+    def test_the_probe_patch_actually_takes_effect(self):
+        """Guards every test below it, for the reason CLAUDE.md spells out:
+        the image ships salmon *installed*, so an available-card assertion
+        passes whether or not the patch worked. Only the unavailable
+        direction can tell a working seam from an escaped one.
+        """
+        with installed_salmon(False):
+            card = build_salmon_quantify_card(_fake_obj(), [_transcriptome_object()])
+        assert card.status is CardStatus.UNAVAILABLE
+        assert "not installed" in card.reason
+
+    def test_offers_salmon_when_a_transcriptome_is_available(self):
+        with installed_salmon(True):
+            card = build_salmon_quantify_card(_fake_obj(), [_transcriptome_object()])
+        assert card is not None
+        assert card.kind == "salmon_quantify"
+        assert card.status is CardStatus.AVAILABLE
+        assert card.launch["endpoint"] == "/pipelines/salmon-quantify"
+
+    def test_the_launch_body_keys_on_reads_id(self):
+        with installed_salmon(True):
+            card = build_salmon_quantify_card(
+                _fake_obj(obj_id="xyz"), [_transcriptome_object()]
+            )
+        assert card.launch["body"]["reads_id"] == "xyz"
+
+    def test_the_cds_caveat_is_stated_in_the_card_copy(self):
+        """Required by the plan's 'Known limitation' section: a CDS
+        reference covers coding transcripts only, and that has to be said
+        somewhere the user actually reads before launching."""
+        with installed_salmon(True):
+            card = build_salmon_quantify_card(_fake_obj(), [_transcriptome_object()])
+        assert (
+            "UTRs and non-coding RNA are not quantified" in card.why
+        )
+
+    def test_an_empty_transcriptome_list_is_unavailable_even_with_a_protein_present(
+        self,
+    ):
+        # REQ-CARD-1, unit-level half. This card receives `transcriptomes`
+        # as a parameter -- role filtering is `transcriptomes_for_project`'s
+        # job (`pipeline_service.py`), not something re-derived here, so the
+        # test that actually proves protein.faa never reaches this card is
+        # `TestSuggestionsFor.
+        # test_salmon_card_is_fed_transcriptomes_for_project_not_protein`,
+        # which patches the real `object_service.list_objects` seam and
+        # checks a protein-role object sitting in the same project never
+        # makes it into the card's candidate list. What this unit test pins
+        # is the other half: passed an empty list (the correct outcome once
+        # protein.faa is filtered out and nothing else remains), the card
+        # must gate rather than treat "empty" as "unknown, so allow it".
+        with installed_salmon(True):
+            card = build_salmon_quantify_card(_fake_obj(), [])
+        assert card.status is CardStatus.UNAVAILABLE
+
+    def test_the_same_transcriptome_twice_counts_once(self):
+        # REQ-CARD-2. Two records of one reference must not read as an
+        # ambiguous choice between two references.
+        tx = _transcriptome_object()
+        with installed_salmon(True):
+            card = build_salmon_quantify_card(_fake_obj(), [tx, tx])
+        assert card is not None
+        assert card.status is CardStatus.AVAILABLE
+        assert "Multiple distinct transcriptomes" not in (card.why or "")
+
+    def test_two_distinct_transcriptomes_are_flagged_as_ambiguous_in_copy(self):
+        tx_a = _transcriptome_object(obj_id="cds1", blob_sha256="digest-a")
+        tx_b = _transcriptome_object(obj_id="cds2", blob_sha256="digest-b")
+        with installed_salmon(True):
+            card = build_salmon_quantify_card(_fake_obj(), [tx_a, tx_b])
+        assert card is not None
+        assert card.status is CardStatus.AVAILABLE
+        assert "Multiple distinct transcriptomes" in card.why
+
+    def test_no_transcriptome_gates_the_card_with_an_actionable_reason(self):
+        with installed_salmon(True):
+            card = build_salmon_quantify_card(_fake_obj(), [])
+        assert card.status is CardStatus.UNAVAILABLE
+        assert "no transcriptome" in card.reason
+
+    def test_a_missing_tool_is_reported_before_a_missing_transcriptome(self):
+        with installed_salmon(False):
+            card = build_salmon_quantify_card(_fake_obj(), [])
+        assert "not installed" in card.reason
+
+    def test_a_bam_gets_no_card_at_all(self):
+        with installed_salmon(True):
+            assert build_salmon_quantify_card(_bam(), [_transcriptome_object()]) is None
 
 
 class TestScaffoldCardOrchestration:
