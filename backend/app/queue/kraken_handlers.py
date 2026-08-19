@@ -207,7 +207,12 @@ def classify_reads(ctx: JobContext) -> dict:
     """
     from app.pipelines import kraken_runner, tools
     from app.pipelines.kraken_db_registry import KRAKEN_DBS, db_present
-    from app.queue.pipeline_handlers import _failure, _prepare_workdir, _resolve_input
+    from app.queue.pipeline_handlers import (
+        _failure,
+        _named_link,
+        _prepare_workdir,
+        _resolve_input,
+    )
 
     kraken_tool = tools.require(tools.kraken2())
 
@@ -224,9 +229,11 @@ def classify_reads(ctx: JobContext) -> dict:
     log_path.parent.mkdir(parents=True, exist_ok=True)
 
     reads = _resolve_input(ctx.payload, "reads")
+    reads = _named_link(work, reads, ctx.payload.get("reads_name"))
     mate = None
     if ctx.payload.get("mate_sha256") or ctx.payload.get("mate_path"):
         mate = _resolve_input(ctx.payload, "mate")
+        mate = _named_link(work, mate, ctx.payload.get("mate_name"))
 
     report = work / "kraken2_report.txt"
     bracken_out = work / "bracken_species.tsv"
@@ -277,6 +284,8 @@ def classify_reads(ctx: JobContext) -> dict:
                 bracken_out.read_text() if bracken_out.exists() else ""
             )
 
+    _copy_kraken_reports(ctx, report, bracken_out)
+
     facts = build_classification_facts(
         kraken_rows=kraken_rows,
         bracken_rows=bracken_rows,
@@ -284,8 +293,6 @@ def classify_reads(ctx: JobContext) -> dict:
         db_key=db_key,
         bracken_note=bracken_note,
     )
-
-    _copy_kraken_reports(ctx, report, bracken_out)
 
     ctx.progress(phase="done", pct=1.0, message="classification complete")
     log.info(

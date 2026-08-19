@@ -5498,6 +5498,7 @@ async def launch_classify_reads(
         payload["reads_sha256"] = digest
     if path:
         payload["reads_path"] = str(path)
+    payload["reads_name"] = obj.name
 
     if mate_object_id is not None:
         mate = await object_service.get_object(mate_object_id, owner=owner)
@@ -5506,6 +5507,7 @@ async def launch_classify_reads(
             payload["mate_sha256"] = m_digest
         if m_path:
             payload["mate_path"] = str(m_path)
+        payload["mate_name"] = mate.name
 
     depends_on: list[PydanticObjectId] = []
     if not db_present(db_key):
@@ -5543,7 +5545,6 @@ async def launch_classify_reads(
         db_key=db_key,
         chained_download=bool(depends_on),
     )
-    return job
     return job
 
 
