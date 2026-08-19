@@ -93,6 +93,10 @@ class AgentProcess:
         self._last_activity = time.monotonic()
         self._readers: list[asyncio.Task] = []
         self._watchdog_task: asyncio.Task | None = None
+        # Strong references to fire-and-forget event tasks: the loop keeps
+        # only a weak reference, so an unreferenced task can be GC'd before
+        # it runs (RUF006).
+        self._event_tasks: set[asyncio.Task] = set()
         self._spawn_error: str | None = None
 
     # --- lifecycle ---------------------------------------------------------
@@ -248,7 +252,9 @@ class AgentProcess:
         if payload.get("success") is False:
             if command in _ACK_COMMANDS:
                 message = payload.get("message") or f"Agent rejected the {command} command."
-                asyncio.create_task(self._put_event("error", {"message": message}))
+                task = asyncio.create_task(self._put_event("error", {"message": message}))
+                self._event_tasks.add(task)
+                task.add_done_callback(self._event_tasks.discard)
             return
         if command == "prompt":
             # Accepted: the run starts now; if it neither starts nor settles

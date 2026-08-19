@@ -1,7 +1,7 @@
 """The feedback HTTP surface: submit and list."""
 
 import asyncio
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 from httpx import ASGITransport, AsyncClient
@@ -94,7 +94,10 @@ class TestWebhookNotificationResilience:
         def _capture(coro, **kwargs):
             if getattr(coro, "__name__", "") == "notify_feedback_created":
                 self._captured.append(coro)
-                return None  # create_task returns a Task; tests don't need it
+                # The endpoint keeps a strong reference to the returned Task
+                # and registers a done callback (issue #613), so the stub must
+                # hand back something Task-shaped rather than None.
+                return MagicMock(spec=asyncio.Task)
             return real_create_task(coro, **kwargs)
 
         monkeypatch.setattr("asyncio.create_task", _capture)
