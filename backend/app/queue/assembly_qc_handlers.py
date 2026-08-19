@@ -1233,9 +1233,13 @@ def analyze_meryl_tracks(ctx: JobContext) -> dict:
             meryl_path=meryl_tool.path,
             database=read_db,
         )
-        code = run_subprocess(ctx, stats_cmd, log_path=str(log_path))
+        # Own output file, not the shared job log: run_subprocess appends,
+        # so reading the shared log back would hand the parser the meryl
+        # count output of step 1 as well.
+        stats_out = work / "statistics.out"
+        code = run_subprocess(ctx, stats_cmd, log_path=str(stats_out))
         if code == 0:
-            raw = log_path.read_text()
+            raw = stats_out.read_text()
             histogram = meryl_runner.parse_meryl_histogram(raw)
             if histogram:
                 spectra = meryl_runner.compute_genome_size(histogram, k=k)
@@ -1267,22 +1271,23 @@ def analyze_meryl_tracks(ctx: JobContext) -> dict:
         meryl_path=meryl_tool.path,
         database=asm_db,
     )
-    code = run_subprocess(ctx, print_cmd, log_path=str(log_path))
+    # Own output file for the same reason as statistics.out above.
+    print_out = work / "print_gt.out"
+    code = run_subprocess(ctx, print_cmd, log_path=str(print_out))
     if code != 0:
         raise _failure(code, log_path, "meryl")
 
-    # Read sequence_lengths fact to get contig lengths for windowing.
-    sequence_lengths_raw = ctx.payload.get("sequence_lengths")
-    if sequence_lengths_raw and isinstance(sequence_lengths_raw, dict):
-        contig_lengths = {
-            name: int(length)
-            for name, length in sequence_lengths_raw.items()
-        }
-    else:
-        contig_lengths = {}
-
-    kmer_lines = log_path.read_text().splitlines()
-    density = meryl_runner.compute_repeat_density(kmer_lines, contig_lengths)
+    # Meryl databases store k-mer sequences and counts, never genomic
+    # positions, so locating the repeats means scanning the assembly for
+    # the high-frequency k-mers ourselves (#612). Contig lengths come from
+    # the scan itself, not the sequence_lengths fact.
+    repeat_kmers = meryl_runner.parse_meryl_print_kmers(print_out.read_text())
+    density = meryl_runner.compute_repeat_density(
+        meryl_runner.iter_fasta_contigs(Path(assembly)),
+        repeat_kmers,
+        k=k,
+        cancel_event=ctx.cancel_event,
+    )
     if density and density.get("contigs"):
         facts["repeat_density"] = density
 
