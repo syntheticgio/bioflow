@@ -142,6 +142,7 @@ class Settings(BaseSettings):
     # variant calling besides Clair3 itself.
     bcftools_path: str = "bcftools"
     clair3_path: str = "run_clair3.sh"
+    sniffles_path: str = "sniffles"
     # From the `tabix` package. Compresses FASTQ/FASTA/VCF at ingest -- see
     # docs/superpowers/specs/2026-08-05-object-compression-design.md. Not a
     # user-selectable pipeline step, so it has no PipelineType card; the

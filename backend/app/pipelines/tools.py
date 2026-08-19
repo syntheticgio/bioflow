@@ -443,6 +443,12 @@ def clair3() -> Tool:
     return _probe("clair3", settings.clair3_path, ["--version"])
 
 
+@lru_cache(maxsize=1)
+def sniffles() -> Tool:
+    # `--version` prints "Sniffles2, version 2.8.0" and exits 0.
+    return _probe("sniffles", settings.sniffles_path, ["--version"])
+
+
 def _probe_on_demand_image(name: str, image: str) -> Tool:
     """Whether an ON_DEMAND_IMAGE tool can be run, which is a question about
     Docker rather than about a binary on PATH.
@@ -844,6 +850,7 @@ def all_tools() -> list[Tool]:
         bcftools(),
         bgzip(),
         clair3(),
+        sniffles(),
         deepvariant(),
         flye(),
         abyss(),
@@ -1548,6 +1555,36 @@ TOOL_META: dict[str, ToolMeta] = {
             "input runs Clair3 rather than bcftools, against a chemistry-"
             "matched model picked from the reads' recorded platform. bcftools "
             "still indexes the VCF it writes."
+        ),
+    ),
+    "sniffles": ToolMeta(
+        pipelines=(PipelineType.STRUCTURAL_VARIANT,),
+        one_liner="Structural variant caller for long reads",
+        summary=(
+            "Structural variant caller for long reads. Detects deletions, "
+            "insertions, duplications, inversions, and translocations from "
+            "split-read and within-read-gap signal, which is the variant "
+            "class long reads resolve best."
+        ),
+        strengths=(
+            "The standard long-read SV caller",
+            "Resolves breakpoints from alignment structure, not per-base accuracy",
+            "Works on ONT and PacBio, including high-error CLR reads",
+            "Types and sizes each call (SVTYPE, SVLEN)",
+        ),
+        homepage="https://github.com/fritzsedlazeck/Sniffles",
+        repository="https://github.com/fritzsedlazeck/Sniffles",
+        citation="Smolka et al., Nature Biotechnology 2024",
+        citation_url="https://doi.org/10.1038/s41587-023-02024-y",
+        # MIT, read from the repo's LICENSE file. GitHub's API reports
+        # NOASSERTION because unconventional copyright lines defeat its
+        # detector; PyPI's metadata for 2.8.0 agrees it is MIT.
+        license="MIT",
+        usage=(
+            "The structural variant caller: an SV job on long-read input "
+            "runs Sniffles against the BAM and its reference, producing a "
+            "typed VCF of deletions, insertions, duplications, inversions, "
+            "and breakends. Small variants go to Clair3 or bcftools instead."
         ),
     ),
     "deepvariant": ToolMeta(
@@ -2413,6 +2450,7 @@ def reset_cache() -> None:
     bcftools_csq.cache_clear()
     bgzip.cache_clear()
     clair3.cache_clear()
+    sniffles.cache_clear()
     deepvariant.cache_clear()
     flye.cache_clear()
     abyss.cache_clear()
