@@ -57,6 +57,9 @@ async def beanie_models():
         mongo_url = mongo_url.replace("://mongo:", "://127.0.0.1:")
     import re
     mongo_url = re.sub(r"replicaSet=[^&]*&?", "", mongo_url)
+    # Stripping replicaSet can leave a dangling "?" or "&" (e.g. "...:27017/?"),
+    # and pymongo rejects an empty option segment with InvalidURI.
+    mongo_url = mongo_url.rstrip("?&")
     if "directConnection=" not in mongo_url:
         sep = "&" if "?" in mongo_url else "?"
         mongo_url += f"{sep}directConnection=true"
