@@ -314,6 +314,63 @@ fix is `git commit --amend` with a corrected subject, or (mid-rebase)
 `reword`ing the offending commit. This is the same fix CI's own error output
 walks through, so there is no second thing to learn.
 
+### Ruff must pass before you open a PR -- this is required
+
+**`ruff check` passing locally is a precondition for pushing a branch or
+opening a PR, not something to discover from a red CI run.** A ruff failure
+is the single most common way a PR in this repo goes red, and it is entirely
+avoidable: the check is a two-second local command with no services, no
+containers, and no database behind it.
+
+Run exactly what CI runs -- same config, same paths:
+
+```bash
+ruff check --config backend/pyproject.toml backend/app backend/tests ops e2e
+```
+
+`--config` is explicit on purpose. `backend/pyproject.toml` only
+auto-applies to paths under `backend/`, so `ops/` and `e2e/` would otherwise
+silently fall back to ruff's own built-in defaults -- a different, smaller
+rule set that passes locally and fails in CI (see
+[#466](https://github.com/syntheticgio/bioflow/issues/466)). Running bare
+`ruff check` is therefore *not* the same check and does not clear this bar.
+
+Most findings fix themselves:
+
+```bash
+ruff check --config backend/pyproject.toml --fix backend/app backend/tests ops e2e
+```
+
+**Install the pre-commit hook so this cannot be forgotten.**
+`ops/hooks/pre-commit` runs the command above at `git commit` time and
+refuses the commit if it fails, printing the same `--fix` invocation. It
+shares the `core.hooksPath` opt-in with `commit-msg` above, so one command
+installs both, once per clone:
+
+```bash
+git config core.hooksPath ops/hooks
+```
+
+Two things worth knowing about how that behaves:
+
+- **The value is stored once in the shared `.git/config`, and a relative
+  path resolves against the main worktree.** A hook run from a worktree is
+  therefore the *main checkout's* script. Both hooks are written not to
+  assume their own location is the tree being committed -- `pre-commit`
+  re-derives it with `git rev-parse --show-toplevel` -- so a worktree lints
+  its own code, which is what you want. Don't "fix" this by pointing
+  `hooksPath` at a worktree's copy; that breaks the main checkout.
+- **It lints the whole tree, not just the staged files.** That is
+  deliberate: ruff is fast enough here that the simplicity is worth more
+  than the saving, and a staged-files-only check reports green while CI
+  fails whenever a commit breaks a file it didn't touch.
+
+If ruff is not on `PATH` the hook says so and lets the commit through rather
+than blocking work -- install it (`pip install ruff`, or `brew install
+ruff`) so the check actually runs. `git commit --no-verify` bypasses the
+hook for a genuine emergency; a bypassed commit still has to pass CI, so it
+buys nothing but a later red check.
+
 ### Writing the subject line
 
 **Write the subject for someone reading a release changelog, not for someone
