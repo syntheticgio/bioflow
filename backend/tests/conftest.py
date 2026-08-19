@@ -1,30 +1,102 @@
 """Shared test fixtures.
 
 `beanie_models` is here rather than copy-pasted into each test module because
-three files now need it. It targets a throwaway `biopipe_test` database, so it
-never touches real data.
+three files now need it. It targets a throwaway, per-run/per-worker database
+(`biopipe_test_{token}_{worker}`), so it never touches real data.
 """
 
 import importlib
 import os
+import sys
+import time
 
 import pytest
 import pytest_asyncio
 from beanie import init_beanie
 from hypothesis import settings as hypothesis_settings
-from pymongo import AsyncMongoClient
+from pymongo import AsyncMongoClient, MongoClient
 
 from app.config import settings
 from app.models import ALL_MODELS
+from tests._mongo_isolation import (
+    direct_mongo_url,
+    ensure_run_token,
+    run_prefix,
+    stale_test_dbs,
+    worker_db_name,
+)
 
 hypothesis_settings.register_profile("dev", max_examples=10)
 hypothesis_settings.register_profile("ci", max_examples=100)
 hypothesis_settings.load_profile(os.getenv("HYPOTHESIS_PROFILE", "dev"))
 
 
+def pytest_configure(config):
+    # Mint the run token on the controller; xdist workers inherit it via env.
+    ensure_run_token()
+
+
+def pytest_report_header(config):
+    # Where a failed run's data will be, for whoever inspects it.
+    return f"biopipe test databases: {run_prefix()}*"
+
+
+def _is_controller(config) -> bool:
+    # xdist workers carry workerinput; the controller (and non-xdist runs) do not.
+    return not hasattr(config, "workerinput")
+
+
+def _sync_mongo_client() -> MongoClient:
+    from app.config import settings as _settings
+
+    return MongoClient(
+        direct_mongo_url(_settings.mongo_url),
+        tz_aware=True,
+        serverSelectionTimeoutMS=2000,
+    )
+
+
+def pytest_sessionstart(session):
+    """Sweep run databases abandoned by failed sessions older than 2h."""
+    if not _is_controller(session.config):
+        return
+    try:
+        client = _sync_mongo_client()
+        names = client.list_database_names()
+        metas = {}
+        for name in names:
+            if name.startswith("biopipe_test_"):
+                doc = client[name]["_run_meta"].find_one()
+                metas[name] = doc.get("started_at") if doc else None
+        for name in stale_test_dbs(names, metas, time.time(), run_prefix()):
+            client.drop_database(name)
+        client.close()
+    except Exception as exc:  # pure-function runs may have no Mongo at all
+        print(f"biopipe test-db sweep skipped: {exc}", file=sys.stderr)
+
+
+def pytest_sessionfinish(session, exitstatus):
+    """Green runs leave no databases behind; failures keep theirs for inspection."""
+    if not _is_controller(session.config) or exitstatus != 0:
+        return
+    try:
+        client = _sync_mongo_client()
+        for name in client.list_database_names():
+            if name.startswith(run_prefix()):
+                client.drop_database(name)
+        client.close()
+    except Exception as exc:
+        print(f"biopipe test-db cleanup skipped: {exc}", file=sys.stderr)
+
+
 @pytest_asyncio.fixture(scope="module", loop_scope="module")
 async def beanie_models():
     """Initialize Beanie against a throwaway database.
+
+    The database is per-run and per-worker -- `biopipe_test_{token}_{worker}`
+    -- because two concurrent pytest sessions (two agents, two worktrees)
+    and two xdist workers within one session all share the same Mongo, and a
+    single shared name means each truncates the others' data mid-test.
 
     Beanie refuses to instantiate a Document before init_beanie, even for an
     object that is never saved. Requested explicitly rather than autouse: it
@@ -56,23 +128,14 @@ async def beanie_models():
     but failed once the full suite's collection order changed which module
     imported first).
     """
-    mongo_url = settings.mongo_url
-    if "://mongo:" in mongo_url:
-        mongo_url = mongo_url.replace("://mongo:", "://127.0.0.1:")
-    import re
-    mongo_url = re.sub(r"replicaSet=[^&]*&?", "", mongo_url)
-    # Stripping replicaSet can leave a dangling "?" or "&" (e.g. "...:27017/?"),
-    # and pymongo rejects an empty option segment with InvalidURI.
-    mongo_url = mongo_url.rstrip("?&")
-    if "directConnection=" not in mongo_url:
-        sep = "&" if "?" in mongo_url else "?"
-        mongo_url += f"{sep}directConnection=true"
-    client = AsyncMongoClient(mongo_url, tz_aware=True)
-    db = client["biopipe_test"]
+    client = AsyncMongoClient(direct_mongo_url(settings.mongo_url), tz_aware=True)
+    db = client[worker_db_name()]
 
     for coll_name in await db.list_collection_names():
         if not coll_name.startswith("system."):
             await db[coll_name].delete_many({})
+
+    await db["_run_meta"].replace_one({}, {"started_at": time.time()}, upsert=True)
 
     await init_beanie(database=db, document_models=ALL_MODELS)
 
@@ -87,9 +150,10 @@ async def beanie_models():
             # and bulk-write paths first got tests that hit a real database.
             # It aggregates and updates through raw Motor rather than Beanie,
             # so without the patch those queries ran against the *real*
-            # `mongo_db` while the fixtures wrote to `biopipe_test`. That does
-            # not look like a missing patch from the test: it reads as an empty
-            # facet list and a bulk edit that 404s on the caller's own rows.
+            # `mongo_db` while the fixtures wrote to this run's own test
+            # database. That does not look like a missing patch from the test:
+            # it reads as an empty facet list and a bulk edit that 404s on the
+            # caller's own rows.
             "app.services.search_service",
             # share_service opens its own `get_client().start_session()` for
             # the accept-cascade transaction, same reason blob_service is here.
@@ -97,9 +161,9 @@ async def beanie_models():
             # executor._write_progress writes progress ticks through raw
             # Motor rather than Beanie. Unpatched, any test that drives a real
             # progress write through JobExecutor.run() silently updates the
-            # actual `mongo_db` database instead of `biopipe_test` -- the
+            # actual `mongo_db` database instead of this run's own -- the
             # write succeeds, publishes no error, and the test's own read
-            # (which does go through Beanie, hence `biopipe_test`) simply
+            # (which does go through Beanie, hence the run database) simply
             # never sees it. Found via test_executor_live_resources.py's
             # sampler-driven progress ticks, which are the first tests to
             # exercise this write path for real.
