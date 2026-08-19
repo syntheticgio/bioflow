@@ -281,6 +281,7 @@ class TestSerialization:
             "prefetch",
             "datasets",
             "featurecounts",
+            "salmon",
             "ivar",
             "quast",
             "craq",
@@ -295,6 +296,7 @@ class TestSerialization:
             # version that ran a differential expression test is half that
             # result's provenance, and the panel is where a user reads it.
             "pydeseq2",
+            "snpeff",
         }
 
 
@@ -606,6 +608,46 @@ class TestBgzipProbe:
         monkeypatch.setattr(tools.shutil, "which", lambda name: None if name == "bgzip" else "/x")
         tool = tools.bgzip()
         assert tool.available is False
+
+
+class TestSalmonProbe:
+    """Salmon's probe, and the reason it needs no special-casing.
+
+    Unlike featureCounts (which exits non-zero on `-v`), `salmon --version`
+    exits zero and prints a bare "salmon 1.10.2" to stdout. Verified against
+    the Debian trixie binary rather than recalled.
+    """
+
+    def test_probe_reports_version_from_stdout(self, monkeypatch):
+        import subprocess
+
+        monkeypatch.setattr(tools.shutil, "which", lambda _: "/usr/bin/salmon")
+
+        def fake_run(cmd, **kwargs):
+            assert cmd == ["/usr/bin/salmon", "--version"]
+            return subprocess.CompletedProcess(
+                cmd, 0, stdout=b"salmon 1.10.2\n", stderr=b""
+            )
+
+        monkeypatch.setattr(tools.subprocess, "run", fake_run)
+        tools.salmon.cache_clear()
+
+        tool = tools.salmon()
+        assert tool.name == "salmon"
+        assert tool.available
+        assert "1.10.2" in tool.version
+
+    def test_probe_reports_error_when_absent(self, monkeypatch):
+        monkeypatch.setattr(tools.shutil, "which", lambda _: None)
+        tools.salmon.cache_clear()
+
+        tool = tools.salmon()
+        assert not tool.available
+        assert "SALMON_PATH" in tool.error
+
+    def test_salmon_is_in_the_aggregate_list(self):
+        names = {t.name for t in tools.all_tools()}
+        assert "salmon" in names
 
 
 class TestNewAlignerProbes:

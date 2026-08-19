@@ -193,6 +193,12 @@ class SidecarRole(StrEnum):
     # HISAT2_INDEX -- and per-reference like every other index here, reused
     # across every read set aligned against that reference.
     WINNOWMAP_INDEX = "winnowmap-index"
+    # Salmon's transcriptome index -- a directory of several files. Reserved
+    # for a not-yet-built index-caching optimization: the current
+    # salmon_quantify handler builds the index fresh inside each job's
+    # workdir and discards it when the job finishes, rather than storing it
+    # as a sidecar under this role and reusing it across samples.
+    SALMON_INDEX = "salmon-index"
     FAI = "fai"
     BAI = "bai"
     # The tabix index beside a bgzipped VCF -- to a VCF what BAI is to a BAM.

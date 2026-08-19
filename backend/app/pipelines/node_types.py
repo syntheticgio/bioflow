@@ -45,7 +45,7 @@ from app.models.object import FormatKind, ObjectRole
 from app.models.run import RunKind
 from app.models.workflow import PortType
 from app.pipelines.aligner_registry import Choice, ParamField
-from app.pipelines.tool_choice import ALIGN_TOOL_CHOICE, ToolChoice
+from app.pipelines.tool_choice import ALIGN_TOOL_CHOICE, ANNOTATION_TOOL_CHOICE, ToolChoice
 from app.services import (
     ncbi_assembly_service,
     pipeline_service,
@@ -200,7 +200,9 @@ async def _launch_merge_structural_variants(*, inputs: dict, params: dict, owner
 
 async def _launch_annotation(*, inputs: dict, params: dict, owner: str):
     return await pipeline_service.launch_annotation(
-        object_id=inputs["variants"], owner=owner
+        object_id=inputs["variants"],
+        owner=owner,
+        annotator=params.get("annotator"),
     )
 
 
@@ -257,6 +259,15 @@ async def _launch_quantify(*, inputs: dict, params: dict, owner: str):
         owner=owner,
         annotation_id=inputs.get("annotation"),
         params=params,
+    )
+
+
+async def _launch_salmon_quantify(*, inputs: dict, params: dict, owner: str):
+    return await pipeline_service.launch_salmon_quantify(
+        reads_id=inputs["reads"],
+        transcriptome_id=inputs.get("transcriptome"),
+        params=params,
+        owner=owner,
     )
 
 
@@ -611,6 +622,7 @@ NODE_TYPES: dict[str, NodeTypeSpec] = {
         # Creates no PipelineRun -- launch_annotation never calls
         # run_service.create_run, unlike launch_variant_calling beside it.
         run_kind=None,
+        tool_choice=ANNOTATION_TOOL_CHOICE,
         inputs=(
             # The reference and annotation (GFF3) are resolved internally via
             # resolve_annotation_inputs, not accepted as launch arguments, so
@@ -742,6 +754,36 @@ NODE_TYPES: dict[str, NodeTypeSpec] = {
             PortSpec(
                 "annotation",
                 PortType(format=FormatKind.GTF),
+                required=False,
+            ),
+        ),
+        outputs=(
+            PortSpec("counts", PortType(format=FormatKind.TEXT, role=ObjectRole.COUNTS)),
+        ),
+    ),
+    "salmon_quantify": NodeTypeSpec(
+        label="Quantify (Salmon)",
+        launch_name="pipeline_service.launch_salmon_quantify",
+        launch=_launch_salmon_quantify,
+        run_kind=RunKind.QUANTIFY,
+        # "quantify" shares RunKind.QUANTIFY with no run_tool (featureCounts
+        # is the default/fallback case in workflow_derive._node_type_for), so
+        # this one must claim "salmon" to keep the (run_kind, run_tool) pair
+        # unique -- otherwise a salmon run derives back as a featureCounts
+        # node with ports it never had.
+        run_tool="salmon",
+        inputs=(
+            PortSpec("reads", PortType(format=FormatKind.FASTQ)),
+            # The role is load-bearing, not decoration: an NCBI genome
+            # download brings protein.faa alongside the CDS FASTA, and both
+            # are FormatKind.FASTA. Without the role this port would accept
+            # the protein file.
+            # Optional: resolve_transcriptome falls back to the project's one
+            # unambiguous TRANSCRIPT-role FASTA when this is not wired, and
+            # refuses only when the project holds more than one.
+            PortSpec(
+                "transcriptome",
+                PortType(format=FormatKind.FASTA, role=ObjectRole.TRANSCRIPT),
                 required=False,
             ),
         ),

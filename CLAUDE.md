@@ -677,15 +677,17 @@ thought before running a pipeline that rewrites an existing artifact.
 
 ## Verifying changes
 
-Manual testing in the browser at localhost:5173 is the actual verification
-step for anything UI-facing -- there is no headless component-testing setup
-in this repo (no jsdom/testing-library, zero `.test.tsx` files) and none is
-expected. From a worktree, `./ops/worktree-up.sh` serves the same UI at
-localhost:5273 against that worktree's code. Backend changes are covered by
-`pytest`; run it inside the `api` container (`docker compose exec api python
--m pytest tests/ -q`) rather than a bare host `.venv`, since the host venv
-hits Mongo replica-set connection errors that the container's network doesn't
-have.
+Manual testing in the browser at localhost:5173 is the primary verification
+step for visual UI changes -- there is no browser/DOM component-testing setup
+in this repo (no jsdom/testing-library). However, pure-function component tests
+that call component functions directly under Vitest and walk the returned element
+tree are an established pattern (e.g., `frontend/src/components/AlignerParamFields.test.tsx`
+and `frontend/src/components/ExpressionCharts.test.tsx`). From a worktree,
+`./ops/worktree-up.sh` serves the same UI at localhost:5273 against that
+worktree's code. Backend changes are covered by `pytest`; run it inside the `api`
+container (`docker compose exec api python -m pytest tests/ -q`) rather than a
+bare host `.venv`, since the host venv hits Mongo replica-set connection
+errors that the container's network doesn't have.
 
 **That `docker compose exec api` command is only correct from the main repo
 root.** Run it inside a worktree and it silently tests *main's* code, not the

@@ -354,3 +354,205 @@ class TestDifferentialExpressionSuccess:
         assert result["counts_object_ids"] == ["id-a", "id-b"]
         assert result["tool_version"] == "0.4.12"
         assert result["output"]["name"] == "de_treated_vs_control.tsv"
+
+
+class TestSalmonQuantifyResultContract:
+    """The salmon_quantify handler's contract with the results applier.
+
+    The handler runs in a worker thread and cannot touch the database, so its
+    entire output is the dict it returns. These tests pin the keys that dict
+    must carry -- particularly annotation_sha256, which is what lets
+    de_runner.merge_counts refuse a design mixing incompatible samples.
+    """
+
+    def test_transcriptome_digest_is_carried_as_annotation_sha256(self):
+        # pipeline_service reads this key out of facts when it builds a DE
+        # design, and merge_counts refuses samples whose values differ. For
+        # Salmon the digest is the transcriptome's -- there is no annotation.
+        # This also, correctly, refuses a matrix mixing Salmon and
+        # featureCounts samples: their digests can never match, and they do
+        # not describe the same gene universe.
+        result = expression_handlers._salmon_result_dict(
+            object_id="64b" + "0" * 21,
+            transcriptome_object_id="64c" + "0" * 21,
+            project_id="64d" + "0" * 21,
+            job_id="64e" + "0" * 21,
+            output_path="/tmp/x/SRR1.counts.tsv",
+            tool_version="1.10.2",
+            transcriptome_name="cds.fna",
+            transcriptome_sha256="deadbeef",
+            facts={"genes_detected": 12},
+            workdir="/tmp/x",
+        )
+        assert result["annotation_sha256"] == "deadbeef"
+        assert result["annotation_name"] == "cds.fna"
+        assert result["facts"]["quantified_by"] == "salmon"
+
+    def test_output_carries_the_path_and_name_the_applier_needs(self):
+        result = expression_handlers._salmon_result_dict(
+            object_id="64b" + "0" * 21,
+            transcriptome_object_id="64c" + "0" * 21,
+            project_id="64d" + "0" * 21,
+            job_id="64e" + "0" * 21,
+            output_path="/tmp/x/SRR1.counts.tsv",
+            tool_version="1.10.2",
+            transcriptome_name="cds.fna",
+            transcriptome_sha256="deadbeef",
+            facts={},
+            workdir="/tmp/x",
+        )
+        assert result["output"]["name"] == "SRR1.counts.tsv"
+        assert result["output"]["tmp_path"] == "/tmp/x/SRR1.counts.tsv"
+
+
+class TestSalmonQuantifyMateDetection:
+    """Paired-end detection at the handler, not just the result-dict builder.
+
+    salmon_quantify must decide whether a sample is paired the same way this
+    codebase's other handlers do: a second file addressed by
+    mate_sha256/mate_path (see assembly_handlers.payload_has_mate and
+    align_handlers._resolve_digest_or_path's docstring), not by a key
+    ('reads2_blob_id') nothing in this codebase ever sets. These tests run
+    the real handler end to end (subprocess mocked) so a regression back to
+    the dead key fails a test instead of only failing silently at runtime.
+    """
+
+    @pytest.fixture
+    def salmon_available(self, monkeypatch):
+        fake = _fake_tool("salmon", "1.10.2")
+        monkeypatch.setattr(expression_handlers.tools, "salmon", lambda: fake)
+        return fake
+
+    def _fake_run_subprocess(self, calls):
+        def fake_run(ctx, cmd, **kw):
+            calls.append(cmd)
+            if cmd[1] == "index":
+                Path(cmd[cmd.index("-i") + 1]).mkdir(parents=True, exist_ok=True)
+            else:
+                out_dir = Path(cmd[cmd.index("-o") + 1])
+                out_dir.mkdir(parents=True, exist_ok=True)
+                (out_dir / "quant.sf").write_text(
+                    "Name\tLength\tEffectiveLength\tTPM\tNumReads\n"
+                    "t1\t100\t80\t1.0\t10.0\n"
+                )
+            return 0
+
+        return fake_run
+
+    def test_single_end_run_passes_one_reads_file_to_salmon(
+        self, salmon_available, home, tmp_path, monkeypatch
+    ):
+        transcriptome = tmp_path / "cds.fna"
+        transcriptome.write_text(">t1 [gene=g1]\nACGT\n")
+        reads = tmp_path / "reads_1.fastq.gz"
+        reads.write_bytes(b"x")
+
+        calls: list[list[str]] = []
+        monkeypatch.setattr(
+            expression_handlers, "run_subprocess", self._fake_run_subprocess(calls)
+        )
+
+        expression_handlers.salmon_quantify(
+            expression_handlers.JobContext(
+                job_id="job-1",
+                payload={
+                    "object_id": "obj-1",
+                    "transcriptome_path": str(transcriptome),
+                    "reads_path": str(reads),
+                },
+                epoch=1,
+                attempts=1,
+                owner="local",
+            )
+        )
+
+        quant_call = next(c for c in calls if c[1] == "quant")
+        assert "-r" in quant_call
+        assert "-1" not in quant_call
+        assert "-2" not in quant_call
+
+    def test_a_mate_file_is_detected_by_mate_sha256_and_paired_into_the_run(
+        self, salmon_available, home, tmp_path, monkeypatch
+    ):
+        transcriptome = tmp_path / "cds.fna"
+        transcriptome.write_text(">t1 [gene=g1]\nACGT\n")
+        reads = tmp_path / "reads_1.fastq.gz"
+        reads.write_bytes(b"x")
+        mate = tmp_path / "reads_2.fastq.gz"
+        mate.write_bytes(b"y")
+
+        calls: list[list[str]] = []
+        monkeypatch.setattr(
+            expression_handlers, "run_subprocess", self._fake_run_subprocess(calls)
+        )
+
+        expression_handlers.salmon_quantify(
+            expression_handlers.JobContext(
+                job_id="job-2",
+                payload={
+                    "object_id": "obj-1",
+                    "transcriptome_path": str(transcriptome),
+                    "reads_path": str(reads),
+                    "mate_path": str(mate),
+                },
+                epoch=1,
+                attempts=1,
+                owner="local",
+            )
+        )
+
+        quant_call = next(c for c in calls if c[1] == "quant")
+        assert "-1" in quant_call
+        assert "-2" in quant_call
+        assert "-r" not in quant_call
+        # Both files actually got symlinked into the workdir under the mate's
+        # own reads_2.fastq.gz name, not silently dropped.
+        r1 = Path(quant_call[quant_call.index("-1") + 1])
+        r2 = Path(quant_call[quant_call.index("-2") + 1])
+        assert r1.resolve() == reads.resolve()
+        assert r2.resolve() == mate.resolve()
+
+    def test_a_mate_by_sha256_alone_is_also_detected(
+        self, salmon_available, home, tmp_path, monkeypatch
+    ):
+        """mate_sha256 (digest-addressed blob), not just mate_path, must
+        trigger the paired branch -- payload_has_mate's own condition is an
+        `or` over both keys."""
+        transcriptome = tmp_path / "cds.fna"
+        transcriptome.write_text(">t1 [gene=g1]\nACGT\n")
+        reads = tmp_path / "reads_1.fastq.gz"
+        reads.write_bytes(b"x")
+
+        blob_dir = tmp_path / "objects" / "de"
+        blob_dir.mkdir(parents=True)
+        digest = "de" + "0" * 62
+        blob_file = blob_dir / digest
+        blob_file.write_bytes(b"y")
+
+        import app.queue.align_handlers as align_handlers
+
+        monkeypatch.setattr(align_handlers, "blob_path", lambda d: blob_file)
+
+        calls: list[list[str]] = []
+        monkeypatch.setattr(
+            expression_handlers, "run_subprocess", self._fake_run_subprocess(calls)
+        )
+
+        expression_handlers.salmon_quantify(
+            expression_handlers.JobContext(
+                job_id="job-3",
+                payload={
+                    "object_id": "obj-1",
+                    "transcriptome_path": str(transcriptome),
+                    "reads_path": str(reads),
+                    "mate_sha256": digest,
+                },
+                epoch=1,
+                attempts=1,
+                owner="local",
+            )
+        )
+
+        quant_call = next(c for c in calls if c[1] == "quant")
+        assert "-1" in quant_call
+        assert "-2" in quant_call

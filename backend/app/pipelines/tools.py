@@ -842,6 +842,14 @@ def featurecounts() -> Tool:
 
 
 @lru_cache(maxsize=1)
+def salmon() -> Tool:
+    # `salmon --version` exits zero and prints a bare "salmon 1.10.2" to
+    # stdout, so none of featureCounts' special-casing applies. Verified
+    # against the Debian trixie binary (1.10.2+ds1-1+b5) rather than recalled.
+    return _probe("salmon", settings.salmon_path, ["--version"])
+
+
+@lru_cache(maxsize=1)
 def pydeseq2() -> Tool:
     """The differential expression engine.
 
@@ -878,6 +886,21 @@ def pydeseq2() -> Tool:
     )
 
 
+def snpeff() -> Tool:
+    """SnpEff variant consequence annotator.
+
+    Delivered as an on-demand OCI image: SnpEff is Java-based and would
+    require a JRE in the backend image plus a multi-hundred-MB download of
+    the SnpEff distribution. Keeping it as an image avoids both.
+
+    The image is probed by presence rather than by --version, matching the
+    DeepVariant pattern: SnpEff's own --version output is not trivially
+    parseable in a way that survives version bumps, and the pinned tag in
+    settings already encodes the version.
+    """
+    return _probe_on_demand_image("snpeff", settings.snpeff_image)
+
+
 def all_tools() -> list[Tool]:
     return [
         fastp(),
@@ -906,6 +929,7 @@ def all_tools() -> list[Tool]:
         prefetch(),
         datasets(),
         featurecounts(),
+        salmon(),
         pydeseq2(),
         quast(),
         craq(),
@@ -915,6 +939,7 @@ def all_tools() -> list[Tool]:
         winnowmap(),
         bedtools(),
         seqkit(),
+        snpeff(),
     ]
 
 
@@ -2371,6 +2396,48 @@ TOOL_META: dict[str, ToolMeta] = {
             "counts rather than failing."
         ),
     ),
+    "salmon": ToolMeta(
+        pipelines=(PipelineType.EXPRESSION,),
+        one_liner="Quantifies transcript abundance without aligning",
+        summary=(
+            "Estimates how much of each transcript is present directly from "
+            "reads, using selective alignment against a transcriptome rather "
+            "than aligning to a genome first. Reaches the same differential "
+            "expression test as the align-and-count path, in a fraction of "
+            "the time, for users who want expression numbers and nothing else."
+        ),
+        strengths=(
+            "No alignment step: minutes rather than hours on a typical sample",
+            "Corrects for GC and positional bias that naive counting ignores",
+            "Distributes multi-mapping reads instead of discarding them",
+            "Detects the library's strandedness itself, so there is no flag to get wrong",
+        ),
+        homepage="https://combine-lab.github.io/salmon",
+        repository="https://github.com/COMBINE-lab/salmon",
+        citation=(
+            "Patro R, Duggal G, Love MI, Irizarry RA, Kingsford C. Salmon "
+            "provides fast and bias-aware quantification of transcript "
+            "expression. Nature Methods. 2017;14(4):417-419."
+        ),
+        citation_url="https://doi.org/10.1038/nmeth.4197",
+        # Verified 2026-08-18 against the upstream repository via
+        # `gh api repos/COMBINE-lab/salmon`, not recalled.
+        license="BSD-3-Clause",
+        usage=(
+            "Runs one sample at a time against a transcriptome index, which is "
+            "built fresh inside the job's workdir for every run and discarded "
+            "afterward, rather than cached and reused across samples. "
+            "Transcript-level estimates are summed to genes "
+            "before they are stored, so the result is an ordinary counts file "
+            "that the differential expression test accepts alongside "
+            "featureCounts output -- though not mixed into the same "
+            "comparison, since the two describe different gene universes. "
+            "The library's strandedness is detected automatically rather than "
+            "asked for. Note that a CDS reference (what an NCBI genome "
+            "download provides) covers coding sequences only: UTRs and "
+            "non-coding transcripts are absent from the estimates."
+        ),
+    ),
     "pydeseq2": ToolMeta(
         pipelines=(PipelineType.EXPRESSION,),
         one_liner="Differential expression testing on count data",
@@ -2573,6 +2640,52 @@ TOOL_META: dict[str, ToolMeta] = {
             "with a note when Bracken cannot run."
         ),
         delivery=Delivery.BUNDLED,
+    "snpeff": ToolMeta(
+        pipelines=(PipelineType.ANNOTATION,),
+        one_liner="Richer variant consequence annotation with impact scoring",
+        summary=(
+            "A self-contained Java-based variant annotation tool that builds "
+            "its own database from a GFF3/GTF and reference genome. Produces "
+            "per-variant consequence annotations with impact severity "
+            "(HIGH/MODERATE/LOW/MODIFIER), HGVS notation (both coding and "
+            "protein-level), and per-transcript ranking, written directly "
+            "into the VCF's ANN field. Lighter-weight than Ensembl VEP with "
+            "no external database dependency at runtime."
+        ),
+        strengths=(
+            "Impact severity tiers: HIGH, MODERATE, LOW, MODIFIER",
+            "HGVS notation: protein and coding-sequence changes",
+            "Per-transcript consequence ranking",
+            "Self-contained database build from GFF3/GTF",
+            "No external network dependency after database is built",
+        ),
+        homepage="https://pcingola.github.io/SnpEff/",
+        repository="https://github.com/pcingola/SnpEff",
+        citation=(
+            "Cingolani P, Platts A, Wang LL, Coon M, Nguyen T, Wang L, "
+            "Land SJ, Lu X, Ruden DM. A program for annotating and "
+            "predicting the effects of single nucleotide polymorphisms, "
+            "SnpEff: SNPs in the genome of Drosophila melanogaster strain "
+            "w1118; iso-2; iso-3. Fly. 2012;6(2):80-92."
+        ),
+        citation_url="https://doi.org/10.4161/fly.19695",
+        # Checked via gh api repos/pcingola/SnpEff/license on 2026-08-18.
+        license="LGPL-3.0",
+        usage=(
+            "An alternative to bcftools csq for variant consequence "
+            "annotation. Builds a SnpEff database from the project's GFF3 "
+            "and reference genome on first use per genome accession, cached "
+            "for subsequent runs. Then annotates the called VCF with "
+            "consequence effects including impact severity, HGVS notation, "
+            "and per-transcript rankings. Runs as a separate container image "
+            "rather than being installed in the BioFlow image."
+        ),
+        runnable=True,
+        delivery=Delivery.ON_DEMAND_IMAGE,
+        image=settings.snpeff_image,
+        # Measured 2026-08-18 pulling pegi3s/snpeff:5.2a: 797 MB compressed
+        # transfer (docker pull output).
+        download_bytes=797_000_000,
     ),
 }
 
@@ -2684,6 +2797,7 @@ def reset_cache() -> None:
     prefetch.cache_clear()
     datasets.cache_clear()
     featurecounts.cache_clear()
+    salmon.cache_clear()
     pydeseq2.cache_clear()
     quast.cache_clear()
     craq.cache_clear()

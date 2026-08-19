@@ -103,6 +103,7 @@ RUN apt-get update \
         bowtie2 \
         hisat2 \
         rna-star \
+        salmon \
         samtools \
         cutadapt \
         trimmomatic \
