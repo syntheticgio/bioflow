@@ -3864,7 +3864,7 @@ async def launch_merge_structural_variants(
     }
 
     run = await run_service.create_run(
-        kind=RunKind.STRUCTURAL_VARIANT_CALLING,
+        kind=RunKind.STRUCTURAL_VARIANT_MERGING,
         project_id=project_id,
         label=f"Merge {len(snf_objects)} SV callsets",
         inputs=[

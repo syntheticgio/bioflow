@@ -31,6 +31,13 @@ class RunKind(StrEnum):
     # not the same line in an activity view as "called variants" -- the same
     # reasoning that separates ASSEMBLY_DOWNLOAD from SRA_DOWNLOAD.
     STRUCTURAL_VARIANT_CALLING = "structural_variant_calling"
+    # Merging per-sample SV callsets into a joint callset. Separate from
+    # STRUCTURAL_VARIANT_CALLING for the same display-and-grouping reason that
+    # kind is separate from VARIANT_CALLING: "called structural variants on
+    # this BAM" and "merged N callsets" are not the same line in an activity
+    # view, and the (run_kind, run_tool) pair must stay unique so
+    # workflow_derive does not mislabel one node type as the other.
+    STRUCTURAL_VARIANT_MERGING = "structural_variant_merging"
     # Separate from SRA_DOWNLOAD because RunKind is a display and grouping
     # vocabulary, and "downloaded a genome" reads differently from "downloaded
     # sequencing runs" in the activity view.
