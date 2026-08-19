@@ -1142,3 +1142,15 @@ def test_abyss_is_declared_and_documented():
     assert meta.citation
     assert meta.license
     assert meta.usage
+
+
+def test_structural_variant_is_its_own_pipeline_type():
+    """SVs are not a kind of small variant.
+
+    PipelineType drives the tool picker, and VARIANT's label is "a variant
+    caller". Declaring Sniffles under it would offer a user picking an SNV
+    caller a tool that cannot produce SNVs -- the mistake ASSEMBLY_QC's own
+    comment records avoiding.
+    """
+    assert tools.PipelineType.STRUCTURAL_VARIANT.value == "structural_variant"
+    assert tools.PipelineType.STRUCTURAL_VARIANT is not tools.PipelineType.VARIANT

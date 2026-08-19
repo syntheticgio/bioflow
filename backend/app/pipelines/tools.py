@@ -882,6 +882,12 @@ class PipelineType(StrEnum):
     # misleading listed as utilities beside samtools.
     DOWNLOAD = "download"
     VARIANT = "variant"
+    # Structural variants, not a flavour of VARIANT. This enum drives the
+    # tool picker (PipelineToolSelector.tsx), whose VARIANT screen is headed
+    # "a variant caller" -- listing Sniffles there would offer it to someone
+    # picking an SNV caller, as something to call small variants with. Same
+    # reasoning as ASSEMBLY_QC's separation from ASSEMBLE below.
+    STRUCTURAL_VARIANT = "structural_variant"
     # Counting reads per gene and testing those counts between conditions.
     # One member rather than two: quantification and the test are separate
     # pipelines, but a tool selector splitting them would show two screens of
