@@ -772,9 +772,13 @@ NODE_TYPES: dict[str, NodeTypeSpec] = {
             # download brings protein.faa alongside the CDS FASTA, and both
             # are FormatKind.FASTA. Without the role this port would accept
             # the protein file.
+            # Optional: resolve_transcriptome falls back to the project's one
+            # unambiguous TRANSCRIPT-role FASTA when this is not wired, and
+            # refuses only when the project holds more than one.
             PortSpec(
                 "transcriptome",
                 PortType(format=FormatKind.FASTA, role=ObjectRole.TRANSCRIPT),
+                required=False,
             ),
         ),
         outputs=(
