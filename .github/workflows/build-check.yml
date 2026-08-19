@@ -209,21 +209,22 @@ jobs:
     # ~5.5 min for the suite plus ~3 min of setup; same stalled-apt-mirror
     # margin reasoning as backend-smoke (#494).
     timeout-minutes: 20
-    services:
+    steps:
+      - uses: actions/checkout@v7
+
       # A single-node replica set is required for MongoDB transactions
       # (blob refcount updates, share cascades) — conftest.py hardcodes the
       # "biopipe_test" database and the URL must name replicaSet=rs0.
       #
-      # Deliberately no MONGO_INITDB_ROOT_USERNAME/PASSWORD: mongod refuses
-      # to start with auth + --replSet and no keyfile, and a throwaway CI
-      # container has nothing to protect. Same pattern as the throwaway
-      # Mongo in backend/run-worktree-tests.sh.
-      mongo:
-        image: mongo:7
-        ports: ['27017:27017']
-        options: --replSet rs0 --bind_ip_all
-    steps:
-      - uses: actions/checkout@v7
+      # `docker run` rather than a `services:` container because a service's
+      # `options` are flags to `docker create`, not arguments to the image's
+      # entrypoint — there is no way to hand mongod its --replSet flag through
+      # `services:` (the first attempt died with "unknown flag: --replSet").
+      # Same pattern as the throwaway Mongo in backend/run-worktree-tests.sh,
+      # including no root auth: mongod refuses to start with auth + --replSet
+      # and no keyfile, and a throwaway CI container has nothing to protect.
+      - name: Start Mongo replica set
+        run: docker run -d --name mongo -p 27017:27017 mongo:7 --replSet rs0 --bind_ip_all
 
       - name: Setup Python
         uses: actions/setup-python@v7
@@ -242,13 +243,13 @@ jobs:
         run: pip install -e 'backend/.[dev]'
 
       # The mongo:7 image ships mongosh, so the replica set is initiated by
-      # exec-ing into the service container rather than installing a shell on
-      # the runner. The loop covers both mongod not accepting connections yet
+      # exec-ing into the container rather than installing a shell on the
+      # runner. The loop covers both mongod not accepting connections yet
       # and the window between rs.initiate() and the node electing itself
       # primary — rs.status().ok only reports 1 once the set is usable.
       - name: Initialize replica set
         run: |
-          until docker exec ${{ job.services.mongo.id }} mongosh --quiet --eval \
+          until docker exec mongo mongosh --quiet --eval \
                 'try { rs.status().ok } catch (e) { rs.initiate({_id:"rs0",members:[{_id:0,host:"localhost:27017"}]}).ok }' \
                 2>/dev/null | grep -q 1; do
             sleep 1
