@@ -4150,6 +4150,29 @@ table.software-matrix thead th.software-matrix-corner {
   min-width: 0;
 }
 
+/* The before/after quality overlay sits inside .facts-columns, whose columns
+   are half a narrow detail panel wide -- well under the chart's own 460px.
+   Scaling a 460-wide viewBox into 125px does not produce a small chart, it
+   produces an unreadable one, so the chart keeps a readable floor and the
+   card scrolls it sideways instead. Matches how the workflow diagrams and
+   wide code blocks handle the same problem. */
+.trim-chart {
+  margin-top: 14px;
+  overflow-x: auto;
+}
+
+/* On the svg itself, not the wrapper: the chart is `width: 100%` of its
+   parent, so a min-width one level up leaves it free to collapse inside a
+   block that is merely allowed to be wider. */
+.trim-chart svg {
+  min-width: 320px;
+  /* The chart is `width: 100%` of a parent narrower than its floor, so the
+     browser has no width to derive a height from. Stating the viewBox's own
+     ratio gives it one. */
+  aspect-ratio: 460 / 210;
+  height: auto;
+}
+
 /* Conclusions under the trim comparison: what it cost, and where the result
    went. Sentences rather than more table rows. */
 .trim-outcome {

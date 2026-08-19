@@ -2,6 +2,8 @@ import { useQuery } from "@tanstack/react-query";
 import { useSearchParams } from "react-router-dom";
 import { api } from "../api/client";
 import type { TrimReport as Report } from "../api/types";
+import { InfoMarker } from "./InfoMarker";
+import { QualityOverlayChart } from "./SequenceCharts";
 
 /**
  * What trimming actually did to a file.
@@ -9,7 +11,8 @@ import type { TrimReport as Report } from "../api/types";
  * fastp reports the same measurements before and after in one pass, so this is
  * a genuine comparison rather than two separate runs -- which is why the
  * default path needs no FastQC. The point is the delta: whether reads were
- * lost, whether quality improved, how much adapter was there.
+ * lost, whether quality improved, how much adapter was there -- and, from
+ * the overlaid per-cycle curves, *where* along the read it happened.
  */
 export function TrimReport({
   facts,
@@ -38,6 +41,7 @@ export function TrimReport({
 
   const { before, after } = report;
   const readsLost = delta(before.total_reads, after.total_reads);
+  const overlay = report.quality_overlay;
 
   const outputFiles = outputs
     .map((id) => siblings.find((s) => s.id === id))
@@ -152,6 +156,20 @@ export function TrimReport({
         ) : null}
 
       </dl>
+
+      {/* Where trimming acted, rather than only how much it removed. Absent
+          on files trimmed before the curves were persisted (#639), which is
+          why this is conditional rather than a chart that would render empty
+          for them. */}
+      {overlay && overlay.length > 0 && (
+        <div className="trim-chart">
+          <div className="section-title">
+            Quality per position
+            <InfoMarker metric="ui.chart_trim_quality_overlay" />
+          </div>
+          <QualityOverlayChart curve={overlay} />
+        </div>
+      )}
 
       {/* The outcome, as sentences under the table: what the comparison cost
           and where the result went. Both are conclusions drawn from the rows
