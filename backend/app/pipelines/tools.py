@@ -783,6 +783,20 @@ def winnowmap() -> Tool:
 
 
 @lru_cache(maxsize=1)
+def bedtools() -> Tool:
+    # `bedtools --version` prints "bedtools v2.x.y" and exits zero.
+    # Installed via apt since the Merqury work (#64); this probe is what
+    # finally makes it visible to /help/software and the Actions tab.
+    return _probe("bedtools", settings.bedtools_path, ["--version"])
+
+
+@lru_cache(maxsize=1)
+def seqkit() -> Tool:
+    # seqkit has no `--version`; `seqkit version` prints "seqkit v2.x.y".
+    return _probe("seqkit", settings.seqkit_path, ["version"])
+
+
+@lru_cache(maxsize=1)
 def featurecounts() -> Tool:
     # Writes its banner to stderr and exits non-zero on `-v` with no input
     # files. `_probe` already reads whichever stream produced something, and
@@ -862,6 +876,8 @@ def all_tools() -> list[Tool]:
         merqury(),
         gci(),
         winnowmap(),
+        bedtools(),
+        seqkit(),
     ]
 
 
@@ -2308,6 +2324,62 @@ TOOL_META: dict[str, ToolMeta] = {
         # built and tagged -- the database is several GB and should not be in
         # the base image. image and download_bytes must be filled in together.
         delivery=Delivery.BUNDLED,
+    ),
+    "bedtools": ToolMeta(
+        pipelines=(PipelineType.UTILITY,),
+        one_liner="Swiss-army knife for genome coordinate operations",
+        summary=(
+            "BEDtools is a fast, flexible toolkit for investigating genomic "
+            "feature relationships. Performs coordinate intersections, merges, "
+            "overlaps, and arithmetic on genomic intervals in BED, GFF, VCF, "
+            "and SAM formats. The foundation for per-feature coverage analysis "
+            "and structural variant detection."
+        ),
+        strengths=(
+            "Fast interval set operations: intersect, merge, closest, coverage",
+            "Supports multiple input formats: BED, GFF, GVF, VCF, SAM, BAM",
+            "Flexible output: raw results, counts, statistics",
+            "Scripting-friendly TSV output for downstream processing",
+        ),
+        homepage="https://bedtools.readthedocs.io/",
+        repository="https://github.com/arq5x/bedtools2",
+        citation="Quinlan & Hall, Bioinformatics 2010",
+        citation_url="https://doi.org/10.1093/bioinformatics/btq033",
+        license="MIT",
+        usage=(
+            "Runs interval arithmetic on genomic features. Used for per-feature "
+            "coverage quantification and structural variant analysis, where the "
+            "input is one or more coordinate sets and the output is coverage, "
+            "overlap, or intersection results."
+        ),
+    ),
+    "seqkit": ToolMeta(
+        pipelines=(PipelineType.UTILITY,),
+        one_liner="Fast FASTA/FASTQ manipulation toolkit",
+        summary=(
+            "SeqKit is a fast, cross-platform FASTA/FASTQ sequence toolkit "
+            "written in Go. Provides subcommands for filtering, sampling, "
+            "concatenating, splitting, reformatting, and searching sequences, "
+            "with built-in decompression and streaming for efficient handling "
+            "of large datasets."
+        ),
+        strengths=(
+            "Cross-platform compiled binary: no dependencies",
+            "Streaming processing: handles GBs efficiently",
+            "Auto-detects and handles compressed FASTA/FASTQ",
+            "Subcommand interface for filtering, sampling, splitting, stats",
+            "Written in Go: compiled, no Python or Perl overhead",
+        ),
+        homepage="https://bioinf.shenwei.me/seqkit/",
+        repository="https://github.com/shenwei356/seqkit",
+        citation="Shen, Shibuya & Zhu, bioRxiv 2016",
+        citation_url="https://doi.org/10.1101/081851",
+        license="MIT",
+        usage=(
+            "Runs sequence filtering, sampling, and reformatting operations. "
+            "Handles FASTA and FASTQ in compressed or uncompressed formats, "
+            "streaming results for memory efficiency on large files."
+        ),
     ),
 }
 

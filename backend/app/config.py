@@ -214,6 +214,8 @@ class Settings(BaseSettings):
     # gotchas (the top-level Makefile's `-e` discarding the aarch64
     # `-fsigned-char` flag, and the bundled ext/meryl that must not be built).
     winnowmap_path: str = "winnowmap"
+    bedtools_path: str = "bedtools"
+    seqkit_path: str = "seqkit"
     # Model directories, one per Clair3 --platform. The install script
     # normalizes each to hold the checkpoint files directly.
     clair3_models_dir: str = "/opt/clair3/models"
