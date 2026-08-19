@@ -135,6 +135,7 @@ _STEP_VERBS: dict[str, str] = {
     "assemble_reads": "assembled with",
     "assemble_upload": "assembled with",
     "polish_assembly": "polished with",
+    "polish_long_assembly": "polished with",
     "scaffold_assembly": "scaffolded with",
     "quantify": "quantified with",
     "differential_expression": "tested for differential expression with",

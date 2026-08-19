@@ -1659,6 +1659,38 @@ async def launch_polish_route(body: PolishRequest, owner: OwnerDep) -> JobOut:
     return JobOut.of(job)
 
 
+class PolishLongRequest(BaseModel):
+    draft_object_id: PydanticObjectId
+    # Optional: omitted, the launch resolves the project's one long-read set
+    # and refuses when there is more than one. No mate slot -- ONT and PacBio
+    # data is unpaired.
+    reads_object_id: PydanticObjectId | None = None
+    # ONT's bacterial-methylation model. A research release by upstream's own
+    # labelling, so it is opt-in rather than inferred from the draft.
+    bacteria: bool = False
+    resource_override: bool = False
+
+
+@router.post(
+    "/polish-long", response_model=JobOut, status_code=status.HTTP_201_CREATED
+)
+async def launch_polish_long_route(
+    body: PolishLongRequest, owner: OwnerDep
+) -> JobOut:
+    """Queue a Medaka run: long reads correcting a draft assembly.
+
+    No alignment is supplied and none is configured. Medaka runs minimap2
+    itself with a preset chosen by the model it resolves."""
+    job = await pipeline_service.launch_polish_long(
+        draft_object_id=body.draft_object_id,
+        reads_object_id=body.reads_object_id,
+        bacteria=body.bacteria,
+        owner=owner,
+        resource_override=body.resource_override,
+    )
+    return JobOut.of(job)
+
+
 class ScaffoldRequest(BaseModel):
     draft_object_id: PydanticObjectId
     # Optional, but unlike PolishRequest's reads the ambiguous case is the

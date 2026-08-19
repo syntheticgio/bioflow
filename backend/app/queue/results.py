@@ -2609,6 +2609,7 @@ async def _apply_polish_assembly(result: dict, *, owner: str) -> None:
         draft_id=draft_id,
         polished_id=str(polished.id),
         changed=facts.get("polish_changed_positions"),
+        tool=facts.get("polish_tool"),
         careful=facts.get("polish_careful_mode"),
     )
 
@@ -3072,5 +3073,6 @@ _APPLIERS = {
     "assess_assembly_continuity": _apply_assess_assembly_continuity,
     "consensus_from_alignment": _apply_consensus_from_alignment,
     "polish_assembly": _apply_polish_assembly,
+    "polish_long_assembly": _apply_polish_assembly,
     "scaffold_assembly": _apply_scaffold_assembly,
 }

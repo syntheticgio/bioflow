@@ -353,3 +353,67 @@ def short_read_sets(objects: list[DataObject]) -> list[list[DataObject]]:
         if obj.status is ObjectStatus.READY and is_short_read(obj)
     ]
     return group_read_sets(ready)
+
+
+# --- Long reads for Medaka polishing ---------------------------------------
+
+
+def is_long_read(obj: DataObject) -> bool:
+    """Whether a FASTQ is long-read data.
+
+    **Written positively, and deliberately not `not is_short_read(obj)`.**
+    That negation is the single most tempting wrong edit here.
+    `is_short_read` returns False for a protein FASTA, for a FASTQ whose
+    platform is unknown and whose chemistry is not `short`, and for genuine
+    long reads alike -- so negating it would hand Medaka every non-short
+    object in the project. That is the `protein.faa` mistake in a new
+    costume.
+
+    Precedence is `is_short_read`'s, for its reasons: a known long-read
+    platform is decisive regardless of inferred chemistry, because
+    chemistry is inferred from read *lengths* and a nanopore run carrying
+    short reads infers `short` (`ERR16145610.fastq`, a real MinION run).
+    Chemistry only votes when the platform is unknown.
+
+    **Unknown stays unknown**, which is a deliberate asymmetry with the
+    sibling function. `is_short_read` counts an unlabelled FASTQ as short,
+    because `_qc_platform` defaults to ILLUMINA and that module declines to
+    second-guess the default -- without it, an uploaded Illumina FASTQ with
+    no metadata would never get a polish card. Inheriting that default here
+    would invert its meaning: every unlabelled file would look like a Medaka
+    candidate as well, and the two polish cards would both fire on data
+    neither can vouch for. The residual cost is that an uploaded ONT FASTQ
+    with no metadata gets no Medaka card until QC runs -- a missing offer
+    rather than a wrong run.
+    """
+    if obj.format.kind is not FormatKind.FASTQ:
+        return False
+
+    # Lazily imported for the same circularity reason is_short_read
+    # documents: pipeline_service imports this module.
+    from app.services.pipeline_service import _qc_platform
+
+    platform = _qc_platform(obj)
+    if platform in LONG_READ_PLATFORMS:
+        return True
+    if platform in SHORT_READ_PLATFORMS:
+        return False
+
+    return (obj.facts or {}).get("qc_read_chemistry") == "long"
+
+
+def long_read_sets(objects: list[DataObject]) -> list[list[DataObject]]:
+    """The ready long-read sets among a project's objects.
+
+    Same grouping as `short_read_sets` -- a set is what one polish run
+    consumes -- though in practice a long-read set is a single file, since
+    ONT and PacBio data is unpaired. `group_read_sets` is reused rather
+    than special-cased so a mate-linked long-read pair, if one ever
+    appears, is one candidate rather than two.
+    """
+    ready = [
+        obj
+        for obj in objects
+        if obj.status is ObjectStatus.READY and is_long_read(obj)
+    ]
+    return group_read_sets(ready)

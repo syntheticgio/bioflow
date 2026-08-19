@@ -686,6 +686,23 @@ def polypolish() -> Tool:
 
 
 @lru_cache(maxsize=1)
+def medaka() -> Tool:
+    """Medaka, ONT's neural-network consensus tool.
+
+    Probes `medaka` rather than `medaka_consensus`: the wrapper script is
+    what jobs invoke, but it takes no `--version` of its own and would fall
+    through to its usage block, which `_clean_version` would then scrape a
+    line of into the version field -- the same trap clair3() documents.
+    `medaka --version` prints "medaka 2.2.2" and exits zero.
+
+    No arm64 special-casing, unlike polypolish(): bioconda ships
+    linux-aarch64 builds, so this is the one polisher that works on Apple
+    Silicon.
+    """
+    return _probe("medaka", settings.medaka_binary_path, ["--version"])
+
+
+@lru_cache(maxsize=1)
 def ragtag() -> Tool:
     # The binary is `ragtag.py`, not `ragtag` -- a probe looking for `ragtag`
     # on PATH finds nothing and reports a working install as missing, the
@@ -2118,6 +2135,55 @@ TOOL_META: dict[str, ToolMeta] = {
             "into the output rather than dropped. Upstream also credits the "
             "earlier RaGOO method this tool superseded (Alonge et al., "
             "Genome Biology 2019, doi:10.1186/s13059-019-1829-6)."
+        ),
+    ),
+    "medaka": ToolMeta(
+        pipelines=(PipelineType.REFERENCE_ASSEMBLY,),
+        one_liner="Neural-network polishing of long-read assemblies",
+        summary=(
+            "Corrects residual base errors in a long-read assembly using "
+            "the long reads it was built from. A neural network trained on "
+            "ONT basecaller output predicts the true consensus from the "
+            "pileup, which is what makes it effective on the homopolymer "
+            "runs long-read assemblers systematically get wrong -- the "
+            "error class short-read polishers cannot help with when no "
+            "short reads exist."
+        ),
+        strengths=(
+            "The only polishing path for a project with no short reads",
+            "Trained per basecaller model, so it corrects the specific "
+            "error profile of the chemistry that produced the reads",
+            "Performs its own alignment with a model-appropriate minimap2 "
+            "preset, so there is no aligner choice to get wrong",
+        ),
+        homepage="https://github.com/nanoporetech/medaka",
+        repository="https://github.com/nanoporetech/medaka",
+        # Medaka has no accompanying paper. Upstream asks that the software
+        # be cited directly, so this is the repository rather than a
+        # fabricated reference -- citation_url is deliberately left empty
+        # for the same reason.
+        citation=(
+            "Oxford Nanopore Technologies. medaka: sequence correction "
+            "provided by ONT Research. https://github.com/nanoporetech/medaka"
+        ),
+        # From the repository's own LICENCE.md, checked 2026-08-18 rather
+        # than recalled. This is *not* an OSI-standard license -- it is
+        # ONT's own -- and it is recorded verbatim rather than normalized to
+        # something familiar-looking. A page that reads as authoritative
+        # saying "MIT" here would be worse than saying nothing.
+        license="Oxford Nanopore Technologies PLC. Public License Version 1.0",
+        usage=(
+            "BioFlow runs medaka_consensus over a draft assembly and the "
+            "long reads it was built from, storing the polished consensus "
+            "as a new object beside the draft rather than replacing it. "
+            "Medaka performs its own alignment internally using a minimap2 "
+            "preset chosen by the model, so no aligner is configured here. "
+            "The model is normally resolved from basecaller metadata in the "
+            "reads; when that metadata is absent Medaka falls back to a "
+            "default model without erroring, so the resolved model and "
+            "whether it was auto-selected are both recorded as facts on the "
+            "output. ONT's bacterial-methylation model is available as an "
+            "opt-in at launch and is a research release."
         ),
     ),
     "polypolish": ToolMeta(

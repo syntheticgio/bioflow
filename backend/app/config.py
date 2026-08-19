@@ -177,6 +177,20 @@ class Settings(BaseSettings):
     # from upstream's musl-static release binary, and absent on arm64 by
     # design -- see backend/scripts/install-polypolish.sh.
     polypolish_path: str = "polypolish"
+    # Two settings rather than one derived from the other. `medaka_path` is
+    # the wrapper script jobs exec; `medaka_binary_path` is the sibling
+    # binary the probe versions, because the wrapper has no --version of its
+    # own and would fall through to its usage block. Deriving one from the
+    # other by string surgery was the first draft and is exactly the kind of
+    # thing that breaks silently when a path changes.
+    #
+    # Absolute rather than bare names: medaka lives in its own conda prefix
+    # so its pinned torch and its vendored minimap2/samtools stay out of the
+    # image's own PATH resolution. The ENV in the Dockerfile puts the prefix
+    # on PATH; these stay absolute so a probe does not depend on that
+    # ordering.
+    medaka_path: str = "/opt/medaka/env/bin/medaka_consensus"
+    medaka_binary_path: str = "/opt/medaka/env/bin/medaka"
     # Reference-guided scaffolding. Not in Debian; installed from PyPI (pure
     # Python, pinned in backend/Dockerfile). The binary is `ragtag.py`, not
     # `ragtag` -- see tools.ragtag()'s own comment.
