@@ -210,6 +210,10 @@ _NO_NARRATIVE_STEP: frozenset[str] = frozenset(
         # Bakta genome annotation -- read-only facts (gene density) merged
         # onto an existing assembly, same class as gc_tracks and meryl.
         "annotate_genome",
+        # Kraken2/Bracken classification -- read-only taxonomy facts merged
+        # onto an existing reads object, same class as gc_tracks, meryl, and
+        # annotate_genome.
+        "classify_reads",
         # AI features that write a field rather than producing an object.
         "summarize_object",
         "summarize_de_results",
@@ -226,6 +230,12 @@ _NO_NARRATIVE_STEP: frozenset[str] = frozenset(
         # object with provenance of its own, and it runs against a project
         # rather than any single object a chain could walk through.
         "project_export",
+        # Kraken2 database download: same shape as download_lineage's own
+        # reasoning would suggest, but it produces no DataObject at all
+        # (node_types.py's "download_kraken_db" has outputs=()) -- the
+        # dataset lands under settings.kraken_dbs_dir, outside the object
+        # model, so there is nothing for a chain to walk through here.
+        "download_kraken_db",
     }
 )
 

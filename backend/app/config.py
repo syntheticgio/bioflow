@@ -165,6 +165,12 @@ class Settings(BaseSettings):
     # Bacterial genome annotation. On-demand delivery — the database is
     # several GB — so this probe only checks the binary, not the DB.
     bakta_path: str = "bakta"
+    # Taxonomic classification. On-demand delivery — the database is several
+    # GB — so this probe only checks the binary, not the DB.
+    kraken2_path: str = "kraken2"
+    # Bracken re-estimates abundances over an existing Kraken2 report; no
+    # database of its own to probe.
+    bracken_path: str = "bracken"
     # Assembly completeness. Built from source in the Dockerfile -- neither is
     # packaged for trixie -- so compleasm resolves miniprot on PATH under this
     # exact name rather than needing a second setting passed through to it.
@@ -467,6 +473,16 @@ class Settings(BaseSettings):
         depend on the network, so what it reads here must already exist.
         """
         return self.bioinfo_home / "lineages"
+
+    @property
+    def kraken_dbs_dir(self) -> Path:
+        """Kraken2 classification databases, shared across every project.
+
+        Reference data fetched by `download_kraken_db`, the same class of
+        thing as `lineages_dir`: a classification job must not depend on
+        the network, so what it reads here must already exist.
+        """
+        return self.bioinfo_home / "kraken_dbs"
 
     @property
     def meta_dir(self) -> Path:

@@ -69,11 +69,13 @@ import { TrimDialog } from "./TrimDialog";
 import { AssembleDialog } from "./AssembleDialog";
 import { CompletenessDialog } from "./CompletenessDialog";
 import { PolishDialog } from "./PolishDialog";
+import { ClassifyReadsDialog } from "./ClassifyReadsDialog";
 import { ScaffoldDialog } from "./ScaffoldDialog";
 import { QuantifyDialog } from "./QuantifyDialog";
 import { DifferentialExpressionDialog } from "./DifferentialExpressionDialog";
 import { VariantDialog } from "./VariantDialog";
 import { QcReport } from "./QcReport";
+import { TaxonomyFacts } from "./TaxonomyFacts";
 import { TrimReport } from "./TrimReport";
 import { SraPanel } from "./SraPanel";
 import { TabPanel, Tabs, type TabDef } from "./Tabs";
@@ -469,6 +471,7 @@ function ObjectDetail({ id }: { id: string }) {
   const [assembleOpen, setAssembleOpen] = useState(false);
   const [completenessOpen, setCompletenessOpen] = useState(false);
   const [polishLongOpen, setPolishLongOpen] = useState(false);
+  const [classifyReadsOpen, setClassifyReadsOpen] = useState(false);
   const [scaffoldOpen, setScaffoldOpen] = useState(false);
   const [deOpen, setDeOpen] = useState(false);
   // The suggestion card's launch body, when a dialog was opened by "Adjust…"
@@ -547,6 +550,9 @@ function ObjectDetail({ id }: { id: string }) {
         break;
       case "polish_long":
         setPolishLongOpen(true);
+        break;
+      case "classify_reads":
+        setClassifyReadsOpen(true);
         break;
       default:
         setPrefill(null);
@@ -1155,6 +1161,16 @@ function ObjectDetail({ id }: { id: string }) {
           }}
         />
       )}
+      {classifyReadsOpen && (
+        <ClassifyReadsDialog
+          object={obj}
+          prefill={prefill}
+          onClose={() => {
+            setClassifyReadsOpen(false);
+            setPrefill(null);
+          }}
+        />
+      )}
       {scaffoldOpen && (
         <ScaffoldDialog
           object={obj}
@@ -1498,6 +1514,12 @@ function QcTab({
               trim comparison because it describes the starting point that
               comparison is against. */}
           <QcReport facts={obj.facts} objectId={obj.id} />
+
+          {/* What the reads actually are, not just how clean they are --
+              placed right after QC since both answer "what does this file
+              contain/look like", ahead of the before/after trim
+              comparison. */}
+          <TaxonomyFacts facts={obj.facts} />
 
           {/* Before/after comparison, on the source file rather than the
               output: "what did trimming do to my reads" is a question about
