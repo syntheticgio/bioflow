@@ -7,8 +7,9 @@ gene universe nobody intended -- the same silent-success shape that cost STAR
 its index sidecars.
 """
 
-import pytest
 from pathlib import Path
+
+import pytest
 
 from app.errors import ValidationError
 from app.pipelines import salmon_runner
