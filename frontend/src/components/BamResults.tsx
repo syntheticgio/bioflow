@@ -14,6 +14,7 @@ import { AlignmentReport } from "./AlignmentReport";
 import { BirdsEyeCoverageChart, CumulativeCoverageChart } from "./CoverageChart";
 import { ContigTable } from "./ContigTable";
 import { ContigDepthChart } from "./ContigDepthChart";
+import { ContigDepthStrip } from "./ContigDepthStrip";
 import { DepthHistogramChart } from "./DepthHistogramChart";
 import { OnDemandCompute } from "./OnDemandCompute";
 import { TranscriptQc } from "./TranscriptQc";
@@ -106,6 +107,14 @@ export function BamResults({ obj }: { obj: ObjectDetailData }) {
               {f.bam_stats_cumulative && f.bam_stats_cumulative.length > 0 && (
                 <div style={{ flex: "1 1 300px" }}>
                   <CumulativeCoverageChart curve={f.bam_stats_cumulative} />
+                </div>
+              )}
+              {f.bam_stats_contigs_top && f.bam_stats_contigs_top.length > 0 && (
+                <div style={{ flex: "1 1 300px" }}>
+                  <ContigDepthStrip
+                    contigs={f.bam_stats_contigs_top}
+                    totalContigs={f.bam_stats_summary?.total_contigs}
+                  />
                 </div>
               )}
               {f.bam_stats_contigs_top && f.bam_stats_contigs_top.length > 0 && (

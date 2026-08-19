@@ -571,6 +571,13 @@ export const METRIC_INFO: Record<string, MetricInfo> = {
     description:
       "Mean depth per contig against the genome-wide mean. Contigs far below the line have less material in the sample than the reference expects; far above usually means repeat content or a plasmid present in many copies.",
   },
+  "ui.chart_contig_depth_strip": {
+    term: "Depth by chromosome",
+    description:
+      "Each contig drawn to scale and shaded by its depth against a typical contig. Cool means below typical, warm means above, and a neutral bar is ordinary depth. The readings it exists for are a chromosome at half the depth of its neighbours (aneuploidy, or a sex chromosome at the expected dosage), one at zero (a dropout or a reference/sample mismatch), and one at double depth (a duplication).",
+    computed:
+      "From the same per-contig `samtools coverage` pass as the contig table, so the lengths are the BAM header's own rather than a reference file's. The baseline is the length-weighted median depth, deliberately not the mean reported above: one small very deep sequence moves a mean arbitrarily far, and a yeast mitochondrion at 8,157\u00d7 over 86 kb is enough to pull the genome mean from 26\u00d7 to 80\u00d7 and make all sixteen nuclear chromosomes look like a dropout. The shade saturates at half and double the baseline. Bar height is sequence length, not depth.",
+  },
   "ui.chart_depth_histogram": {
     term: "Depth distribution",
     description:

@@ -4618,6 +4618,64 @@ table.software-matrix thead th.software-matrix-corner {
   max-width: 100%;
 }
 
+/* Depth-by-chromosome strip (ContigDepthStrip): ChromosomeStrip's geometry
+   with a diverging shade for depth against the genome mean. Direction is the
+   class, magnitude is the rect's opacity -- so the two hues stay themeable
+   here rather than being computed in the component. */
+.depth-bar rect {
+  fill: var(--text-faint);
+}
+
+.depth-bar.is-low rect {
+  fill: var(--warn);
+}
+
+.depth-bar.is-high rect {
+  fill: var(--accent);
+}
+
+/* "Ordinary depth" and "no mean to compare against" must not look alike: the
+   first is a reading, the second is the absence of one. Neutral keeps the
+   solid body colour; unknown is outlined and hollow. */
+.depth-bar.is-neutral rect {
+  fill: var(--text-faint);
+}
+
+.depth-bar.is-unknown rect {
+  fill: none;
+  stroke: var(--text-faint);
+  stroke-width: 1;
+}
+
+.depth-legend {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  margin-top: 8px;
+  font-size: 10px;
+  color: var(--text-faint);
+  flex-wrap: wrap;
+}
+
+.depth-swatch {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+}
+
+.depth-swatch.is-low {
+  background: var(--warn);
+}
+
+.depth-swatch.is-neutral {
+  background: var(--text-faint);
+}
+
+.depth-swatch.is-high {
+  background: var(--accent);
+}
+
 /* The reason this is a modal at all: the viewer is unusable in a column. */
 .sviewer-modal {
   width: min(1100px, 92vw);
