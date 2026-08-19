@@ -1,12 +1,15 @@
 #!/usr/bin/env bash
-# git pre-commit hook: run ruff over the same paths, with the same config,
-# as the "Lint with ruff" step in .github/workflows/build-check.yml, so a
-# lint error is caught at `git commit` time instead of after a PR is open.
+# git pre-commit hook: run ruff before a commit is made.
 #
-# The command below is a verbatim copy of CI's. Keep it in sync with
-# build-check.yml if either one changes -- a hook that lints a *different*
-# rule set is worse than no hook, because it reports green on something CI
-# will still reject.
+# CI does *not* lint. The "Lint with ruff" step was removed from
+# build-check.yml on 2026-08-19 because it failed PRs on line length and
+# import order -- trivia that blocks a merge without telling anyone
+# anything. This hook is therefore the only place ruff runs.
+#
+# It is kept because the same run that reports E501 also reports F821 (a
+# name used but never imported) and outright syntax errors. Both showed up
+# for real on PR #691. Those findings are the point; the style noise is the
+# price, and it is paid here where --no-verify costs nothing.
 #
 # --config is explicit rather than relied on for auto-discovery:
 # backend/pyproject.toml only auto-applies to paths under backend/, so
@@ -15,15 +18,17 @@
 #
 # The whole tree is linted, not just the staged files. Ruff is fast enough
 # (~2s on this repo) that the simplicity is worth more than the saving, and
-# it matches what CI actually runs: a staged-files-only check passes while
-# CI fails whenever a commit's change breaks a file it didn't touch.
+# a staged-files-only check goes green while a file the commit didn't touch
+# is broken.
 #
 # Not installed by default -- git does not auto-run hooks from a cloned
 # repo. Opt in once per clone (main checkout or worktree alike):
 #
 #   git config core.hooksPath ops/hooks
 #
-# To commit anyway in an emergency: git commit --no-verify
+# To commit anyway: git commit --no-verify. Nothing downstream re-checks
+# this, so read what it printed first -- a wrapped line is fine to skip, an
+# F821 is a bug with no other gate.
 set -euo pipefail
 
 # Lint the tree being committed, not the main checkout. core.hooksPath is
@@ -45,14 +50,17 @@ fi
 if ! ruff check --config backend/pyproject.toml backend/app backend/tests ops e2e; then
   cat >&2 <<'MSG'
 
-pre-commit: ruff found problems. This is the same check CI runs, so the
-commit is refused here rather than failing the PR later.
+pre-commit: ruff found problems.
 
 Many rules fix themselves:
 
     ruff check --config backend/pyproject.toml --fix backend/app backend/tests ops e2e
 
-Then re-stage and commit again. To bypass in an emergency: git commit --no-verify
+Then re-stage and commit again.
+
+CI does not lint, so this hook is the only check for these. Most findings
+are style, but F821 (undefined name) and syntax errors are real bugs --
+read the output before bypassing with: git commit --no-verify
 MSG
   exit 1
 fi

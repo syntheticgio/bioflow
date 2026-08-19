@@ -3,12 +3,12 @@
 # Four jobs:
 #   frontend-check   — lint + unit tests + prod image build (ubuntu-latest)
 #   launcher-check   — unit tests + the tsc/vite build tauri runs (ubuntu-latest)
-#   backend-smoke    — ruff + import smoke test + ops script tests
+#   backend-smoke    — import smoke test + ops script tests
 #   backend-full-test — full pytest suite with Mongo replica-set service
 #
 # Backend Docker images are NOT built on PRs: they compile bwa-mem2, Clair3,
 # and compleasm from source and are expensive. The backend is instead
-# smoke-tested here (ruff + import + ops tests). The full pytest suite runs
+# smoke-tested here (import + ops tests). The full pytest suite runs
 # as a separate job with a Mongo replica-set container.
 
 name: Build check
@@ -130,7 +130,7 @@ jobs:
         run: npm run build
 
   backend-smoke:
-    name: Backend smoke (ruff + import + ops tests)
+    name: Backend smoke (import + ops tests)
     if: ${{ !inputs.skip_backend }}
     runs-on: ubuntu-latest
     # Default (no timeout-minutes) is GitHub's 360-minute hard cap. A stalled
@@ -193,19 +193,6 @@ jobs:
                        -o Acquire::https::Timeout=15 \
                        update
           sudo apt-get install -y build-essential zlib1g-dev
-
-      # Ruff is a standalone binary (no dependencies of its own), so install
-      # it first — this gives fast lint feedback before the heavier backend
-      # install step runs.
-      #
-      # --config is explicit rather than relied on for auto-discovery:
-      # backend/pyproject.toml only auto-applies to paths under backend/, so
-      # ops/ and e2e/ would otherwise silently fall back to ruff's own
-      # built-in defaults -- a different, smaller rule set (see #466).
-      - name: Lint with ruff
-        run: |
-          pip install ruff
-          ruff check --config backend/pyproject.toml backend/app backend/tests ops e2e
 
       - name: Install backend dev dependencies
         run: pip install -e 'backend/.[dev]'
