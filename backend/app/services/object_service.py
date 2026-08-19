@@ -41,6 +41,7 @@ _REPORT_ROOTS = (
     settings.bam_stats_dir,
     settings.vcf_stats_dir,
     settings.annotation_stats_dir,
+    settings.sv_stats_dir,
 )
 
 

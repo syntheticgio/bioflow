@@ -270,6 +270,7 @@ class TestSerialization:
             "bcftools",
             "bgzip",
             "clair3",
+            "sniffles",
             "deepvariant",
             "flye",
             "abyss",
@@ -1144,6 +1145,33 @@ def test_abyss_is_declared_and_documented():
     assert meta.citation
     assert meta.license
     assert meta.usage
+
+
+def test_structural_variant_is_its_own_pipeline_type():
+    """SVs are not a kind of small variant.
+
+    PipelineType drives the tool picker, and VARIANT's label is "a variant
+    caller". Declaring Sniffles under it would offer a user picking an SNV
+    caller a tool that cannot produce SNVs -- the mistake ASSEMBLY_QC's own
+    comment records avoiding.
+    """
+    assert tools.PipelineType.STRUCTURAL_VARIANT.value == "structural_variant"
+    assert tools.PipelineType.STRUCTURAL_VARIANT is not tools.PipelineType.VARIANT
+
+
+def test_sniffles_is_documented_with_a_verified_license():
+    """MIT, read from the LICENSE file.
+
+    GitHub's API reports NOASSERTION for this repo -- its detector is
+    defeated by the unconventional copyright lines -- so the automated
+    answer is wrong here and a recalled one would be a guess.
+    """
+    meta = tools.TOOL_META["sniffles"]
+    assert meta.license == "MIT"
+    assert meta.homepage == "https://github.com/fritzsedlazeck/Sniffles"
+    assert meta.citation_url == "https://doi.org/10.1038/s41587-023-02024-y"
+    assert tools.PipelineType.STRUCTURAL_VARIANT in meta.pipelines
+    assert tools.PipelineType.VARIANT not in meta.pipelines
 
 
 def test_bedtools_probe_reports_missing_binary(monkeypatch):

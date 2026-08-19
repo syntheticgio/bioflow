@@ -56,6 +56,7 @@ from app.pipelines import (
     qc_stats,
     ragtag_runner,
     resource_estimator,
+    sniffles_runner,
     tools,
     trimmomatic_runner,
     variant_runner,
@@ -3612,6 +3613,293 @@ async def _variant_payload(
         ).as_dict()
 
     return payload
+
+
+# --- Structural variant calling ----------------------------------------------
+
+STRUCTURAL_VARIANT_CALLING_MEM_MB = 8192
+
+
+def _sv_dedup_key(*, bam_id, params: dict) -> str:
+    """Identity of a structural variant calling request.
+
+    No caller in the key, unlike `_variant_dedup_key`: Sniffles2 is the only
+    SV caller this pipeline runs, so the params fingerprint alone identifies
+    the request.
+    """
+    return f"call_structural_variants:{bam_id}:{_params_fingerprint(params)}"
+
+
+async def _sv_payload(
+    *,
+    bam: DataObject,
+    reference: DataObject,
+    bai: DataObject,
+    fai: DataObject,
+    params: sniffles_runner.SnifflesParams,
+) -> dict:
+    """The call_structural_variants payload, with every input addressed by
+    digest or path -- mirrors `_variant_payload`."""
+    payload: dict = {
+        "bam_object_id": str(bam.id),
+        "reference_object_id": str(reference.id),
+        "project_id": str(bam.project_id),
+        "bam_name": bam.name,
+        "reference_name": reference.name,
+        "params": params.as_dict(),
+        "output_name": f"{Path(bam.name).stem}.sniffles.vcf.gz",
+    }
+
+    for key, obj in (
+        ("bam", bam),
+        ("reference", reference),
+        ("bai", bai),
+        ("fai", fai),
+    ):
+        digest, path = await _resolve_readable(obj)
+        if digest:
+            payload[f"{key}_sha256"] = digest
+        if path:
+            payload[f"{key}_path"] = path
+
+    return payload
+
+
+async def launch_structural_variant_calling(
+    *,
+    bam_id: PydanticObjectId,
+    params: dict | None,
+    owner: str,
+    resource_override: bool = False,
+):
+    """Queue a Sniffles2 structural variant calling run over an aligned BAM.
+
+    Mirrors `launch_variant_calling`'s structure: requires the `.bai` and the
+    reference `.fai` to already exist rather than building them, and refuses
+    up front rather than letting a doomed job reach the worker. The chemistry
+    gate is the one thing this launcher checks that `launch_variant_calling`
+    does not -- Sniffles2 is a long-read caller, and a short-read BAM would
+    otherwise produce a junk callset with nothing saying so. Checked here, at
+    the one place the API is actually reachable, rather than only on the
+    suggestion card, which is advisory and skippable.
+    """
+    from app.queue import queue
+    from app.services import object_service
+
+    refuse_if_over_budget(
+        declared_mb=STRUCTURAL_VARIANT_CALLING_MEM_MB,
+        budget_mb=await current_admission_budget_mb(),
+        resource_override=resource_override,
+    )
+
+    bam = await object_service.get_object(bam_id, owner=owner)
+    _check_variant_callable(bam)
+
+    chemistry = await read_chemistry_for_alignment(bam)
+    if not sniffles_runner.sv_calling_allowed_for(
+        chemistry or align_runner.ReadChemistry.UNKNOWN
+    ):
+        raise ValidationError(
+            f"{bam.name!r} does not look like long reads "
+            f"(chemistry={chemistry.value if chemistry else 'unknown'}). "
+            f"Structural variant calling needs a long-read alignment.",
+            details={
+                "bam_id": str(bam.id),
+                "chemistry": chemistry.value if chemistry else None,
+            },
+        )
+
+    reference = await _resolve_variant_reference(bam, None, owner=owner)
+
+    bai = await _sidecar_of_role(bam, SidecarRole.BAI)
+    if bai is None:
+        raise ValidationError(
+            f"{bam.name!r} has no BAM index (.bai). Index it first.",
+            details={"bam_id": str(bam.id), "needs": "index_bam"},
+        )
+
+    fai = await _sidecar_of_role(reference, SidecarRole.FAI)
+    if fai is None:
+        raise ValidationError(
+            f"Reference {reference.name!r} has no FASTA index (.fai). "
+            f"Build its index first.",
+            details={"reference_id": str(reference.id), "needs": "build_index"},
+        )
+
+    tools.require(tools.sniffles())
+
+    merged = sniffles_runner.SnifflesParams.from_dict(params)
+
+    payload = await _sv_payload(
+        bam=bam, reference=reference, bai=bai, fai=fai, params=merged
+    )
+
+    run = await run_service.create_run(
+        kind=RunKind.STRUCTURAL_VARIANT_CALLING,
+        project_id=bam.project_id,
+        label=f"{bam.name} → structural variants (sniffles2)",
+        inputs=[
+            RunInput(object_id=bam.id, name=bam.name, role=RunInputRole.READS),
+            RunInput(
+                object_id=reference.id,
+                name=reference.name,
+                role=RunInputRole.REFERENCE,
+            ),
+        ],
+        params=merged.as_dict(),
+        owner=owner,
+        tool="sniffles2",
+    )
+
+    job = await queue.enqueue(
+        "call_structural_variants",
+        owner=owner,
+        payload=payload,
+        job_class=JobClass.COMPUTE,
+        resources=JobResources(
+            cpu=merged.threads,
+            mem_mb=STRUCTURAL_VARIANT_CALLING_MEM_MB,
+            io=IoClass.HEAVY,
+        ),
+        max_attempts=2,
+        dedup_key=_sv_dedup_key(bam_id=bam.id, params=merged.as_dict()),
+        project_id=bam.project_id,
+        object_id=bam.id,
+    )
+    if job is None:
+        await run_service.discard_run(run.id, owner=run.owner)
+        raise ConflictError(
+            "An identical structural variant calling run is already queued "
+            "or running",
+            details={"bam_id": str(bam.id)},
+        )
+
+    await run_service.link_job(run.id, job.id, RunJobRole.CALL_STRUCTURAL_VARIANTS)
+    log.info(
+        "structural_variant_calling_launched",
+        job_id=str(job.id),
+        run_id=str(run.id),
+        bam_id=str(bam.id),
+    )
+    return job
+
+
+def _sv_merge_dedup_key(*, snf_ids: list[PydanticObjectId]) -> str:
+    sorted_ids = sorted(str(i) for i in snf_ids)
+    return f"merge_structural_variants:{','.join(sorted_ids)}"
+
+
+async def launch_merge_structural_variants(
+    *,
+    snf_object_ids: list[PydanticObjectId],
+    owner: str,
+    output_name: str | None = None,
+    resource_override: bool = False,
+):
+    """Queue a Sniffles2 --combine run across N single-sample .snf callsets."""
+    from app.queue import queue
+    from app.services import object_service
+
+    if not snf_object_ids or len(snf_object_ids) < 2:
+        raise ValidationError("At least two .snf callsets are required for merging")
+
+    refuse_if_over_budget(
+        declared_mb=STRUCTURAL_VARIANT_CALLING_MEM_MB,
+        budget_mb=await current_admission_budget_mb(),
+        resource_override=resource_override,
+    )
+
+    snf_objects: list[DataObject] = []
+    for sid in snf_object_ids:
+        obj = await object_service.get_object(sid, owner=owner)
+        if obj.sidecar_role != SidecarRole.SNF:
+            raise ValidationError(f"{obj.name!r} is not an SNF sidecar file")
+        snf_objects.append(obj)
+
+    project_id = snf_objects[0].project_id
+    for obj in snf_objects[1:]:
+        if obj.project_id != project_id:
+            raise ValidationError("All .snf callsets must belong to the same project")
+
+    references: dict[str, tuple[str, PydanticObjectId]] = {}
+    for obj in snf_objects:
+        parent_vcf = await DataObject.get(obj.sidecar_of) if obj.sidecar_of else None
+        ref_obj = None
+        if parent_vcf and parent_vcf.derived_from:
+            for p_id in parent_vcf.derived_from:
+                p = await DataObject.get(p_id)
+                if p and p.role == ObjectRole.REFERENCE:
+                    ref_obj = p
+                    break
+        if ref_obj is not None:
+            references[obj.name] = (ref_obj.name, ref_obj.id)
+
+    ref_ids = {r[1] for r in references.values()}
+    if len(ref_ids) > 1:
+        ref_details = ", ".join(f"'{name}': reference '{ref[0]}'" for name, ref in references.items())
+        raise ValidationError(
+            f"Cannot merge SV callsets across differing reference assemblies: {ref_details}.",
+            details={"references": {name: str(ref[1]) for name, ref in references.items()}},
+        )
+
+    ref_id = next(iter(ref_ids)) if ref_ids else None
+
+    tools.require(tools.sniffles())
+
+    snf_blobs: list[str] = []
+    snf_names: list[str] = []
+    for obj in snf_objects:
+        _, path = await _resolve_readable(obj)
+        if path:
+            snf_blobs.append(path)
+            snf_names.append(obj.name)
+
+    payload = {
+        "snf_object_ids": [str(i) for i in snf_object_ids],
+        "reference_object_id": str(ref_id) if ref_id else None,
+        "project_id": str(project_id),
+        "snf_blobs": snf_blobs,
+        "snf_names": snf_names,
+        "output_name": output_name or "joint_calls.sniffles.vcf.gz",
+    }
+
+    run = await run_service.create_run(
+        kind=RunKind.STRUCTURAL_VARIANT_CALLING,
+        project_id=project_id,
+        label=f"Merge {len(snf_objects)} SV callsets",
+        inputs=[
+            RunInput(object_id=obj.id, name=obj.name, role=RunInputRole.VARIANTS)
+            for obj in snf_objects
+        ],
+        params={},
+        owner=owner,
+        tool="sniffles2",
+    )
+
+    job = await queue.enqueue(
+        "merge_structural_variants",
+        owner=owner,
+        payload=payload,
+        job_class=JobClass.COMPUTE,
+        resources=JobResources(
+            cpu=4, mem_mb=STRUCTURAL_VARIANT_CALLING_MEM_MB, io=IoClass.HEAVY
+        ),
+        max_attempts=2,
+        dedup_key=_sv_merge_dedup_key(snf_ids=snf_object_ids),
+        project_id=project_id,
+        object_id=snf_objects[0].id,
+        resource_override=resource_override,
+    )
+    if job is None:
+        await run_service.discard_run(run.id, owner=run.owner)
+        raise ConflictError(
+            "An identical SV merge run is already queued or running",
+            details={"snf_ids": [str(i) for i in snf_object_ids]},
+        )
+
+    await run_service.link_job(run.id, job.id, RunJobRole.CALL_VARIANTS)
+    log.info("merge_structural_variants_launched", job_id=str(job.id), count=len(snf_objects))
+    return job
 
 
 # --- Consequence annotation --------------------------------------------------

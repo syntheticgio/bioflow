@@ -26,6 +26,11 @@ class RunKind(StrEnum):
     TRIM = "trim"
     SRA_DOWNLOAD = "sra_download"
     VARIANT_CALLING = "variant_calling"
+    # Structural variants. Separate from VARIANT_CALLING because RunKind is a
+    # display and grouping vocabulary, and "called structural variants" is
+    # not the same line in an activity view as "called variants" -- the same
+    # reasoning that separates ASSEMBLY_DOWNLOAD from SRA_DOWNLOAD.
+    STRUCTURAL_VARIANT_CALLING = "structural_variant_calling"
     # Separate from SRA_DOWNLOAD because RunKind is a display and grouping
     # vocabulary, and "downloaded a genome" reads differently from "downloaded
     # sequencing runs" in the activity view.
@@ -107,6 +112,8 @@ class RunInputRole(StrEnum):
     # An additional read set's mate, concatenated into the alignment's R2
     # stream -- to EXTRA_READS what MATE is to READS.
     EXTRA_MATE = "extra_mate"
+    # A single-sample variant callset (.vcf or .snf) going into a joint callset merge.
+    VARIANTS = "variants"
 
 
 class RunInput(BaseModel):
@@ -180,6 +187,11 @@ class RunJobRole(StrEnum):
     DOWNLOAD = "download"
     QC = "qc"
     CALL_VARIANTS = "call_variants"
+    # Structural variants. Named for the action, same reasoning as
+    # CALL_VARIANTS beside it -- separate because it links a different job
+    # kind (call_structural_variants) to its RunKind.STRUCTURAL_VARIANT_CALLING
+    # run, not because the concept differs.
+    CALL_STRUCTURAL_VARIANTS = "call_structural_variants"
     QUANTIFY = "quantify"
     # The differential expression test itself. Not in OPTIONAL_ROLES below:
     # it is the whole point of its run, and a run reporting anything but

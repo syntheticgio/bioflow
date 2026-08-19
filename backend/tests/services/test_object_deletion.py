@@ -24,10 +24,22 @@ def report_dirs():
         settings.bam_stats_dir,
         settings.vcf_stats_dir,
         settings.annotation_stats_dir,
+        settings.sv_stats_dir,
     )
 
 
 class TestReportDirCleanup:
+    def test_report_dirs_matches_object_services_report_roots(self):
+        """A settings dir added to this test's own `report_dirs()` but missed
+        in `object_service._REPORT_ROOTS` (or vice versa) would pass every
+        other test here while leaking that root's directories on delete and
+        never copying them on share -- exactly the gap `sv_stats_dir` had
+        until this test was added. Compared as sets since ordering is not a
+        contract either tuple makes.
+        """
+        assert set(report_dirs()) == set(object_service._REPORT_ROOTS)
+
+
     async def test_removes_every_report_dir_for_the_deleted_object(self):
         from tests.services.helpers import make_object
 

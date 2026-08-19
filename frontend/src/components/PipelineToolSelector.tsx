@@ -68,6 +68,7 @@ const PIPELINE_LABEL: Record<PipelineType, string> = {
   utility: "a tool",
   download: "a download tool",
   variant: "a variant caller",
+  structural_variant: "a structural variant caller",
   expression: "an expression tool",
   assemble: "an assembler",
   reference_assembly: "a reference assembly tool",

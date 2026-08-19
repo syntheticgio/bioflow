@@ -7,6 +7,7 @@ export type PipelineType =
   | "utility"
   | "download"
   | "variant"
+  | "structural_variant"
   | "expression"
   | "assemble"
   | "reference_assembly"

@@ -29,6 +29,7 @@ from app.pipelines import (
     counts_runner,
     de_runner,
     lineage_inference,
+    sv_db,
     tile_scanner,
     tools,
     variant_db,
@@ -2102,6 +2103,126 @@ async def launch_variant_calling(body: VariantRequest, owner: OwnerDep) -> JobOu
         resource_override=body.resource_override,
     )
     return JobOut.of(job)
+
+
+class StructuralVariantRequest(BaseModel):
+    # Keyed on bam_id, matching /pipelines/variants -- both take an
+    # alignment rather than a generic object.
+    bam_id: PydanticObjectId
+    params: dict = {}
+    # "Launch anyway" from the refusal card. Skips the enqueue-time BLOCK and
+    # persists on the job, where claim.lua admits it only as sole occupant.
+    resource_override: bool = False
+
+
+class MergeStructuralVariantsRequest(BaseModel):
+    snf_object_ids: list[PydanticObjectId]
+    output_name: str | None = None
+    resource_override: bool = False
+
+
+@router.post(
+    "/structural_variants", response_model=JobOut, status_code=status.HTTP_201_CREATED
+)
+async def launch_structural_variant_calling(
+    body: StructuralVariantRequest, owner: OwnerDep
+) -> JobOut:
+    """Queue a Sniffles2 structural variant calling run over an aligned,
+    indexed long-read BAM."""
+    job = await pipeline_service.launch_structural_variant_calling(
+        bam_id=body.bam_id,
+        params=body.params,
+        owner=owner,
+        resource_override=body.resource_override,
+    )
+    return JobOut.of(job)
+
+
+@router.post(
+    "/merge_structural_variants", response_model=JobOut, status_code=status.HTTP_201_CREATED
+)
+async def launch_merge_structural_variants(
+    body: MergeStructuralVariantsRequest, owner: OwnerDep
+) -> JobOut:
+    """Queue a Sniffles2 --combine run to merge per-sample .snf callsets into a joint VCF."""
+    job = await pipeline_service.launch_merge_structural_variants(
+        snf_object_ids=body.snf_object_ids,
+        owner=owner,
+        output_name=body.output_name,
+        resource_override=body.resource_override,
+    )
+    return JobOut.of(job)
+
+
+@router.get("/structural_variants/svs/{object_id}")
+async def get_structural_variants(
+    object_id: PydanticObjectId,
+    owner: OwnerDep,
+    offset: int = 0,
+    limit: int = 100,
+    contig: str | None = None,
+    pos_min: int | None = None,
+    pos_max: int | None = None,
+    svtype: str | None = None,
+    min_length: int | None = None,
+    max_length: int | None = None,
+    filter_value: str | None = None,
+    min_qual: float | None = None,
+    skip_count: bool = False,
+) -> dict:
+    """A page of the SV table, filtered.
+
+    Mirrors `get_vcf_stats_variants`: `object_id` is the SV VCF's own id, and
+    the database it reads is keyed the same way `vcf_stats_dir` keys its
+    variants.db -- `sv_stats_dir/<object_id>/sv.db` -- not by the source BAM.
+    `total` is the count *after* filtering, and is omitted when `skip_count`
+    is set so a page turn need not re-run the count query.
+    """
+    await object_service.get_object(object_id, owner=owner)
+
+    db_path = settings.sv_stats_dir / str(object_id) / "sv.db"
+    if not db_path.exists():
+        raise NotFoundError(
+            "No computed results for this file. Compute results first."
+        )
+
+    filters = sv_db.SvFilters(
+        contig=contig,
+        pos_min=pos_min,
+        pos_max=pos_max,
+        svtype=svtype,
+        min_length=min_length,
+        max_length=max_length,
+        filter_value=filter_value,
+        min_qual=min_qual,
+    )
+
+    rows = sv_db.query_svs(db_path, filters, limit=limit, offset=offset)
+    total = None if skip_count else sv_db.count_svs(db_path, filters)
+    return {"total": total, "rows": rows}
+
+
+@router.get("/structural_variants/summary/{object_id}")
+async def get_structural_variant_summary(
+    object_id: PydanticObjectId, owner: OwnerDep
+) -> dict:
+    """The SV type breakdown and the log-binned length histogram for one SV
+    VCF's callset -- the two summary views the results page charts, computed
+    over the whole callset rather than the current page of filtered rows."""
+    await object_service.get_object(object_id, owner=owner)
+
+    db_path = settings.sv_stats_dir / str(object_id) / "sv.db"
+    if not db_path.exists():
+        raise NotFoundError(
+            "No computed results for this file. Compute results first."
+        )
+
+    return {
+        "type_counts": sv_db.type_counts(db_path),
+        "length_histogram": sv_db.length_histogram(db_path),
+        "samples": sv_db.sample_names(db_path),
+    }
+
 
 
 class QuantifyRequest(BaseModel):

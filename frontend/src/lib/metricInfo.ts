@@ -692,6 +692,25 @@ export const METRIC_INFO: Record<string, MetricInfo> = {
       "SNPs and indels here are classified by site the same way bcftools classifies them, so these columns sum to the headline row above rather than drifting from it on files with multiallelic sites. A site whose alleles are all the same length but longer than one base is an MNP and appears only in the total.",
   },
 
+  // ---- Results tab: structural variants (Sniffles2) -----------------------
+  "ui.sv_total": {
+    term: "Structural variants",
+    description:
+      "How many SV records the callset holds, across every SVTYPE. A breakend (BND) counts once here even though it is reported as two joined records in the VCF.",
+  },
+  "ui.sv_type_count": {
+    term: "SV type breakdown",
+    description:
+      "How many calls Sniffles2 assigned to each structural variant type — deletion, insertion, duplication, inversion, or breakend. A callset dominated by one type against a distant reference is more often an alignment artifact than biology.",
+  },
+  "ui.chart_sv_length": {
+    term: "SV length distribution",
+    description:
+      "How many structural variants fall in each length bin. Bins are log-scaled because SV sizes span roughly 50 bp to several megabases — a linear axis would put nearly every call in the first bar. Breakends are excluded: they join two loci and span neither, so they have no length to bin.",
+    computed:
+      "Six fixed bins (50 bp, 100 bp, 1 kb, 10 kb, 100 kb, 1 Mb+), every one shown even when empty, so the axis stays stable across callsets rather than reshaping itself per run.",
+  },
+
   // ---- Results tab: differential expression --------------------------------
   "ui.de_contrast": {
     term: "Contrast",

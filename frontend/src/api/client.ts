@@ -103,6 +103,9 @@ import type {
   VariantRequest,
   VariantsPage,
   VariantStructure,
+  SvQuery,
+  SvsPage,
+  SvSummary,
   DerivedGraph,
   MetricsStats,
   RecentRuns,
@@ -1234,6 +1237,40 @@ export const api = {
   /** URL for downloading the complete variants TSV. */
   vcfStatsDownloadUrl: (objectId: string, reportPath: string) =>
     `${BASE}/pipelines/vcfstats/report/${objectId}/${reportPath}?${profileQuery()}`,
+
+  /** A page of the structural variant table. Filters are applied
+   *  server-side against the SQLite index built alongside the VCF, the same
+   *  shape as vcfStatsVariants -- see get_structural_variants. */
+  structuralVariants: (objectId: string, q: SvQuery) => {
+    const p = new URLSearchParams({
+      offset: String(q.offset),
+      limit: String(q.limit),
+    });
+    if (q.contig) p.set("contig", q.contig);
+    if (q.posMin != null) p.set("pos_min", String(q.posMin));
+    if (q.posMax != null) p.set("pos_max", String(q.posMax));
+    if (q.svtype) p.set("svtype", q.svtype);
+    if (q.minLength != null) p.set("min_length", String(q.minLength));
+    if (q.maxLength != null) p.set("max_length", String(q.maxLength));
+    if (q.filterValue) p.set("filter_value", q.filterValue);
+    if (q.minQual != null) p.set("min_qual", String(q.minQual));
+    if (q.skipCount) p.set("skip_count", "true");
+    return request<SvsPage>(
+      `/pipelines/structural_variants/svs/${objectId}?${p.toString()}`,
+    );
+  },
+
+  /** The SV type breakdown and the log-binned length histogram for one SV
+   *  VCF's whole callset, not just the current filtered page. */
+  structuralVariantSummary: (objectId: string) =>
+    request<SvSummary>(`/pipelines/structural_variants/summary/${objectId}`),
+
+  /** Merge per-sample .snf callsets into a joint SV callset. */
+  mergeStructuralVariants: (body: { snf_object_ids: string[]; output_name?: string }) =>
+    request<JobOut>("/pipelines/merge_structural_variants", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
 
   /** One page of a protein FASTA's records, optionally filtered.
    *

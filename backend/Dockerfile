@@ -25,6 +25,22 @@ RUN chmod +x /srv/scripts/install-winnowmap.sh \
     && WINNOWMAP_VERSION="${WINNOWMAP_VERSION}" \
        /srv/scripts/install-winnowmap.sh
 
+# edlib is a required Sniffles dependency and publishes no linux-aarch64
+# wheel for any Python version -- only x86-64 wheels and an sdist (verified
+# 2026-08-18 against PyPI). The final image carries no compiler, so pip would
+# fall back to that sdist and die with `command 'gcc' failed`, exactly as
+# recorded at line 336 for another package and at line 59 for cutadapt.
+#
+# Building the wheel here keeps the toolchain in a stage that is discarded
+# and leaves both architectures running identical code. This fails *only* on
+# arm64, so a bare `pip install sniffles` passes x86-64 CI and breaks on an
+# Apple Silicon machine.
+FROM python:3.12-slim AS edlib-build
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends build-essential \
+    && rm -rf /var/lib/apt/lists/*
+RUN pip wheel --no-deps --wheel-dir /wheels edlib==1.3.9.post1
+
 FROM python:3.12-slim
 
 ENV PYTHONUNBUFFERED=1 \
@@ -432,6 +448,14 @@ RUN pip install --no-cache-dir pydeseq2==0.5.4
 # image -- networkx, numpy and pysam already arrived via NanoPlot/PyDESeq2
 # and pysam's own top-level dependency.
 RUN pip install --no-cache-dir ragtag==2.1.0
+
+# Sniffles2, the long-read structural variant caller. Its edlib dependency
+# comes from the wheel built in the edlib-build stage above -- see there for
+# why. --no-index is deliberately absent: the other dependencies (pysam,
+# pyspoa, numpy, psutil) all publish arm64 wheels and come from PyPI.
+COPY --from=edlib-build /wheels /tmp/wheels
+RUN pip install --no-cache-dir --find-links /tmp/wheels sniffles==2.8.0 \
+    && rm -rf /tmp/wheels
 
 # compleasm, the assembly completeness tool -- BUSCO's job, ~10-20x faster,
 # and it recovers BUSCOs the metaeuk step in Debian's own busco package

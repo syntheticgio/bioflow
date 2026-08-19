@@ -197,6 +197,8 @@ class SidecarRole(StrEnum):
     BAI = "bai"
     # The tabix index beside a bgzipped VCF -- to a VCF what BAI is to a BAM.
     TBI = "tbi"
+    # Sniffles2 binary callset sidecar used for multi-sample merging.
+    SNF = "snf"
     # A meryl k-mer database built from a read set, cached on the read
     # object so a second assembly from the same reads does not rebuild it.
     # Merqury's expensive artifact: the assembly-side database is cheap and

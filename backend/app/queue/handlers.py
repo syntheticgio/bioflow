@@ -943,6 +943,7 @@ async def reap_report_dirs(ctx: JobContext) -> dict:
         settings.bam_stats_dir,
         settings.vcf_stats_dir,
         settings.annotation_stats_dir,
+        settings.sv_stats_dir,
     ):
         if not root.exists():
             continue
@@ -1046,6 +1047,7 @@ from app.queue import (  # noqa: E402, F401
     reference_assembly_handlers,
     sra_handlers,
     summary_handlers,
+    sv_handlers,
     tool_handlers,
     transcript_qc_handlers,
     uniprot_handlers,
