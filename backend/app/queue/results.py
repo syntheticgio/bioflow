@@ -2102,6 +2102,41 @@ async def _apply_analyze_gc_tracks(result: dict, *, owner: str) -> None:
     )
 
 
+async def _apply_analyze_meryl_tracks(result: dict, *, owner: str) -> None:
+    """Record meryl k-mer spectra and repeat-density facts on the assembly.
+
+    Near-copy of ``_apply_analyze_gc_tracks``: read-only, no files to
+    ingest. Missing from ``_APPLIERS`` until #612 — the handler's facts
+    landed on ``Job.result`` and went nowhere, the exact silent-skip shape
+    CLAUDE.md documents from the STAR ``build_index`` failure.
+    """
+    object_id = result.get("object_id")
+    facts = result.get("facts") or {}
+    if not object_id or not facts:
+        return
+
+    obj = await DataObject.get(PydanticObjectId(object_id))
+    if obj is None:
+        log.warning("meryl_tracks_object_missing", object_id=object_id)
+        return
+
+    await obj.set(
+        {
+            DataObject.facts: {**obj.facts, **facts},
+            DataObject.updated_at: datetime.now(UTC),
+        }
+    )
+
+    density = facts.get("repeat_density") or {}
+    log.info(
+        "meryl_tracks_applied",
+        object_id=object_id,
+        spectra=("kmer_spectra" in facts),
+        contigs=len(density.get("contigs") or []),
+        partial=density.get("repeat_density_partial"),
+    )
+
+
 async def _apply_analyze_synteny(result: dict, *, owner: str) -> None:
     """Record minimap2's synteny alignment on the draft assembly it
     described.
@@ -2996,6 +3031,7 @@ _APPLIERS = {
     "assess_completeness": _apply_assess_completeness,
     "assess_misassemblies": _apply_assess_misassemblies,
     "analyze_gc_tracks": _apply_analyze_gc_tracks,
+    "analyze_meryl_tracks": _apply_analyze_meryl_tracks,
     "analyze_synteny": _apply_analyze_synteny,
     "annotate_genome": _apply_annotate_genome,
     "assess_assembly_errors": _apply_assess_assembly_errors,
