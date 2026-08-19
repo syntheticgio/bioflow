@@ -9,7 +9,6 @@ up quietly asserting something weaker than its neighbours.
 
 import itertools
 
-import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 

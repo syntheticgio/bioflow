@@ -10,10 +10,10 @@ those conflicts and drops the stale index first.
 import pytest
 from beanie import init_beanie
 from pymongo import ASCENDING, AsyncMongoClient, IndexModel
+from tests._mongo_isolation import direct_mongo_url, worker_db_name
 
 from app.config import settings
 from app.db.index_reconcile import _index_def, reconcile_indexes
-from tests._mongo_isolation import direct_mongo_url, worker_db_name
 
 
 @pytest.fixture
