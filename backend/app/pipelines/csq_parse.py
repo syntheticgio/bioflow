@@ -40,6 +40,7 @@ _SEVERITY = (
     "3_prime_utr",
     "non_coding",
     "intron",
+    "structural_variant_overlap",
     "intergenic",
 )
 _RANK = {name: i for i, name in enumerate(_SEVERITY)}
@@ -132,9 +133,29 @@ def parse_bcsq(value: str | None) -> Consequence | None:
     if not text or text == ".":
         return None
 
+    raw_items = [item.strip() for item in text.split(",") if item.strip()]
+    items: list[str] = []
+    current_buf: list[str] = []
+
+    for raw in raw_items:
+        if raw.startswith("@"):
+            if current_buf:
+                items.append(",".join(current_buf))
+                current_buf = []
+            items.append(raw)
+            continue
+
+        current_buf.append(raw)
+        candidate = ",".join(current_buf)
+        if len(candidate.split("|")) >= _MIN_FIELDS:
+            items.append(candidate)
+            current_buf = []
+
+    if current_buf:
+        items.append(",".join(current_buf))
+
     parsed: list[Consequence] = []
-    for item in text.split(","):
-        item = item.strip()
+    for item in items:
         # "@1234" points at another record sharing this haplotype. Skipped per
         # item rather than rejecting the whole value -- a pointer can sit in a
         # list beside a real consequence, and dropping the record would lose a
