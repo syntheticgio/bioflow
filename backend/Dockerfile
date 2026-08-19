@@ -292,6 +292,29 @@ RUN set -e \
     && chmod +x /usr/local/bin/datasets \
     && datasets --version
 
+# --- seqkit -------------------------------------------------------------
+#
+# Single static Go binary, same shape as the NCBI datasets CLI above --
+# only the URL and archive layout differ. Used by the planned region/
+# sequence extraction feature (#632). Version pinned; seqkit does not
+# publish sha256 checksums, only MD5 sidecar files per release asset, so
+# this verifies with md5sum rather than the sha256sum this file uses
+# elsewhere.
+ARG SEQKIT_VERSION=2.13.0
+RUN set -e \
+    && case "$TARGETARCH" in \
+         arm64) SEQKIT_ARCH=linux_arm64; SEQKIT_MD5=77aaa9f03792553e993e96157421e87f ;; \
+         *)     SEQKIT_ARCH=linux_amd64; SEQKIT_MD5=872368c1e24706dbd1f931d26b38d7d1 ;; \
+       esac \
+    && curl -fsSL \
+         "https://github.com/shenwei356/seqkit/releases/download/v${SEQKIT_VERSION}/seqkit_${SEQKIT_ARCH}.tar.gz" \
+         -o /tmp/seqkit.tar.gz \
+    && echo "${SEQKIT_MD5}  /tmp/seqkit.tar.gz" | md5sum -c - \
+    && tar -xzf /tmp/seqkit.tar.gz -C /usr/local/bin seqkit \
+    && chmod +x /usr/local/bin/seqkit \
+    && rm /tmp/seqkit.tar.gz \
+    && seqkit version
+
 # --- Docker client ----------------------------------------------------------
 #
 # For starting *sibling* containers, not for running a daemon here. DeepVariant
