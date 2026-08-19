@@ -835,6 +835,31 @@ class TestStructuralVariantsCard:
         assert card.launch["endpoint"] == "/pipelines/structural_variants"
         assert card.launch["body"]["bam_id"] == "bam456"
 
+    def test_clr_is_deliberately_allowed_for_structural_variants(self):
+        """The opposite asymmetry from `TestVariantsCard`'s CLR tests.
+
+        `variant_runner.caller_for_chemistry` refuses CLR for small-variant
+        calling because Clair3's model needs per-base accuracy CLR does not
+        have. Sniffles2 is deliberately different: it resolves breakpoints
+        from alignment structure -- split reads and within-read gaps -- which
+        tolerates CLR's high per-base error rate, and CLR reads are long,
+        which is exactly the property SV detection needs. See
+        `sniffles_runner.sv_calling_allowed_for`'s docstring for the same
+        reasoning. This is a standalone, named assertion rather than only a
+        parametrize case so that if `_LONG_READ` in `sniffles_runner.py` ever
+        silently dropped CLR (e.g. someone "harmonising" it with
+        `caller_for_chemistry`'s refusal), a test fails *by name* instead of
+        a parametrized count quietly going from 4 to 3.
+        """
+        with patch(
+            "app.services.suggestion_service.tools.sniffles",
+            return_value=_FakeTool(True, name="sniffles"),
+        ):
+            card = build_structural_variants_card(
+                _bam(), align_runner.ReadChemistry.CLR
+            )
+        assert card.status is CardStatus.AVAILABLE
+
     def test_card_is_unavailable_when_the_probe_fails(self):
         """The load-bearing direction.
 
