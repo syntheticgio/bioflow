@@ -111,9 +111,22 @@ IDs are permanent; do not reuse.
 
 ### Classification node
 
-- **K2-C1.** A `classify_reads` node type: QC-family, one FASTQ reads
-  input port (any role), no output object, with a run record
-  (`RunKind`/`RunJobRole` members following the existing QC jobs).
+- **K2-C1 (amended during implementation).** `classify_reads` is
+  facts-only, with no `PipelineRun` and no `NodeTypeSpec` entry in
+  `NODE_TYPES` -- the original text below called for a QC-family node
+  type with a run record, but the repo's settled convention for
+  facts-only QC launchers (`launch_annotate_genome`, `launch_gc_tracks`,
+  issue #371) is `EXCLUDED_LAUNCHES` classification instead, with the
+  suggestion card as the sole launch surface. `pipeline_service.py`'s
+  `launch_classify_reads` is listed in `node_types.py`'s
+  `EXCLUDED_LAUNCHES`, alongside `launch_annotate_genome`, rather than
+  registered in `NODE_TYPES`. `download_kraken_db` keeps its original
+  `NodeTypeSpec`, mirroring `download_lineage` -- only the
+  classification launcher's shape changed.
+  <br>Original text, preserved for the record: "A `classify_reads` node
+  type: QC-family, one FASTQ reads input port (any role), no output
+  object, with a run record (`RunKind`/`RunJobRole` members following
+  the existing QC jobs)."
 - **K2-C2.** `pipeline_service.launch_classify_reads(object_id, db_key,
   owner)` requires both tool probes; when `db_present(db_key)` is
   false it enqueues the download and chains the classify job behind it
@@ -122,9 +135,12 @@ IDs are permanent; do not reuse.
   registry entry's `mem_mb`, never from the fitted memory model: the
   load size is known a priori, and a model fit from unrelated jobs
   would under-provision exactly into an OOM.
-- **K2-C4.** Both node types are registered in `NODE_TYPES` and the
-  full `TestExhaustiveness` class passes (both partition tests, per
-  the #355/#366 record).
+- **K2-C4 (amended during implementation).** `download_kraken_db` is
+  registered in `NODE_TYPES` and the full `TestExhaustiveness` class
+  passes (both partition tests, per the #355/#366 record) --
+  `classify_reads` is verified by the same test class's
+  `EXCLUDED_LAUNCHES`-side assertions instead, per the K2-C1 amendment
+  above. Only one node type exists for this feature, not two.
 
 ### Runner
 
