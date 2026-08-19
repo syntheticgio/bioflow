@@ -2640,6 +2640,7 @@ TOOL_META: dict[str, ToolMeta] = {
             "with a note when Bracken cannot run."
         ),
         delivery=Delivery.BUNDLED,
+    ),
     "snpeff": ToolMeta(
         pipelines=(PipelineType.ANNOTATION,),
         one_liner="Richer variant consequence annotation with impact scoring",
