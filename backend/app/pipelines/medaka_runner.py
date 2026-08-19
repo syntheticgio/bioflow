@@ -141,6 +141,8 @@ def _read_fasta(path: Path) -> dict[str, str]:
                 if name is not None:
                     contigs[name] = "".join(buf)
                 parts = stripped[1:].split()
+                # A bare > yields the empty-string key, which never matches
+                # and lands in unmatched rather than raising.
                 name = parts[0] if parts else ""
                 buf = []
             elif name is not None:
@@ -162,12 +164,13 @@ def count_changed_positions(draft: Path, consensus: Path) -> dict:
     **Alignment-free by design.** An aligner in the fact-gathering path
     would be a second failure surface for a number that exists to make
     failures visible. Medaka preserves contig identity and order, so a
-    name-keyed comparison is well-defined. Where a contig's length changed,
-    the substitutions over the shared prefix are still counted and the
-    difference is reported as `polish_length_delta` rather than being
-    forced into a substitution count that would be meaningless -- a
-    one-base insertion would otherwise read as every downstream base having
-    changed.
+    name-keyed comparison is well-defined. Without alignment, `polish_changed_positions`
+    is a positional-mismatch count: exact when contigs have identical lengths,
+    but an upper bound when `polish_length_delta` is nonzero. An indel
+    anywhere but the tail shifts every downstream base out of register,
+    so the position count alone cannot distinguish a single insertion from
+    many substitutions. Consumers of this data read `polish_frameshift_suspected`
+    to know whether the position count is a tally or a bound.
 
     A contig in the draft with no counterpart in the consensus is counted
     in `polish_contigs_unmatched` rather than raising. Degrading to a
@@ -183,6 +186,7 @@ def count_changed_positions(draft: Path, consensus: Path) -> dict:
     delta = 0
     compared = 0
     unmatched = 0
+    frameshift_suspected = False
 
     for name, draft_seq in draft_contigs.items():
         polished_seq = consensus_contigs.get(name)
@@ -190,14 +194,20 @@ def count_changed_positions(draft: Path, consensus: Path) -> dict:
             unmatched += 1
             continue
         compared += 1
-        delta += len(polished_seq) - len(draft_seq)
+        seq_delta = len(polished_seq) - len(draft_seq)
+        delta += seq_delta
+        if seq_delta != 0:
+            frameshift_suspected = True
         changed += sum(
             1 for a, b in zip(draft_seq, polished_seq, strict=False) if a != b
         )
+    # A contig present only in the consensus is not counted anywhere. This
+    # is acceptable because Medaka emits one consensus contig per draft contig.
 
     return {
         "polish_changed_positions": changed,
         "polish_length_delta": delta,
         "polish_contigs_compared": compared,
         "polish_contigs_unmatched": unmatched,
+        "polish_frameshift_suspected": frameshift_suspected,
     }

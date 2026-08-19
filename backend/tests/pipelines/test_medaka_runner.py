@@ -189,6 +189,7 @@ class TestChangedPositions:
         facts = runner.count_changed_positions(draft, cons)
 
         assert facts["polish_length_delta"] == 3
+        assert facts["polish_changed_positions"] == 0
 
     def test_contig_missing_from_consensus_does_not_raise(self, tmp_path):
         """Degrade to a visible count, never to an exception.
@@ -230,3 +231,63 @@ class TestChangedPositions:
 
         assert facts["polish_contigs_compared"] == 1
         assert facts["polish_contigs_unmatched"] == 0
+
+    def test_soft_masking_is_not_counted_as_change(self, tmp_path):
+        """Soft-masking (lowercase) is a claim about repeats, not a polish.
+
+        Uppercasing before comparison ensures a draft and consensus that
+        differ only in case are recognized as identical.
+        """
+        draft = _write_fasta(tmp_path / "d.fasta", [("ctg1", "acgtACGT")])
+        cons = _write_fasta(tmp_path / "c.fasta", [("ctg1", "ACGTACGT")])
+
+        facts = runner.count_changed_positions(draft, cons)
+
+        assert facts["polish_changed_positions"] == 0
+
+    def test_frameshift_suspected_false_when_lengths_equal(self, tmp_path):
+        """When all contigs have identical lengths, position count is exact.
+
+        polish_frameshift_suspected is False, signaling that polish_changed_positions
+        is a true substitution tally, not an upper bound.
+        """
+        draft = _write_fasta(tmp_path / "d.fasta", [("ctg1", "ACGT" * 40)])
+        cons = _write_fasta(tmp_path / "c.fasta", [("ctg1", "ACGC" + "ACGT" * 39)])
+
+        facts = runner.count_changed_positions(draft, cons)
+
+        assert facts["polish_frameshift_suspected"] is False
+        assert facts["polish_changed_positions"] == 1
+
+    def test_frameshift_suspected_true_when_length_changes(self, tmp_path):
+        """When any contig changes length, position count is an upper bound.
+
+        An indel shifts bases out of register, so polish_changed_positions
+        alone cannot distinguish an insertion from substitutions.
+        """
+        draft = _write_fasta(tmp_path / "d.fasta", [("ctg1", "ACGT" * 40)])
+        cons = _write_fasta(tmp_path / "c.fasta", [("ctg1", "ACGT" * 40 + "AA")])
+
+        facts = runner.count_changed_positions(draft, cons)
+
+        assert facts["polish_frameshift_suspected"] is True
+
+    def test_frameshift_suspected_true_even_when_deltas_cancel(self, tmp_path):
+        """Frameshift detection is per-contig, not from summed delta.
+
+        A +3 in one contig and a -3 in another sum to zero, but both are
+        frameshifted. Computing from summed delta would hide both shifts.
+        """
+        draft = _write_fasta(
+            tmp_path / "d.fasta",
+            [("ctg1", "ACGT" * 20), ("ctg2", "TTTT" * 20)],
+        )
+        cons = _write_fasta(
+            tmp_path / "c.fasta",
+            [("ctg1", "ACGT" * 20 + "AAA"), ("ctg2", "TTTT" * 19 + "T")],
+        )
+
+        facts = runner.count_changed_positions(draft, cons)
+
+        assert facts["polish_length_delta"] == 0  # +3 - 3 = 0
+        assert facts["polish_frameshift_suspected"] is True  # but both frameshifted
