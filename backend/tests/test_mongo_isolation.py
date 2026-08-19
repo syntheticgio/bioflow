@@ -68,6 +68,31 @@ class TestDirectMongoUrl:
         )
         assert url.count("directConnection") == 1
 
+    def test_replica_set_as_the_only_option_leaves_no_empty_option(self):
+        # run-worktree-tests.sh passes exactly this shape. Deleting the
+        # substring used to leave `?&directConnection=true`, which pymongo
+        # rejects with "URI options are key=value pairs" -- 91 errors in a
+        # worktree run, and none in a main-stack run whose URL happens to
+        # carry a second option.
+        url = iso.direct_mongo_url(
+            "mongodb://wt-mongo-1:27017/?replicaSet=rs0", host_reachable=True
+        )
+        assert url == "mongodb://wt-mongo-1:27017/?directConnection=true"
+        assert "?&" not in url
+        assert "&&" not in url
+
+    def test_keeps_unrelated_options(self):
+        url = iso.direct_mongo_url(
+            "mongodb://h:27017/db?replicaSet=rs0&tls=true", host_reachable=True
+        )
+        assert "tls=true" in url
+        assert "/db?" in url
+        assert "replicaSet" not in url
+
+    def test_url_without_a_query_gets_one(self):
+        url = iso.direct_mongo_url("mongodb://h:27017", host_reachable=True)
+        assert url == "mongodb://h:27017?directConnection=true"
+
     def test_probes_the_environment_when_not_told(self, monkeypatch):
         monkeypatch.setattr(iso, "_compose_host_resolves", lambda hostname="mongo": True)
         assert "://mongo:" in iso.direct_mongo_url("mongodb://mongo:27017")

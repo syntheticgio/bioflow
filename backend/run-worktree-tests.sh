@@ -241,6 +241,11 @@ for arg in "${PYTEST_ARGS[@]}"; do
 done
 [ -n "$has_verbosity" ] || PYTEST_ARGS+=(-q)
 
+# The interpreter is named by absolute path, never as bare `python`: the image
+# puts a tool venv (/opt/medaka/env/bin) ahead of the app interpreter on PATH,
+# so both `python` and `python3` resolve to an environment with none of the
+# app's dependencies in it -- "No module named pytest", from an image where
+# pytest is demonstrably installed.
 docker run --rm \
   --network biopipe_default \
   -v "$REPO_ROOT/backend/app:/srv/app" \
