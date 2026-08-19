@@ -1,11 +1,13 @@
-"""The cache key for a job failure explanation.
+"""Failure-explanation cache key and TaskSlot metadata.
 
-Unlike normalize_organism's human-readable key, this hashes: error messages
-are unbounded in length and character content (embedded paths, quotes,
-newlines), which makes them unsuitable as a literal indexed string.
+The cache key for a job failure explanation. Unlike normalize_organism's
+human-readable key, this hashes error messages: they are unbounded in length
+and character content (embedded paths, quotes, newlines), which makes them
+unsuitable as a literal indexed string.
 """
 
 from app.models import normalize_failure
+from app.models.ai import TaskSlot
 
 
 class TestNormalization:
@@ -29,3 +31,13 @@ class TestNormalization:
     def test_the_key_is_a_fixed_length_hash(self):
         key = normalize_failure("X", "y" * 5000)
         assert len(key) == 32
+
+
+def test_failure_explanation_slot_has_a_label():
+    assert TaskSlot.FAILURE_EXPLANATION.label == "Job failure explanations"
+
+def test_de_summary_slot_has_a_label():
+    assert TaskSlot.DE_SUMMARY.label == "Differential expression summaries"
+
+def test_variant_summary_slot_has_a_label():
+    assert TaskSlot.VARIANT_SUMMARY.label == "Variant call summaries"
