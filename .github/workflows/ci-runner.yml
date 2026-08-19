@@ -1,0 +1,51 @@
+name: Build CI Runner Image
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/Dockerfile.ci'
+      - '.github/workflows/ci-runner.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  build-and-push-ci-runner:
+    name: Build & Push CI Runner Image
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata (tags, labels)
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository_owner }}/bioflow-ci-runner
+          tags: |
+            type=raw,value=latest
+            type=sha,format=short
+
+      - name: Build and push CI Runner image
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: .github/Dockerfile.ci
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

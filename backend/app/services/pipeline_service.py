@@ -2776,9 +2776,8 @@ async def launch_vcf_stats(*, object_id: PydanticObjectId, owner: str):
     from app.queue import queue
     from app.services import object_service
 
-    tools.require(tools.bcftools())
-
     vcf = await object_service.get_object(object_id, owner=owner)
+    tools.require(tools.bcftools())
     _check_vcf_stats_callable(vcf)
 
     digest, path = await _resolve_readable(vcf)
@@ -3868,7 +3867,7 @@ async def launch_merge_structural_variants(
     }
 
     run = await run_service.create_run(
-        kind=RunKind.STRUCTURAL_VARIANT_CALLING,
+        kind=RunKind.STRUCTURAL_VARIANT_MERGING,
         project_id=project_id,
         label=f"Merge {len(snf_objects)} SV callsets",
         inputs=[
@@ -4089,9 +4088,8 @@ async def launch_annotation(
             tools.snpeff(), owner=owner, install_optional=install_optional
         )
     else:
-        tools.require(tools.bcftools_csq())
-
-    vcf = await object_service.get_object(object_id, owner=owner)
+        vcf = await object_service.get_object(object_id, owner=owner)
+    tools.require(tools.bcftools_csq())
 
     inputs = await resolve_annotation_inputs(vcf)
     if not inputs.ok:
