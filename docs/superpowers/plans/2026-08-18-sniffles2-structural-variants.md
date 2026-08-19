@@ -1043,12 +1043,28 @@ git commit -m "feat(pipelines): store structural variants with SV-native columns
 Wires the runner into the queue and the API. The node type's partition invariant is the specific trap here.
 
 **Files:**
-- Modify: `backend/app/queue/pipeline_handlers.py` (the SV handler)
+- Create: `backend/app/queue/sv_handlers.py` (the SV handler — **not** `pipeline_handlers.py`; see the note below)
+- Modify: `backend/app/queue/handlers.py` (register `sv_handlers` for its `@handler` side effects, in the `from app.queue import (...)` block, alongside `variant_handlers`)
 - Modify: `backend/app/services/pipeline_service.py` (`launch_structural_variant_calling`)
 - Modify: `backend/app/api/v1/pipelines.py` (`StructuralVariantRequest` and its route)
 - Modify: `backend/app/models/run.py` (`RunKind.STRUCTURAL_VARIANT_CALLING`)
 - Modify: `backend/app/pipelines/node_types.py` (`_launch_structural_variant_calling`, the `call_structural_variants` spec)
 - Test: `backend/tests/pipelines/test_node_types.py`, `backend/tests/pipelines/test_sv_launch.py`
+
+**Note on the handler's module** — corrected during pre-flight review, since
+the plan's original text named the wrong file. `pipeline_handlers.py` is
+*shared* infrastructure (`_failure`, `_prepare_workdir`, `_resolve_input`,
+`_named_link`) that domain-specific handler modules import from — it is not
+where a domain handler's own code lives. The small-variant handler that this
+task mirrors is `backend/app/queue/variant_handlers.py`, whose own docstring
+says it was "split from `align_handlers.py` for the same reason that file
+was split from `pipeline_handlers.py`: these share a problem the others do
+not." Follow that pattern: create `sv_handlers.py`, `from
+app.queue.pipeline_handlers import _failure, _named_link, _prepare_workdir`
+(or whichever subset is actually needed), and register the new module in
+`handlers.py`'s import block — `registry.load_handlers()` imports only
+`handlers.py`, so a handler module absent from that block never registers,
+which fails silently (the job simply has no handler) rather than raising.
 
 **Interfaces:**
 - Consumes: `sniffles_runner.build_sniffles_command`, `SnifflesParams`, `sv_calling_allowed_for` (Task 3); `sv_db.build_sv_db` (Task 4); `tools.sniffles` (Task 2).
@@ -1130,7 +1146,7 @@ In `backend/app/services/pipeline_service.py`, following `launch_variant_calling
 
 - [ ] **Step 5: Add the handler**
 
-In `backend/app/queue/pipeline_handlers.py`, following the variant handler: materialize the BAM and reference, build the command with `sniffles_runner.build_sniffles_command`, run it, bgzip and tabix the VCF (reusing the existing index helper the variant path calls), store the VCF as an object with `ObjectRole.VARIANTS` and its `.tbi` as a `SidecarRole.TBI` sidecar, then build the SQLite table with `sv_db.build_sv_db` over the VCF's data lines.
+In the new `backend/app/queue/sv_handlers.py`, following `variant_handlers.py`'s handler: materialize the BAM and reference, build the command with `sniffles_runner.build_sniffles_command`, run it, bgzip and tabix the VCF with `variant_runner.build_index_command` (the same helper `variant_handlers.py:376` calls — no SV-specific indexing exists, and none is needed), store the VCF as an object with `ObjectRole.VARIANTS` and its `.tbi` as a `SidecarRole.TBI` sidecar, then build the SQLite table with `sv_db.build_sv_db` over the VCF's data lines. Register `@handler` on the job kind exactly as `variant_handlers.py` does for `call_variants`.
 
 - [ ] **Step 6: Add the endpoint**
 
