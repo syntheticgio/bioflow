@@ -1291,7 +1291,20 @@ class TestClassifyReadsCard:
     seam it depends on actually works. The unavailable-direction test is the
     one that fails when the probe patch stops reaching the call site."""
 
-    def test_offered_for_fastq(self):
+    def test_offered_for_fastq(self, monkeypatch):
+        # The probe is patched *on* rather than left to the host. The backend
+        # image ships kraken2, so trusting the real probe made this assertion
+        # depend on where it ran: green in the container, red on a CI runner
+        # that has no kraken2 on PATH. Patching states the precondition the
+        # assertion actually needs.
+        from app.pipelines.tools import Tool
+        from app.services import suggestion_service
+
+        monkeypatch.setattr(
+            suggestion_service.tools,
+            "kraken2",
+            lambda: Tool(name="kraken2", path="/usr/bin/kraken2", version="2.1.3", error=None),
+        )
         obj = _fake_obj(kind=FormatKind.FASTQ, obj_id="fq1")
         card = build_classify_reads_card(obj)
         assert card is not None

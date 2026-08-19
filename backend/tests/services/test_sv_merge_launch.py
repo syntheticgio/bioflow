@@ -114,11 +114,21 @@ async def test_merge_structural_variants_succeeds_on_same_reference(monkeypatch)
         from unittest.mock import MagicMock
 
         from beanie import PydanticObjectId
+
         j = MagicMock()
         j.id = PydanticObjectId()
         return j
 
     monkeypatch.setattr("app.queue.queue.enqueue", _stub_enqueue)
+
+    # What this test asserts is the reference-agreement check and the enqueue,
+    # neither of which is about whether sniffles is on PATH. Left unstubbed,
+    # `tools.require` reads the host: fine in the backend image that ships
+    # sniffles, a PermanentError on a CI runner that does not. Same stub as
+    # tests/api/test_route_owner_scoping.py uses for the launch routes.
+    from app.pipelines import tools
+
+    monkeypatch.setattr(tools, "require", lambda tool: tool)
 
     snf1, snf2, ref1, _ = await _setup_snf_pair(same_reference=True)
 
