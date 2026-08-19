@@ -212,6 +212,22 @@ export function AssemblyFacts({ facts, objectId, projectId }: Props) {
     | undefined;
   const hasAssemblyQv = assemblyQv !== undefined;
 
+  // K-mer spectrum: meryl, genome characteristics estimated from the reads
+  // this assembly was built from. Written by the analyze_meryl_tracks
+  // applier. genome_size_est and heterozygosity are absent when the
+  // histogram had no usable coverage peak (heavy error tail), so the block
+  // gates on the fact itself and shows whichever numbers were computable.
+  type KmerSpectra = {
+    k?: number;
+    total_kmers?: number;
+    distinct_kmers?: number;
+    genome_size_est?: number;
+    heterozygosity?: number | null;
+    read_set_name?: string;
+  };
+  const kmerSpectra = facts.kmer_spectra as KmerSpectra | undefined;
+  const hasKmerSpectra = kmerSpectra !== undefined;
+
   // Continuity: GCI, long-read only. Score has no upstream-published quality
   // bands (unlike CRAQ's AQI) -- see aqiBand's docstring for the contrast --
   // so only the raw published benchmark range is shown as context, never a
@@ -255,6 +271,7 @@ export function AssemblyFacts({ facts, objectId, projectId }: Props) {
     !hasMisassembly &&
     !hasAssemblyErrors &&
     !hasAssemblyQv &&
+    !hasKmerSpectra &&
     !hasContinuity
   ) {
     return (
@@ -757,6 +774,56 @@ export function AssemblyFacts({ facts, objectId, projectId }: Props) {
             )}
           </dl>
           <SpectraCnPlots objectId={objectId} />
+        </div>
+      )}
+
+      {hasKmerSpectra && kmerSpectra && (
+        <div style={{ marginTop: 14 }}>
+          <div
+            style={{ fontSize: 11, color: "var(--text-faint)", marginBottom: 6 }}
+          >
+            K-mer spectrum (meryl
+            {kmerSpectra.k !== undefined ? `, k=${kmerSpectra.k}` : ""})
+          </div>
+          {/* Same reasoning as the QV block above: these numbers describe
+              the reads, so the read set is context, not provenance. */}
+          {kmerSpectra.read_set_name && (
+            <div style={{ fontSize: 12, marginBottom: 8 }}>
+              Computed from {kmerSpectra.read_set_name}
+            </div>
+          )}
+          <dl className="kv">
+            {kmerSpectra.genome_size_est !== undefined && (
+              <>
+                <dt>Estimated genome size</dt>
+                <dd>{formatBases(kmerSpectra.genome_size_est)}</dd>
+              </>
+            )}
+            {typeof kmerSpectra.heterozygosity === "number" && (
+              <>
+                <dt>Heterozygosity</dt>
+                <dd>{(kmerSpectra.heterozygosity * 100).toPrecision(3)}%</dd>
+              </>
+            )}
+            {kmerSpectra.total_kmers !== undefined && (
+              <>
+                <dt>Total k-mers</dt>
+                <dd>{kmerSpectra.total_kmers.toLocaleString()}</dd>
+              </>
+            )}
+            {kmerSpectra.distinct_kmers !== undefined && (
+              <>
+                <dt>Distinct k-mers</dt>
+                <dd>{kmerSpectra.distinct_kmers.toLocaleString()}</dd>
+              </>
+            )}
+          </dl>
+          {kmerSpectra.genome_size_est === undefined && (
+            <div style={{ color: "var(--text-faint)", fontSize: 11, marginTop: 4 }}>
+              No clear coverage peak in the k-mer histogram — genome size and
+              heterozygosity could not be estimated from these reads.
+            </div>
+          )}
         </div>
       )}
 
