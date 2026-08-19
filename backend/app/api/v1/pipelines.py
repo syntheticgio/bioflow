@@ -809,12 +809,15 @@ async def launch_vcf_stats(body: VcfStatsRequest, owner: OwnerDep) -> JobOut:
 
 class AnnotateRequest(BaseModel):
     object_id: PydanticObjectId
+    annotator: str | None = None
 
 
 @router.post("/annotate", response_model=JobOut, status_code=status.HTTP_201_CREATED)
 async def launch_annotate(body: AnnotateRequest, owner: OwnerDep) -> JobOut:
     """Queue consequence annotation for a called VCF."""
-    job = await pipeline_service.launch_annotation(object_id=body.object_id, owner=owner)
+    job = await pipeline_service.launch_annotation(
+        object_id=body.object_id, owner=owner, annotator=body.annotator
+    )
     return JobOut.of(job)
 
 
@@ -2237,6 +2240,21 @@ class QuantifyRequest(BaseModel):
     resource_override: bool = False
 
 
+class SalmonQuantifyRequest(BaseModel):
+    reads_id: PydanticObjectId
+    # Normally resolved from the project. Supplied when a project holds more
+    # than one distinct transcriptome, which is the case resolve_transcriptome
+    # refuses to guess at.
+    transcriptome_id: PydanticObjectId | None = None
+    # The other mate of a paired-end run. Normally resolved from the reads
+    # object's own provenance; supplied when that resolution is ambiguous.
+    mate_id: PydanticObjectId | None = None
+    params: dict = Field(default_factory=dict)
+    # "Launch anyway" from the refusal card. Skips the declared-budget refusal
+    # and persists on the job, where claim.lua admits it as sole occupant.
+    resource_override: bool = False
+
+
 class DifferentialExpressionRequest(BaseModel):
     project_id: PydanticObjectId
     # counts object id -> condition name. A mapping rather than two parallel
@@ -2330,6 +2348,24 @@ async def launch_quantify(body: QuantifyRequest, owner: OwnerDep) -> JobOut:
         bam_id=body.bam_id,
         owner=owner,
         annotation_id=body.annotation_id,
+        params=body.params,
+        resource_override=body.resource_override,
+    )
+    return JobOut.of(job)
+
+
+@router.post(
+    "/salmon-quantify", response_model=JobOut, status_code=status.HTTP_201_CREATED
+)
+async def launch_salmon_quantify(
+    body: SalmonQuantifyRequest, owner: OwnerDep
+) -> JobOut:
+    """Queue an alignment-free per-gene quantification of one sample."""
+    job = await pipeline_service.launch_salmon_quantify(
+        reads_id=body.reads_id,
+        owner=owner,
+        transcriptome_id=body.transcriptome_id,
+        mate_id=body.mate_id,
         params=body.params,
         resource_override=body.resource_override,
     )

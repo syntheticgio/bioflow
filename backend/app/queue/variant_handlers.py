@@ -15,7 +15,7 @@ from app.config import settings
 from app.errors import PermanentError, RetryableError, ValidationError
 from app.logging import get_logger
 from app.models import IoClass, JobClass, JobResources
-from app.pipelines import aligners, csq_runner, sv_annotation_runner, tools, variant_db, variant_runner, vcf_stats_runner
+from app.pipelines import aligners, csq_runner, snpeff_runner, sv_annotation_runner, tools, variant_db, variant_runner, vcf_stats_runner
 from app.pipelines.align_runner import ReadChemistry
 from app.pipelines.variant_runner import VariantCaller
 from app.queue.align_handlers import _resolve_blob
@@ -548,11 +548,12 @@ def _csq_line_logger(ctx: JobContext) -> "callable":
     resources=JobResources(cpu=1, mem_mb=2048, io=IoClass.HEAVY),
 )
 def annotate_variants(ctx: JobContext) -> dict:
-    """Add consequence annotations to a VCF with `bcftools csq`.
+    """Add consequence annotations to a VCF.
 
-    Produces a new VCF object rather than mutating the input: the original is
-    what the caller actually emitted, and an annotation run is a derivation of
-    it like every other step here.
+    Dispatches to `bcftools csq` or SnpEff based on the `tool` field in the
+    payload. Produces a new VCF object rather than mutating the input: the
+    original is what the caller actually emitted, and an annotation run is a
+    derivation of it like every other step here.
     """
     object_id = ctx.payload.get("object_id")
     if not object_id:
@@ -564,9 +565,17 @@ def annotate_variants(ctx: JobContext) -> dict:
     ):
         raise PermanentError("annotate_variants requires an annotation (GFF3)")
 
+    tool = ctx.payload.get("tool", "bcftools_csq")
+
+    if tool == "snpeff":
+        return _annotate_variants_snpeff(ctx, object_id)
+    return _annotate_variants_bcftools_csq(ctx, object_id)
+
+
+def _annotate_variants_bcftools_csq(ctx: JobContext, object_id: str) -> dict:
+    """Annotate a VCF with `bcftools csq`."""
     bcftools = tools.require(tools.bcftools_csq())
     work = _prepare_workdir(ctx, "annotate")
-
     vcf = _named_link(
         work, _resolve_blob(ctx.payload, "vcf"), ctx.payload.get("vcf_name")
     )
@@ -575,7 +584,6 @@ def annotate_variants(ctx: JobContext) -> dict:
         _resolve_blob(ctx.payload, "annotation"),
         ctx.payload.get("annotation_name"),
     )
-
     # The reference and its .fai, laid out as real siblings the way
     # call_variants does -- not a symlink `samtools faidx` would resolve
     # through, writing a stray `.fai` into the content-addressed store beside
@@ -593,21 +601,17 @@ def annotate_variants(ctx: JobContext) -> dict:
             f".fai may be recorded against a different reference."
         )
     reference = materialized.reference
-
     log_path = settings.logs_dir / f"{ctx.job_id}.log"
     log_path.parent.mkdir(parents=True, exist_ok=True)
     # csq's own log, separate from the shared job log: `_failure` only shows
     # the last 5 lines, and a real NCBI GFF3 buries a genuine failure under
     # routine "unknown biotype" parse warnings if the two share one file.
     csq_log_path = work / "csq.log"
-
     ctx.progress(phase="annotate", pct=0.3, message="calling consequences")
     out = work / "annotated.vcf.gz"
     code = run_subprocess(
-        ctx,
         csq_runner.build_csq_command(
             bcftools_path=bcftools.path,
-            vcf=vcf,
             reference=reference,
             annotation=annotation,
             out=out,
@@ -637,10 +641,8 @@ def annotate_variants(ctx: JobContext) -> dict:
     if produced != out:
         out.rename(produced)
     index = _index_vcf(ctx, produced, log_path)
-
     ctx.progress(phase="done", pct=1.0, message="annotation complete")
     log.info("annotate_variants_finished", job_id=ctx.job_id, output=produced.name)
-
     return {
         "object_id": object_id,
         "reference_object_id": ctx.payload.get("reference_object_id"),
@@ -651,4 +653,89 @@ def annotate_variants(ctx: JobContext) -> dict:
         "index": {"tmp_path": str(index), "name": index.name, "role": "tbi"},
         "tool": "bcftools csq",
         "tool_version": bcftools.version,
+    }
+
+
+def _annotate_variants_snpeff(ctx: JobContext, object_id: str) -> dict:
+    """Annotate a VCF with SnpEff.
+
+    Builds a SnpEff database from the reference and GFF3 if one does not
+    already exist for this genome accession, then runs SnpEff annotation.
+    """
+    tool = tools.require(tools.snpeff())
+    genome_accession = ctx.payload.get("genome_accession")
+    if not genome_accession:
+        raise PermanentError(
+            "annotate_variants (snpeff) requires a 'genome_accession' in payload"
+        )
+
+    _require_image(ctx, tool.path, settings.snpeff_image)
+
+    work = _prepare_workdir(ctx, "snpeff")
+    vcf = _named_link(
+        work, _resolve_blob(ctx.payload, "vcf"), ctx.payload.get("vcf_name")
+    )
+    log_path = settings.logs_dir / f"{ctx.job_id}.log"
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+
+    # Stage the reference FASTA and GFF3 for SnpEff database building.
+    # SnpEff expects them at:
+    #   <data_dir>/data/<genome_accession>/genome.fa
+    #   <data_dir>/data/<genome_accession>/genes.gff
+    if not snpeff_runner.database_exists(genome_accession):
+        ctx.progress(phase="build_db", pct=0.1, message="building SnpEff database")
+        genome_db_dir = snpeff_runner.genome_dir(genome_accession)
+        genome_db_dir.mkdir(parents=True, exist_ok=True)
+
+        ref_blob = _resolve_blob(ctx.payload, "reference")
+        ann_blob = _resolve_blob(ctx.payload, "annotation")
+        _named_link(genome_db_dir, ref_blob, "genome.fa")
+        _named_link(genome_db_dir, ann_blob, "genes.gff")
+
+        build_cmd = snpeff_runner.build_db_command(
+            image=settings.snpeff_image,
+            genome_name=genome_accession,
+        )
+        build_log_path = work / "snpeff_build.log"
+        build_code = run_subprocess(
+            build_cmd,
+            log_path=str(build_log_path),
+        )
+        if build_code != 0:
+            raise _failure(build_code, build_log_path, "snpEff build")
+
+    # Run SnpEff annotation
+    ctx.progress(phase="annotate", pct=0.6, message="annotating with SnpEff")
+    out = work / "snpeff_annotated.vcf.gz"
+    snpeff_log_path = work / "snpeff_ann.log"
+    ann_cmd = snpeff_runner.annotate_command(
+        image=settings.snpeff_image,
+        genome_name=genome_accession,
+        input_vcf=str(vcf),
+        output_vcf=str(out),
+    )
+    ann_code = run_subprocess(
+        ann_cmd,
+        log_path=str(snpeff_log_path),
+    )
+    if ann_code != 0:
+        raise _failure(ann_code, snpeff_log_path, "snpEff ann")
+
+    name = snpeff_runner.annotated_name(ctx.payload.get("vcf_name") or vcf.name)
+    produced = out.parent / name
+    if produced != out:
+        out.rename(produced)
+    index = _index_vcf(ctx, produced, log_path)
+    ctx.progress(phase="done", pct=1.0, message="annotation complete")
+    log.info("annotate_variants_finished", job_id=ctx.job_id, output=produced.name)
+    return {
+        "object_id": object_id,
+        "reference_object_id": ctx.payload.get("reference_object_id"),
+        "annotation_object_id": ctx.payload.get("annotation_object_id"),
+        "project_id": ctx.payload.get("project_id"),
+        "job_id": ctx.job_id,
+        "output": {"tmp_path": str(produced), "name": produced.name},
+        "index": {"tmp_path": str(index), "name": index.name, "role": "tbi"},
+        "tool": "snpeff",
+        "tool_version": settings.snpeff_image.split(":")[-1],
     }

@@ -152,6 +152,7 @@ class Settings(BaseSettings):
     # From the `subread` package. featureCounts is the only binary in it this
     # application invokes.
     featurecounts_path: str = "featureCounts"
+    salmon_path: str = "salmon"
     # The de novo assembler, for long reads only. Debian ships it depending on
     # minimap2 and samtools, both of which this image already carries, so it
     # costs ~37MB rather than a toolchain.
@@ -246,6 +247,13 @@ class Settings(BaseSettings):
     # Architecture-dependent; see default_deepvariant_image above. Override with
     # DEEPVARIANT_IMAGE to pin a different build.
     deepvariant_image: str = Field(default_factory=default_deepvariant_image)
+
+    # SnpEff on-demand image. Pinned tag; the image includes Java and SnpEff.
+    # Override with SNPEFF_IMAGE to pin a different build.
+    snpeff_image: str = "pegi3s/snpeff:5.2a"
+
+    # Directory for cached SnpEff databases, keyed by genome accession.
+    snpeff_data_dir: Path = Path("/data/snpeff")
 
     # Threads a single trim run may use. Deliberately well below the core count:
     # the queue admits more than one compute job at a time, and fastp's own
