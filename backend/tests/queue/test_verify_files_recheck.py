@@ -18,6 +18,7 @@ from app.config import settings
 from app.models import ALL_MODELS, Blob, BlobState, BlobStorage, DataObject, ObjectStatus
 from app.queue import handlers
 from app.queue.registry import JobContext
+from tests._mongo_isolation import direct_mongo_url, worker_db_name
 
 # No `pytestmark = pytest.mark.asyncio` needed: pyproject.toml sets
 # `asyncio_mode = "auto"`.
@@ -29,8 +30,8 @@ async def _init_beanie_models():
     a module-scoped Motor client mixed with per-test cleanup binds to the wrong
     event loop under pytest-asyncio's per-test loops.
     """
-    client = AsyncMongoClient(settings.mongo_url, tz_aware=True)
-    db = client["biopipe_test"]
+    client = AsyncMongoClient(direct_mongo_url(settings.mongo_url), tz_aware=True)
+    db = client[worker_db_name()]
     await db[Blob.Settings.name].drop()
     await db[DataObject.Settings.name].drop()
     await init_beanie(database=db, document_models=ALL_MODELS)

@@ -16,6 +16,7 @@ from app.models.timing import JobRunTiming, RunOutcome, RunResources
 from app.services import memory_estimate
 from app.services.memory_estimate import EstimateSource
 from app.services.timing_service import MIN_SAMPLES
+from tests._mongo_isolation import direct_mongo_url, worker_db_name
 
 
 @pytest.fixture(autouse=True)
@@ -28,8 +29,8 @@ async def _init_beanie_models():
     resolution outcomes, which leftover rows from an earlier test would
     corrupt.
     """
-    client = AsyncMongoClient(settings.mongo_url, tz_aware=True)
-    db = client["biopipe_test"]
+    client = AsyncMongoClient(direct_mongo_url(settings.mongo_url), tz_aware=True)
+    db = client[worker_db_name()]
     await db[JobRunTiming.Settings.name].drop()
     await init_beanie(database=db, document_models=ALL_MODELS)
     yield

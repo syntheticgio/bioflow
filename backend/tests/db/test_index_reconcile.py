@@ -13,13 +13,14 @@ from pymongo import ASCENDING, AsyncMongoClient, IndexModel
 
 from app.config import settings
 from app.db.index_reconcile import _index_def, reconcile_indexes
+from tests._mongo_isolation import direct_mongo_url, worker_db_name
 
 
 @pytest.fixture
 async def _db():
     """Connect to the throwaway test database, same as the storage tests."""
-    client = AsyncMongoClient(settings.mongo_url, tz_aware=True)
-    db = client["biopipe_test"]
+    client = AsyncMongoClient(direct_mongo_url(settings.mongo_url), tz_aware=True)
+    db = client[worker_db_name()]
     # Clean slate: drop any test collection that might carry a stale index.
     for name in await db.list_collection_names():
         await db.drop_collection(name)

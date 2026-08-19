@@ -19,14 +19,15 @@ from app.config import settings
 from app.metadata import platform_migration
 from app.models import ALL_MODELS
 from app.models.object import DataObject
+from tests._mongo_isolation import direct_mongo_url, worker_db_name
 
 
 @pytest.fixture(autouse=True)
 async def _init_beanie_models():
     """Function-scoped for the reason tests/storage/test_read_pairing.py
     documents: a module-scoped client binds to the wrong event loop."""
-    client = AsyncMongoClient(settings.mongo_url, tz_aware=True)
-    db = client["biopipe_test"]
+    client = AsyncMongoClient(direct_mongo_url(settings.mongo_url), tz_aware=True)
+    db = client[worker_db_name()]
     await init_beanie(database=db, document_models=ALL_MODELS)
     await DataObject.delete_all()
     yield

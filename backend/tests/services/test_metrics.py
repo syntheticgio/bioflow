@@ -91,9 +91,10 @@ async def _fresh_job_timings():
 
     from app.config import settings
     from app.models import ALL_MODELS
+    from tests._mongo_isolation import direct_mongo_url, worker_db_name
 
-    client = AsyncMongoClient(settings.mongo_url, tz_aware=True)
-    db = client["biopipe_test"]
+    client = AsyncMongoClient(direct_mongo_url(settings.mongo_url), tz_aware=True)
+    db = client[worker_db_name()]
     await db[JobRunTiming.Settings.name].drop()
     await init_beanie(database=db, document_models=ALL_MODELS)
     yield

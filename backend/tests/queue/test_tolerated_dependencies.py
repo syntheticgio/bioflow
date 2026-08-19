@@ -21,6 +21,7 @@ from pymongo import AsyncMongoClient
 from app.config import settings
 from app.models import ALL_MODELS, JobState
 from app.models.job import Job, JobError
+from tests._mongo_isolation import direct_mongo_url, worker_db_name
 
 
 @pytest.fixture(autouse=True)
@@ -30,8 +31,8 @@ async def _init_beanie_models(monkeypatch):
     so both are pointed at one throwaway database. Function-scoped because
     these tests perform real I/O and pytest-asyncio gives each async test its
     own event loop."""
-    client = AsyncMongoClient(settings.mongo_url, tz_aware=True)
-    db = client["biopipe_test"]
+    client = AsyncMongoClient(direct_mongo_url(settings.mongo_url), tz_aware=True)
+    db = client[worker_db_name()]
     await init_beanie(database=db, document_models=ALL_MODELS)
     monkeypatch.setattr("app.db.client.get_db", lambda: db)
     yield

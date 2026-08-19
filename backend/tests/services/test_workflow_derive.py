@@ -19,14 +19,15 @@ from app.config import settings
 from app.models import ALL_MODELS
 from app.models.run import PipelineRun, RunInput, RunKind, RunStatus
 from app.services.workflow_derive import derive_definition
+from tests._mongo_isolation import direct_mongo_url, worker_db_name
 
 OWNER = "tester"
 
 
 @pytest.fixture(autouse=True)
 async def _init_beanie_models(monkeypatch):
-    client = AsyncMongoClient(settings.mongo_url, tz_aware=True)
-    db = client["biopipe_test"]
+    client = AsyncMongoClient(direct_mongo_url(settings.mongo_url), tz_aware=True)
+    db = client[worker_db_name()]
     await init_beanie(database=db, document_models=ALL_MODELS)
     monkeypatch.setattr("app.db.client.get_db", lambda: db)
     yield

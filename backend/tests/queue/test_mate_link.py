@@ -14,13 +14,14 @@ from pymongo import AsyncMongoClient
 from app.config import settings
 from app.models.object import DataObject, ObjectStatus
 from app.queue.results import _link_mate
+from tests._mongo_isolation import direct_mongo_url, worker_db_name
 
 
 @pytest.fixture
 async def _db():
     """Throwaway test database, same pattern as tests/db/test_index_reconcile."""
-    client = AsyncMongoClient(settings.mongo_url, tz_aware=True)
-    db = client["biopipe_test"]
+    client = AsyncMongoClient(direct_mongo_url(settings.mongo_url), tz_aware=True)
+    db = client[worker_db_name()]
     await init_beanie(database=db, document_models=[DataObject])
     await DataObject.delete_all()
     yield db
