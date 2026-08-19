@@ -116,23 +116,30 @@ class TestFeatureCoverageRun:
     ):
         payload = _inputs(tmp_path)
         calls = []
+        sort_calls = []
+
+        def fake_sort(ctx, cmd, **kw):
+            sort_calls.append((cmd, kw.get("stdout_path"), kw.get("log_path")))
+            Path(kw["stdout_path"]).write_text(
+                "chrT\tRefSeq\tgene\t1\t200\t.\t+\t.\tID=gene-abcA\n"
+            )
+            return 0
 
         def fake_run(ctx, cmd, **kw):
             calls.append((cmd, kw.get("log_path")))
-            if cmd[:2] == ["bedtools", "sort"]:
-                Path(kw["log_path"]).write_text(
-                    "chrT\tRefSeq\tgene\t1\t200\t.\t+\t.\tID=gene-abcA\n"
-                )
-            else:
-                Path(kw["log_path"]).write_text(_REAL_COVERAGE_TSV)
+            Path(kw["log_path"]).write_text(_REAL_COVERAGE_TSV)
             return 0
 
+        monkeypatch.setattr(
+            feature_coverage_handlers, "_run_sort_with_clean_stdout", fake_sort
+        )
         monkeypatch.setattr(feature_coverage_handlers, "run_subprocess", fake_run)
         feature_coverage_handlers.run_feature_coverage(_ctx(payload))
 
-        assert len(calls) == 2
-        sort_cmd, _ = calls[0]
-        coverage_cmd, _ = calls[1]
+        assert len(sort_calls) == 1
+        assert len(calls) == 1
+        sort_cmd, _, _ = sort_calls[0]
+        coverage_cmd, _ = calls[0]
 
         assert sort_cmd[0] == "bedtools"
         assert sort_cmd[1] == "sort"
@@ -154,13 +161,17 @@ class TestFeatureCoverageRun:
     ):
         payload = _inputs(tmp_path)
 
-        def fake_run(ctx, cmd, **kw):
-            if cmd[:2] == ["bedtools", "sort"]:
-                Path(kw["log_path"]).write_text("")
-            else:
-                Path(kw["log_path"]).write_text(_REAL_COVERAGE_TSV)
+        def fake_sort(ctx, cmd, **kw):
+            Path(kw["stdout_path"]).write_text("")
             return 0
 
+        def fake_run(ctx, cmd, **kw):
+            Path(kw["log_path"]).write_text(_REAL_COVERAGE_TSV)
+            return 0
+
+        monkeypatch.setattr(
+            feature_coverage_handlers, "_run_sort_with_clean_stdout", fake_sort
+        )
         monkeypatch.setattr(feature_coverage_handlers, "run_subprocess", fake_run)
         result = feature_coverage_handlers.run_feature_coverage(_ctx(payload))
 
@@ -188,7 +199,9 @@ class TestFeatureCoverageRun:
     ):
         payload = _inputs(tmp_path)
         monkeypatch.setattr(
-            feature_coverage_handlers, "run_subprocess", lambda *a, **k: 1
+            feature_coverage_handlers,
+            "_run_sort_with_clean_stdout",
+            lambda *a, **k: 1,
         )
         with pytest.raises(PermanentError, match="bedtools sort exited 1"):
             feature_coverage_handlers.run_feature_coverage(_ctx(payload))
@@ -198,15 +211,76 @@ class TestFeatureCoverageRun:
     ):
         payload = _inputs(tmp_path)
 
-        def fake_run(ctx, cmd, **kw):
-            if cmd[:2] == ["bedtools", "sort"]:
-                Path(kw["log_path"]).write_text("")
-                return 0
-            return 1
+        def fake_sort(ctx, cmd, **kw):
+            Path(kw["stdout_path"]).write_text("")
+            return 0
 
-        monkeypatch.setattr(feature_coverage_handlers, "run_subprocess", fake_run)
+        monkeypatch.setattr(
+            feature_coverage_handlers, "_run_sort_with_clean_stdout", fake_sort
+        )
+        monkeypatch.setattr(
+            feature_coverage_handlers, "run_subprocess", lambda *a, **k: 1
+        )
         with pytest.raises(PermanentError, match="bedtools coverage exited 1"):
             feature_coverage_handlers.run_feature_coverage(_ctx(payload))
+
+    def test_sort_stderr_does_not_corrupt_sorted_annotation(
+        self, bedtools_available, home, tmp_path, monkeypatch
+    ):
+        """Proves the fix for the sort-step corruption bug: a bedtools-style
+        warning line written to stderr must never end up mixed into the
+        stdout_path bedtools coverage -a reads. Before the fix, both the
+        sort step's "log" and the sorted-annotation *data* file were the
+        same path (log_path=str(sorted_annotation) with run_subprocess's
+        stderr=subprocess.STDOUT merging both streams into it) -- this test
+        exercises the real _run_sort_with_clean_stdout implementation
+        (rather than mocking it away, unlike the other tests here) against a
+        real subprocess that writes to both streams, and asserts the two
+        stay separated."""
+        payload = _inputs(tmp_path)
+
+        # Replace the real "bedtools sort" command with a tiny script that
+        # writes a warning-looking line to stderr AND valid data lines to
+        # stdout, mirroring bedtools sort's documented behaviour of writing
+        # a "***** WARNING: ..." line to stderr alongside its real sorted
+        # output on stdout.
+        script = tmp_path / "fake_sort.py"
+        script.write_text(
+            "import sys\n"
+            "sys.stderr.write('***** WARNING: File has inconsistent naming "
+            "convention *****\\n')\n"
+            "sys.stdout.write('chrT\\tRefSeq\\tgene\\t1\\t200\\t.\\t+\\t.\\t"
+            "ID=gene-abcA\\n')\n"
+        )
+
+        import sys as _sys
+
+        def fake_run_coverage(ctx, cmd, **kw):
+            Path(kw["log_path"]).write_text(_REAL_COVERAGE_TSV)
+            return 0
+
+        original_popen = feature_coverage_handlers.subprocess.Popen
+
+        def patched_popen(cmd, **kwargs):
+            if cmd[:2] == ["bedtools", "sort"]:
+                cmd = [_sys.executable, str(script)]
+            return original_popen(cmd, **kwargs)
+
+        monkeypatch.setattr(feature_coverage_handlers.subprocess, "Popen", patched_popen)
+        monkeypatch.setattr(feature_coverage_handlers, "run_subprocess", fake_run_coverage)
+
+        feature_coverage_handlers.run_feature_coverage(_ctx(payload))
+
+        work = feature_coverage_handlers.settings.tmp_dir / "feature_coverage" / "job-1"
+        sorted_files = list(work.glob("*.sorted.gff"))
+        assert len(sorted_files) == 1
+        sorted_content = sorted_files[0].read_text()
+        assert "WARNING" not in sorted_content
+        assert sorted_content == "chrT\tRefSeq\tgene\t1\t200\t.\t+\t.\tID=gene-abcA\n"
+
+        sort_log = work / "sort.log"
+        assert sort_log.exists()
+        assert "WARNING" in sort_log.read_text()
 
 
 pytestmark_apply = [

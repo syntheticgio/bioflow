@@ -45,11 +45,34 @@ def build_command(annotation: Path, bam: Path, genome_file: Path) -> list[str]:
 
 
 def _gff_name(attributes: str) -> str:
-    """Name= wins, then ID=, then the raw attribute string truncated."""
+    """Name= wins, then ID=, then the raw attribute string truncated.
+
+    Handles both attribute-string punctuations feature_coverage's positional
+    parser can receive: GFF3's `key=value;key2=value2` and GTF's
+    `key "value"; key2 "value2";` (see _FEATURE_COVERAGE_ANNOTATION_FORMATS
+    in pipeline_service.py for why GTF reaches this parser at all -- it is
+    position-compatible with GFF3 even though its attribute punctuation
+    differs). The two are told apart by whether any `=` is present: a GTF
+    attribute string has none, so the `key=value` split below yields nothing
+    and the GTF-style fallback runs instead.
+    """
     fields = dict(
         part.split("=", 1) for part in attributes.split(";") if "=" in part
     )
-    name = fields.get("Name") or fields.get("ID") or attributes
+    if fields:
+        name = fields.get("Name") or fields.get("ID") or attributes
+        return name.removeprefix("gene-")
+
+    # GTF style: `key "value"; key2 "value2";` -- split on `;`, then each
+    # piece on the first whitespace to get key/value, stripping quotes.
+    gtf_fields: dict[str, str] = {}
+    for part in attributes.split(";"):
+        part = part.strip()
+        if not part or " " not in part:
+            continue
+        key, _, value = part.partition(" ")
+        gtf_fields[key] = value.strip().strip('"')
+    name = gtf_fields.get("gene_name") or gtf_fields.get("gene_id") or attributes
     return name.removeprefix("gene-")
 
 

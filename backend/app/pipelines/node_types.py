@@ -494,10 +494,18 @@ NODE_TYPES: dict[str, NodeTypeSpec] = {
             # Optional, same convention as quantify's annotation port:
             # resolve_annotation falls back to the project's one unambiguous
             # GTF/GFF when this is not wired, and refuses only when the
-            # project holds more than one.
+            # project holds more than one. Both formats are genuinely usable
+            # here -- unlike quantify (which needs GTF's `-g gene_id`
+            # convention and cannot read GFF3), bedtools coverage only cares
+            # about column positions, which GTF and GFF3 share -- so the port
+            # accepts both rather than the single FormatKind.GTF a copy-paste
+            # from quantify's port would suggest. BED is left out: it is not
+            # actually reachable through resolve_annotation (_is_annotation
+            # only admits GFF/GTF), so declaring it here would let the canvas
+            # wire something the launch path can never receive this way.
             PortSpec(
                 "annotation",
-                PortType(format=FormatKind.GTF),
+                PortType(formats=(FormatKind.GFF, FormatKind.GTF)),
                 required=False,
             ),
         ),

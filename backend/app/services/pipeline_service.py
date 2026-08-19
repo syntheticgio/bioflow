@@ -4154,13 +4154,23 @@ async def launch_quantify(
 
 # feature_coverage_handlers.run_feature_coverage only understands these two
 # annotation shapes ("gff" or "bed" -- it raises PermanentError on anything
-# else). GTF is deliberately absent: _is_annotation (which gates both
-# resolve_annotation and annotations_for_project) accepts FormatKind.GFF and
-# FormatKind.GTF, so a project whose only annotation is a GTF would resolve
-# here and then have nowhere to map -- see launch_feature_coverage's
-# docstring for how that case is refused rather than silently mis-tagged.
+# else). GTF maps to the same "gff" string as GFF3: bedtools coverage and
+# feature_coverage_runner's row parser only care about column POSITIONS
+# (seq_id/type/start/end/strand/attributes at 0/2/3/4/6/8), which GTF and
+# GFF3 share -- they differ only in how column 8's attribute string is
+# punctuated (`key "value";` vs `key=value;`), which _gff_name handles for
+# both. This is the opposite of featureCounts (counts_runner
+# .attributes_for_format), which genuinely needs GTF's `-g gene_id`
+# convention and cannot read GFF3's attribute names -- that asymmetry is why
+# annotations_for_project sorts GTF first for quantify while feature_coverage
+# is equally happy with either. BED is kept in the map for a format
+# feature_coverage's own row parser already understands, even though
+# _is_annotation (below) never actually resolves a BED here today -- see
+# launch_feature_coverage for why that entry is harmless rather than reachable
+# dead code.
 _FEATURE_COVERAGE_ANNOTATION_FORMATS = {
     FormatKind.GFF: "gff",
+    FormatKind.GTF: "gff",
     FormatKind.BED: "bed",
 }
 
@@ -4221,7 +4231,7 @@ async def launch_feature_coverage(
     if annotation_format is None:
         raise ValidationError(
             f"{annotation.name!r} is {annotation.format.kind.value}, which "
-            f"feature coverage cannot use -- it reads GFF or BED, not GTF.",
+            f"feature coverage cannot use -- it reads GFF, GTF, or BED.",
             details={"object_id": str(annotation.id), "kind": annotation.format.kind.value},
         )
 
