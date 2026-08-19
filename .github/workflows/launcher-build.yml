@@ -192,7 +192,17 @@ jobs:
         # see launcher/README.md.
         run: |
           set -euo pipefail
-          sudo apt-get update
+          # Same mirror-stall exposure as build-check.yml's apt steps: a
+          # mirror that accepts a connection and then stalls mid-transfer
+          # leaves the socket open, so apt waits indefinitely without these
+          # options (#577). The budget per source is (1 + Retries) x Timeout,
+          # ~60s here, well inside GitHub's 360-minute default job cap; the
+          # full rationale is on build-check.yml's "Install system build
+          # dependencies" step.
+          sudo apt-get -o Acquire::Retries=3 \
+                       -o Acquire::http::Timeout=15 \
+                       -o Acquire::https::Timeout=15 \
+                       update
           sudo apt-get install -y \
             libwebkit2gtk-4.1-dev libxdo-dev libssl-dev \
             libayatana-appindicator3-dev librsvg2-dev build-essential
