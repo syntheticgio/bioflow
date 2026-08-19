@@ -153,6 +153,14 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
+      - name: Trust the workspace
+        # The checkout is owned by the runner's uid while the job container
+        # runs as root, so git refuses it: "detected dubious ownership in
+        # repository". ops/tests/test_release_preflight.py shells out to git
+        # for real and fails on that, three tests' worth. Only an issue since
+        # these jobs moved into a container -- on a bare runner the uids match.
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+
       - name: Install backend dev dependencies
         run: pip install -e 'backend/.[dev]'
 
@@ -225,6 +233,14 @@ jobs:
       options: --volume /var/run/docker.sock:/var/run/docker.sock
     steps:
       - uses: actions/checkout@v7
+
+      - name: Trust the workspace
+        # The checkout is owned by the runner's uid while the job container
+        # runs as root, so git refuses it: "detected dubious ownership in
+        # repository". ops/tests/test_release_preflight.py shells out to git
+        # for real and fails on that, three tests' worth. Only an issue since
+        # these jobs moved into a container -- on a bare runner the uids match.
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
 
       - name: Install backend dev dependencies
         run: pip install -e 'backend/.[dev]'
