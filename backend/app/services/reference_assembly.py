@@ -358,7 +358,7 @@ def short_read_sets(objects: list[DataObject]) -> list[list[DataObject]]:
 # --- Long reads for Medaka polishing ---------------------------------------
 
 
-def is_long_read(obj: DataObject) -> bool:
+def is_long_read_for_polishing(obj: DataObject) -> bool:
     """Whether a FASTQ is long-read data.
 
     **Written positively, and deliberately not `not is_short_read(obj)`.**
@@ -414,6 +414,6 @@ def long_read_sets(objects: list[DataObject]) -> list[list[DataObject]]:
     ready = [
         obj
         for obj in objects
-        if obj.status is ObjectStatus.READY and is_long_read(obj)
+        if obj.status is ObjectStatus.READY and is_long_read_for_polishing(obj)
     ]
     return group_read_sets(ready)

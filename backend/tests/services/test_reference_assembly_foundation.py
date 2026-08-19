@@ -404,7 +404,7 @@ class TestIsLongRead:
             role=None,
             facts={"sra_platform": "OXFORD_NANOPORE"},
         )
-        assert reference_assembly.is_long_read(obj) is True
+        assert reference_assembly.is_long_read_for_polishing(obj) is True
 
     def test_illumina_platform_is_not_long(self):
         obj = _object(
@@ -413,7 +413,7 @@ class TestIsLongRead:
             role=None,
             facts={"sra_platform": "ILLUMINA"},
         )
-        assert reference_assembly.is_long_read(obj) is False
+        assert reference_assembly.is_long_read_for_polishing(obj) is False
 
     def test_nanopore_with_short_chemistry_is_still_long(self):
         """Platform beats chemistry, the same way it does in is_short_read.
@@ -428,7 +428,7 @@ class TestIsLongRead:
             role=None,
             facts={"sra_platform": "OXFORD_NANOPORE", "qc_read_chemistry": "short"},
         )
-        assert reference_assembly.is_long_read(obj) is True
+        assert reference_assembly.is_long_read_for_polishing(obj) is True
         assert reference_assembly.is_short_read(obj) is False
 
     def test_unknown_platform_and_chemistry_is_not_long(self):
@@ -442,7 +442,7 @@ class TestIsLongRead:
         obj = _object(
             name="reads.fastq", kind=FormatKind.FASTQ, role=None, facts={}
         )
-        assert reference_assembly.is_long_read(obj) is False
+        assert reference_assembly.is_long_read_for_polishing(obj) is False
 
     def test_non_fastq_is_not_long(self):
         """Not the negation of is_short_read.
@@ -456,7 +456,7 @@ class TestIsLongRead:
             role=None,
             facts={"molecule_type": "protein"},
         )
-        assert reference_assembly.is_long_read(obj) is False
+        assert reference_assembly.is_long_read_for_polishing(obj) is False
 
     def test_unknown_platform_with_long_chemistry_is_long(self):
         """CAPILLARY is neither LONG_READ_PLATFORMS nor SHORT_READ_PLATFORMS
@@ -471,7 +471,7 @@ class TestIsLongRead:
             role=None,
             facts={"sra_platform": "CAPILLARY", "qc_read_chemistry": "long"},
         )
-        assert reference_assembly.is_long_read(obj) is True
+        assert reference_assembly.is_long_read_for_polishing(obj) is True
 
 
 class TestLongReadSets:

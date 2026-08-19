@@ -2662,7 +2662,7 @@ class TestCardBuilderRegistry:
 def _ont_fastq(obj_id="ont1", name="reads.ont.fastq.gz"):
     """A READY long-read FASTQ, matching `_read_object`'s pattern.
 
-    `facts={"qc_platform": "OXFORD_NANOPORE"}` is what `is_long_read`
+    `facts={"qc_platform": "OXFORD_NANOPORE"}` is what `is_long_read_for_polishing`
     (`reference_assembly.py`) reads via `_qc_platform` to classify a FASTQ
     as long-read -- the card builder itself never inspects facts, since
     `long_read_sets` has already done that filtering by the time the card

@@ -6124,7 +6124,7 @@ async def launch_polish_long(
         chosen = candidates[0][0]
     else:
         chosen = await object_service.get_object(reads_object_id, owner=owner)
-        if not reference_assembly.is_long_read(chosen):
+        if not reference_assembly.is_long_read_for_polishing(chosen):
             raise ValidationError(
                 f"{chosen.name!r} is not long-read data; Medaka corrects a "
                 "draft using the long reads it was assembled from, and its "
