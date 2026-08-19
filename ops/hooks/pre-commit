@@ -1,0 +1,58 @@
+#!/usr/bin/env bash
+# git pre-commit hook: run ruff over the same paths, with the same config,
+# as the "Lint with ruff" step in .github/workflows/build-check.yml, so a
+# lint error is caught at `git commit` time instead of after a PR is open.
+#
+# The command below is a verbatim copy of CI's. Keep it in sync with
+# build-check.yml if either one changes -- a hook that lints a *different*
+# rule set is worse than no hook, because it reports green on something CI
+# will still reject.
+#
+# --config is explicit rather than relied on for auto-discovery:
+# backend/pyproject.toml only auto-applies to paths under backend/, so
+# ops/ and e2e/ would otherwise silently fall back to ruff's own built-in
+# defaults -- a different, smaller rule set (see #466).
+#
+# The whole tree is linted, not just the staged files. Ruff is fast enough
+# (~2s on this repo) that the simplicity is worth more than the saving, and
+# it matches what CI actually runs: a staged-files-only check passes while
+# CI fails whenever a commit's change breaks a file it didn't touch.
+#
+# Not installed by default -- git does not auto-run hooks from a cloned
+# repo. Opt in once per clone (main checkout or worktree alike):
+#
+#   git config core.hooksPath ops/hooks
+#
+# To commit anyway in an emergency: git commit --no-verify
+set -euo pipefail
+
+# Lint the tree being committed, not the main checkout. core.hooksPath is
+# stored once in the shared .git/config and a *relative* value resolves
+# against the main worktree, so a hook run from a worktree is the main
+# checkout's script -- it must not assume its own location is the tree under
+# commit. GIT_PREFIX is set by git to the cwd relative to the top level, so
+# `git rev-parse --show-toplevel` here gives the worktree that is committing.
+repo_root="$(git rev-parse --show-toplevel)"
+cd "$repo_root"
+
+if ! command -v ruff >/dev/null 2>&1; then
+  echo "pre-commit: ruff not found on PATH -- skipping the lint check." >&2
+  echo "pre-commit: install it with 'pip install ruff' (or 'brew install ruff')" >&2
+  echo "pre-commit: so this runs before CI does." >&2
+  exit 0
+fi
+
+if ! ruff check --config backend/pyproject.toml backend/app backend/tests ops e2e; then
+  cat >&2 <<'MSG'
+
+pre-commit: ruff found problems. This is the same check CI runs, so the
+commit is refused here rather than failing the PR later.
+
+Many rules fix themselves:
+
+    ruff check --config backend/pyproject.toml --fix backend/app backend/tests ops e2e
+
+Then re-stage and commit again. To bypass in an emergency: git commit --no-verify
+MSG
+  exit 1
+fi
