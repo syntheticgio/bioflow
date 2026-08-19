@@ -381,3 +381,23 @@ class TestActiveAnnotationStatsJobQuery:
         q = pipeline_service.active_annotation_stats_job_query(PydanticObjectId())
         assert isinstance(q, dict)
         assert all(isinstance(s, str) for s in q["state"]["$in"])
+
+
+class TestSalmonQuantifyNode:
+    def test_takes_reads_and_a_transcriptome(self):
+        spec = NODE_TYPES["salmon_quantify"]
+        ports = {p.name: p for p in spec.inputs}
+        assert ports["reads"].type.format == FormatKind.FASTQ
+        assert ports["transcriptome"].type.format == FormatKind.FASTA
+        # The role is what keeps protein.faa out of this port: a protein FASTA
+        # and a transcriptome FASTA are the same format.
+        assert ports["transcriptome"].type.role == ObjectRole.TRANSCRIPT
+
+    def test_output_matches_the_quantify_node_so_de_accepts_it(self):
+        # The whole reason no new differential expression entry point is
+        # needed: the DE node's input port keys on the role, so any node
+        # producing COUNTS feeds it.
+        salmon_out = NODE_TYPES["salmon_quantify"].outputs[0]
+        counts_out = NODE_TYPES["quantify"].outputs[0]
+        assert salmon_out.type.format == counts_out.type.format
+        assert salmon_out.type.role == counts_out.type.role == ObjectRole.COUNTS
