@@ -37,7 +37,7 @@ def _open_writer(path: Path):
     """Gzip-aware line writer."""
     if str(path).endswith(".gz"):
         return gzip.open(path, "wt")
-    return open(path, 'w')
+    return open(path, "w")
 
 
 def build_gene_index(gff_path: Path) -> dict[str, list[tuple[int, int, str]]]:

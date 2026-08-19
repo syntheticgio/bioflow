@@ -73,7 +73,13 @@ class TestAgentSettings:
     read by AgentService (Task 2) and the MCP config builder (Task 3).
     """
 
-    def test_defaults(self):
+    def test_defaults(self, monkeypatch):
+        # Cleared explicitly: `Settings()` reads the ambient environment, and
+        # docker-compose.override.yml sets AGENT_EXTRA_MCP_SERVERS for the api
+        # service (fetch + ncbi-datasets). Without this the test asserts the
+        # *deployment's* value rather than the default it names, and fails in
+        # the container while passing anywhere that variable is unset.
+        monkeypatch.delenv("AGENT_EXTRA_MCP_SERVERS", raising=False)
         s = Settings()
         assert s.pi_path == "/usr/bin/pi"
         assert s.pi_disabled is False

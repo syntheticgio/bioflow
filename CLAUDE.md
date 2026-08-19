@@ -740,6 +740,51 @@ a snapshot, not a live mirror; `--reseed` refreshes it. `/data` *is* shared
 with the main stack, deliberately -- fine for a UI or read-path check, worth a
 thought before running a pipeline that rewrites an existing artifact.
 
+## Fix every error you find, including the ones that were already there
+
+**When a lint or test run you triggered reports errors, fix all of them --
+not only the ones your own diff caused.** Do not separate "mine" from
+"pre-existing", do not file the rest for someone else, and do not report a
+red check as somebody else's problem. If you found it, it is yours.
+
+The instinct to triage by authorship is wrong here for a specific reason:
+this is a single-user repo, so "someone else will fix it" resolves to
+nobody. A pre-existing error that survives your PR has now survived a
+second person looking straight at it, and the next agent to run the same
+command will spend the same time re-deciding it is not theirs.
+
+This is not hypothetical. On 2026-08-19 a full-tree ruff run during #693
+reported 17 errors across `backend/app`, `backend/tests`, `ops` and `e2e`,
+only a handful of them from the branch's own work. One of the
+"pre-existing" ones was `F821 Undefined name 'SidecarRole'` in
+`suggestion_service.py` -- a live `NameError` on every Actions-tab
+evaluation of the SV-merge card, shipped and unnoticed. Triaging by
+authorship would have left a real bug in place under a green PR. That
+finding is the same argument the ruff pre-commit hook is kept for (see
+**Ruff is not a CI check** under
+[Commit messages](#commit-messages-are-conventional-commits)): the run that
+reports style trivia is the run that reports undefined names.
+
+Two practical notes:
+
+- **Lint the whole tree, not the files you touched.** Ruff's config
+  resolution also depends on the invocation directory (see the
+  `known-first-party` note in `backend/pyproject.toml` and #510), so run it
+  the way `ops/hooks/pre-commit` does -- from the repo root, with
+  `--config backend/pyproject.toml` over `backend/app backend/tests ops
+  e2e`. A staged-files-only check goes green while a file the commit did
+  not touch is broken, which is exactly the error this rule is about.
+- **`--fix` is a starting point, not the fix.** Read what it changed:
+  removing an "unused" import can be correct or can be the symptom of a
+  missing usage, and it will happily leave a quote style the file does not
+  use. Then run the tests for every file it touched.
+
+The same applies to a failing test you did not write. If a fix is genuinely
+out of scope -- it needs a design decision, or it would balloon the diff
+past reviewability -- that is the one case for filing an issue, and it
+still means saying so explicitly in the PR rather than leaving the failure
+behind.
+
 ## Verifying changes
 
 Manual testing in the browser at localhost:5173 is the primary verification
