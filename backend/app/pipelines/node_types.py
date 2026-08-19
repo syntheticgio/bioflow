@@ -160,6 +160,14 @@ async def _launch_vcf_stats(*, inputs: dict, params: dict, owner: str):
     )
 
 
+async def _launch_feature_coverage(*, inputs: dict, params: dict, owner: str):
+    return await pipeline_service.launch_feature_coverage(
+        bam_id=inputs["alignment"],
+        owner=owner,
+        annotation_id=inputs.get("annotation"),
+    )
+
+
 async def _launch_variant_calling(*, inputs: dict, params: dict, owner: str):
     return await pipeline_service.launch_variant_calling(
         bam_id=inputs["alignment"],
@@ -460,6 +468,28 @@ NODE_TYPES: dict[str, NodeTypeSpec] = {
             PortSpec(
                 "variants",
                 PortType(format=FormatKind.VCF, role=ObjectRole.VARIANTS),
+            ),
+        ),
+        outputs=(),
+    ),
+    "feature_coverage": NodeTypeSpec(
+        label="Feature coverage",
+        launch_name="pipeline_service.launch_feature_coverage",
+        run_kind=None,  # Read-only: facts + a report, no PipelineRun.
+        launch=_launch_feature_coverage,
+        inputs=(
+            PortSpec(
+                "alignment",
+                PortType(format=FormatKind.BAM, role=ObjectRole.ALIGNMENT),
+            ),
+            # Optional, same convention as quantify's annotation port:
+            # resolve_annotation falls back to the project's one unambiguous
+            # GTF/GFF when this is not wired, and refuses only when the
+            # project holds more than one.
+            PortSpec(
+                "annotation",
+                PortType(format=FormatKind.GTF),
+                required=False,
             ),
         ),
         outputs=(),

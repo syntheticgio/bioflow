@@ -1444,6 +1444,11 @@ QUANTIFY_MEM_MB = 4096
 
 DIFFERENTIAL_EXPRESSION_MEM_MB = 4096
 
+# Matches the handler's own @handler(...) registration (see
+# feature_coverage_handlers.run_feature_coverage): a job cannot need less
+# memory to run than it declares to the scheduler.
+FEATURE_COVERAGE_MEM_MB = 1024
+
 
 def refuse_if_over_budget(
     *, declared_mb: int, budget_mb: int, resource_override: bool
@@ -4142,6 +4147,122 @@ async def launch_quantify(
         bam_id=str(bam.id),
         strandedness=merged.strandedness,
         paired=merged.paired,
+    )
+    return job
+
+
+# feature_coverage_handlers.run_feature_coverage only understands these two
+# annotation shapes ("gff" or "bed" -- it raises PermanentError on anything
+# else). GTF is deliberately absent: _is_annotation (which gates both
+# resolve_annotation and annotations_for_project) accepts FormatKind.GFF and
+# FormatKind.GTF, so a project whose only annotation is a GTF would resolve
+# here and then have nowhere to map -- see launch_feature_coverage's
+# docstring for how that case is refused rather than silently mis-tagged.
+_FEATURE_COVERAGE_ANNOTATION_FORMATS = {
+    FormatKind.GFF: "gff",
+    FormatKind.BED: "bed",
+}
+
+
+async def launch_feature_coverage(
+    *,
+    bam_id: PydanticObjectId,
+    owner: str,
+    annotation_id: PydanticObjectId | None = None,
+    resource_override: bool = False,
+) -> Job:
+    """Queue per-feature read coverage for one BAM against one annotation.
+
+    Read-only, like bam_stats and vcf_stats: no derived object, just a report
+    plus summary facts merged onto the BAM. Unlike launch_bam_stats, this
+    needs a reference's `.fai` in addition to the BAM's own `.bai` -- and
+    unlike launch_bam_stats's `.bai` (which it builds by chaining into
+    index_bam when missing), there is no chaining precedent here for
+    building a *reference's* index on the fly from a read-only launch path.
+    Refusing with an actionable "index it first" / "build its index first"
+    message, matching launch_variant_calling's precedent exactly, is simpler
+    and keeps both required sidecars refused the same way.
+    """
+    from app.queue import queue
+    from app.services import object_service
+
+    # Hoisted above the enqueue for the same reason as launch_assembly: a
+    # declaration the budget can never satisfy is unclaimable, and claim.lua
+    # has no starvation escape (#478, #527).
+    refuse_if_over_budget(
+        declared_mb=FEATURE_COVERAGE_MEM_MB,
+        budget_mb=await current_admission_budget_mb(),
+        resource_override=resource_override,
+    )
+
+    bam = await object_service.get_object(bam_id, owner=owner)
+    _check_bam_stats_callable(bam)
+
+    reference = await _resolve_variant_reference(bam, None, owner=owner)
+    annotation = await resolve_annotation(bam.project_id, annotation_id, owner=owner)
+
+    bai = await _sidecar_of_role(bam, SidecarRole.BAI)
+    if bai is None:
+        raise ValidationError(
+            f"{bam.name!r} has no BAM index (.bai). Index it first.",
+            details={"bam_id": str(bam.id), "needs": "index_bam"},
+        )
+
+    fai = await _sidecar_of_role(reference, SidecarRole.FAI)
+    if fai is None:
+        raise ValidationError(
+            f"Reference {reference.name!r} has no FASTA index (.fai). "
+            f"Build its index first.",
+            details={"reference_id": str(reference.id), "needs": "build_index"},
+        )
+
+    annotation_format = _FEATURE_COVERAGE_ANNOTATION_FORMATS.get(annotation.format.kind)
+    if annotation_format is None:
+        raise ValidationError(
+            f"{annotation.name!r} is {annotation.format.kind.value}, which "
+            f"feature coverage cannot use -- it reads GFF or BED, not GTF.",
+            details={"object_id": str(annotation.id), "kind": annotation.format.kind.value},
+        )
+
+    payload: dict = {
+        "bam_id": str(bam.id),
+        "bam_name": bam.name,
+        "annotation_id": str(annotation.id),
+        "annotation_name": annotation.name,
+        "annotation_format": annotation_format,
+        "project_id": str(bam.project_id),
+    }
+    for key, obj in (("bam", bam), ("annotation", annotation), ("fai", fai)):
+        digest, path = await _resolve_readable(obj)
+        if digest:
+            payload[f"{key}_sha256"] = digest
+        if path:
+            payload[f"{key}_path"] = path
+
+    job = await queue.enqueue(
+        "feature_coverage",
+        owner=owner,
+        payload=payload,
+        job_class=JobClass.COMPUTE,
+        resources=JobResources(cpu=1, mem_mb=FEATURE_COVERAGE_MEM_MB, io=IoClass.HEAVY),
+        max_attempts=2,
+        dedup_key=f"feature_coverage:{bam.blob_sha256}:{annotation.blob_sha256}",
+        project_id=bam.project_id,
+        object_id=bam.id,
+        resource_override=resource_override,
+    )
+    if job is None:
+        raise ConflictError(
+            "Feature coverage is already queued or running for this BAM "
+            "and annotation",
+            details={"bam_id": str(bam.id), "annotation_id": str(annotation.id)},
+        )
+
+    log.info(
+        "feature_coverage_launched",
+        job_id=str(job.id),
+        bam_id=str(bam.id),
+        annotation_id=str(annotation.id),
     )
     return job
 
