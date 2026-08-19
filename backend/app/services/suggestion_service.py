@@ -1215,6 +1215,91 @@ def build_polish_card(obj, read_sets) -> SuggestionCard | None:
     )
 
 
+def build_polish_long_card(obj, long_read_sets) -> SuggestionCard | None:
+    """Long-read polishing of a draft assembly, by Medaka.
+
+    The sibling of `build_polish_card`, and deliberately a separate card
+    rather than a smarter version of that one. The two tools take different
+    reads, produce different facts, and fail for different reasons; merging
+    them would make the description, reason string, launch body and node
+    ports all conditional, and would force a project holding both
+    chemistries to have one tool chosen for it behind the user's back --
+    the guess `build_polish_card`'s docstring exists to forbid.
+
+    Keeping them separate is also what makes "never offer a broken
+    combination" structural rather than enforced: the two cards gate on
+    mutually exclusive predicates over the same read objects, so a
+    short-read project sees Polypolish, an ONT project sees Medaka, and a
+    hybrid project sees both as separate legitimate offers. There is no
+    combining step to get wrong.
+
+    Gated on the reads being long, for the mirror of the reason
+    `build_polish_card` gates on the reads being short: Medaka's models are
+    trained on long-read error profiles, so running it on Illumina data is
+    meaningless rather than merely unusual.
+
+    `--bacteria` is deliberately absent from the launch body -- it is a
+    dialog opt-in the user sets at launch time, not something this card
+    decides. The card offers the tool; it does not guess bacterial-vs-not.
+
+    **Ambiguity is unavailable, not a guess** -- same rule, same reason as
+    `build_polish_card`: cards launch directly with no dialog between click
+    and queue, so an auto-picked read set could silently polish an assembly
+    with the wrong sample's reads.
+    """
+    if not reference_assembly._is_assembly_like(obj):
+        return None
+    if obj.status is not ObjectStatus.READY:
+        return None
+
+    title = "Polish assembly (long reads)"
+    description = (
+        "Correct residual base errors in this assembly using the long "
+        "reads it was built from, with Medaka."
+    )
+
+    def unavailable(reason: str) -> SuggestionCard:
+        return SuggestionCard(
+            kind="polish_long",
+            category="REFERENCE_ASSEMBLY",
+            title=title,
+            description=description,
+            status=CardStatus.UNAVAILABLE,
+            reason=reason,
+        )
+
+    tool = tools.medaka()
+    if not tool.available:
+        return unavailable(tool.error or "Medaka is not installed.")
+
+    if not long_read_sets:
+        return unavailable(
+            "Medaka polishing needs long reads, and this project has none."
+        )
+    if len(long_read_sets) > 1:
+        return unavailable(
+            f"This project has {len(long_read_sets)} long-read sets. "
+            "Polishing needs a specific one, and picking for you could "
+            "correct this assembly with the wrong sample's reads."
+        )
+
+    chosen = long_read_sets[0]
+    body = {
+        "draft_object_id": str(obj.id),
+        "reads_object_id": str(chosen[0].id),
+    }
+
+    return SuggestionCard(
+        kind="polish_long",
+        category="REFERENCE_ASSEMBLY",
+        title=title,
+        description=description,
+        why=f"Long reads: {', '.join(o.name for o in chosen)}.",
+        status=CardStatus.AVAILABLE,
+        launch={"endpoint": "/pipelines/polish-long", "body": body},
+    )
+
+
 def build_scaffold_card(obj, references) -> SuggestionCard | None:
     """Reference-guided scaffolding of a draft assembly, by RagTag.
 
@@ -2066,6 +2151,7 @@ class _Prefetched:
     annotation_inputs: object | None
     alignment_target: object | None
     read_sets: object | None
+    long_reads: object | None
     scaffold_references: list[DataObject] | None
     all_read_sets: object | None
     assembly_alignments: object | None
@@ -2125,6 +2211,7 @@ CARD_BUILDERS: tuple[tuple[str, object], ...] = (
     ("completeness", lambda obj, ctx: build_completeness_card(obj)),
     ("consensus", lambda obj, ctx: build_consensus_card(obj, ctx.alignment_target)),
     ("polish", lambda obj, ctx: build_polish_card(obj, ctx.read_sets)),
+    ("polish_long", lambda obj, ctx: build_polish_long_card(obj, ctx.long_reads)),
     ("scaffold", lambda obj, ctx: build_scaffold_card(obj, ctx.scaffold_references)),
     (
         "misassembly",
@@ -2266,6 +2353,18 @@ async def suggestions_for(obj) -> list[dict]:
         except Exception:  # noqa: BLE001 - a filter failure loses one card, not the grid
             read_sets = None
 
+    long_reads = None
+    if project_objects is not None:
+        # The long-read counterpart of `read_sets` above. Kept out of the
+        # synchronous card builder the same way, and resolved separately
+        # rather than derived from `read_sets` -- `long_read_sets` is not
+        # the complement of `short_read_sets`, since an unlabelled file is
+        # in neither.
+        try:
+            long_reads = reference_assembly.long_read_sets(project_objects)
+        except Exception:  # noqa: BLE001 - a filter failure loses one card, not the grid
+            long_reads = None
+
     scaffold_references = None
     if project_objects is not None:
         # Deliberately not the `references` list built above -- that one is
@@ -2347,6 +2446,7 @@ async def suggestions_for(obj) -> list[dict]:
         annotation_inputs=annotation_inputs,
         alignment_target=alignment_target,
         read_sets=read_sets,
+        long_reads=long_reads,
         scaffold_references=scaffold_references,
         all_read_sets=all_read_sets,
         assembly_alignments=assembly_alignments,
