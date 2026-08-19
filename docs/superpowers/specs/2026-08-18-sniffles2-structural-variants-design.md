@@ -253,6 +253,10 @@ contig density chart, and it is what makes an SV callset readable at a glance:
 a nanopore callset is dominated by sub-kb events, and a spike in the >=1 Mb
 bin is usually a mapping artifact rather than biology.
 
+`SvResults` also carries the download affordance from Decision 6: the VCF and
+its TBI, offered together rather than as two unrelated files, since a viewer
+needs both.
+
 ### `suggestion_service.py`
 
 `build_structural_variants_card(obj, chemistry)`, registered in the card list
@@ -318,13 +322,71 @@ Restating #619's, with where each is satisfied:
    `sv_db.py`'s SV-native columns and the length histogram are the concrete
    one.
 
+One criterion beyond #619's list, from Decision 6:
+
+5. **The callset leaves BioFlow in a form a genome browser can load** -- the
+   VCF and its TBI download together, so breakpoints can be inspected in IGV.
+
+## Decision 6: the callset is exportable for external viewers
+
+**In scope.** The run stores a bgzipped VCF with its TBI sidecar (see the
+runner's Output note), and the results view offers both as a download.
+
+That pair is exactly what IGV, JBrowse, and every other genome browser expect
+for a random-access VCF track: the TBI is what lets a viewer seek to a locus
+without reading the whole file. So this is a download affordance over
+artifacts the pipeline already produces, not a viewer -- BioFlow renders the
+table and the length histogram, and hands off to a real browser for
+breakpoint inspection, which is where that work belongs.
+
+The obligation this creates is narrow but real: **the VCF and its index must
+be downloadable together**, since a `.vcf.gz` without its `.tbi` is not a
+track a viewer can load.
+
 ## Out of scope
 
+Two capabilities were considered for this issue and deliberately deferred,
+each to its own issue. Both were costed against this codebase first; the
+costing is recorded because "cheap, fold it in" was the initial read on both
+and was wrong in both cases.
+
 - **Short-read SV calling** -- #620, which inherits Decisions 1, 3, and 4.
-- **SV annotation** -- no BCSQ-equivalent consequence calling for structural
-  variants. The variants view's severe-consequence list has no counterpart
-  here and none is planned in this change.
-- **SV genotyping across samples, or population merging** (`sniffles --combine`).
-  Single-sample calling only.
-- **IGV or any browser-based breakpoint visualisation.** The VCF is stored
-  with its TBI index, so an external viewer can consume it.
+
+- **SV annotation.** `bcftools csq`, the existing annotation path (~1,800
+  lines across five modules), computes coding consequences for *small*
+  variants from a GFF and has no concept of a deletion spanning twelve genes.
+  Real SV annotation means a new third-party tool, and the obvious candidate
+  is heavier than a tool integration usually is here. AnnotSV v3.5.10,
+  verified 2026-08-18: written in **Tcl** (a runtime this image does not
+  have), **GPL-3.0** (this project's first copyleft dependency, a licensing
+  call for the maintainer rather than an implementation detail), installed by
+  `make install` (a fourth install shape alongside apt, pip, and vendored
+  binaries), and -- decisively -- requiring a multi-gigabyte
+  `Annotations_Human_*.tar.gz` fetched at build time from a single academic
+  web host (`lbgi.fr`) with no checksum and no mirror.
+
+  That last point is the DeepVariant problem: `CLAUDE.md` records a ~3 GB
+  image warranting an entire on-demand sibling-container design with explicit
+  user consent, specifically so a download that size is never forced on
+  someone who did not ask for it. Baking a comparable bundle into the base
+  image is what that design exists to prevent, so AnnotSV needs the same
+  `NEEDS_INSTALL` flow -- making it roughly the size of the Sniffles work
+  itself rather than a section of it.
+
+  A lighter alternative exists and is worth evaluating in that issue rather
+  than assumed here: gene-overlap annotation by intersecting breakpoints
+  against a GFF the project already holds for the reference. No new tool, no
+  download, no license question, and it answers "which genes does this
+  deletion hit?" -- most of the practical value, without pathogenicity
+  ranking.
+
+- **Multi-sample merging** (`sniffles --combine`). One flag on the runner, and
+  everything around it is new. Every request model in `api/v1/pipelines.py`
+  keys on a single `object_id` or `bam_id`; the one multi-input exception
+  (`hifi_bam_ids` / `nano_bam_ids`) is one assembly consuming several read
+  sets, not N samples producing a joint callset. It also breaks this spec's
+  storage design: `sv_db.py`'s `gt` column holds per-sample genotypes for one
+  callset, and the results view has no sample picker. The failure mode of a
+  half-built version is that the table shows sample 1's genotype whichever
+  sample is selected -- which is precisely the bug `variant_db.py`'s `gt`
+  comment records having been written to avoid.
