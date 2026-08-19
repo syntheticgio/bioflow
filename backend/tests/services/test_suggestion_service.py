@@ -20,6 +20,7 @@ from app.services.suggestion_service import (
     build_align_card,
     build_annotate_card,
     build_assemble_card,
+    build_classify_reads_card,
     build_feature_coverage_card,
     build_preprocess_card,
     build_quantify_card,
@@ -1202,6 +1203,43 @@ class TestAnnotateCard:
         assert "csq" in card.reason.lower()
 
 
+class TestClassifyReadsCard:
+    """Per CLAUDE.md, assert the *unavailable* direction hardest: the image
+    ships kraken2, so an availability assertion passes whether or not the
+    seam it depends on actually works. The unavailable-direction test is the
+    one that fails when the probe patch stops reaching the call site."""
+
+    def test_offered_for_fastq(self):
+        obj = _fake_obj(kind=FormatKind.FASTQ, obj_id="fq1")
+        card = build_classify_reads_card(obj)
+        assert card is not None
+        assert card.kind == "classify_reads"
+        assert card.category == "CLASSIFY_READS"
+        assert card.status is CardStatus.AVAILABLE
+        assert card.launch["endpoint"] == "/pipelines/classify-reads"
+        assert card.launch["body"] == {"object_id": "fq1"}
+
+    def test_absent_for_fasta(self):
+        obj = _fake_obj(kind=FormatKind.FASTA)
+        assert build_classify_reads_card(obj) is None
+
+    def test_flips_unavailable_when_probe_off(self, monkeypatch):
+        from app.pipelines.tools import Tool
+        from app.services import suggestion_service
+
+        monkeypatch.setattr(
+            suggestion_service.tools,
+            "kraken2",
+            lambda: Tool(name="kraken2", path=None, version=None, error="not found"),
+        )
+        obj = _fake_obj(kind=FormatKind.FASTQ)
+        card = build_classify_reads_card(obj)
+        assert card is not None
+        assert card.status is CardStatus.UNAVAILABLE
+        assert card.reason == "not found"
+        assert card.launch is None
+
+
 @contextmanager
 def _no_db():
     """Silence the two database questions `suggestions_for` asks at the end.
@@ -1299,7 +1337,9 @@ class TestSuggestionsFor:
                    return_value=_FakeTool(True)), stub_db(
                        references=[_ref("aaa", "ref.fna")]):
             cards = await suggestions_for(_fake_obj())
-        assert [c["kind"] for c in cards] == ["preprocess", "align", "assemble"]
+        assert [c["kind"] for c in cards] == [
+            "preprocess", "align", "classify_reads", "assemble",
+        ]
 
     async def test_a_launchable_card_with_a_dialog_carries_configure(self):
         """The preprocess card opens TrimDialog, so it offers Adjust."""
@@ -1374,7 +1414,9 @@ class TestSuggestionsFor:
                    return_value=_FakeTool(True)), stub_db(references=[]):
             # No reference, so align is unavailable and assemble always is.
             cards = await suggestions_for(_fake_obj())
-        assert [c["kind"] for c in cards] == ["preprocess", "align", "assemble"]
+        assert [c["kind"] for c in cards] == [
+            "preprocess", "align", "classify_reads", "assemble",
+        ]
         assert cards[1]["status"] == "unavailable"
 
     async def test_protein_and_transcript_fasta_are_not_counted_as_references(self):
@@ -1431,8 +1473,10 @@ class TestSuggestionsFor:
         ), stub_db(references=[_ref("aaa", "ref.fna")]):
             cards = await suggestions_for(_fake_obj())
 
-        # Align is gone; the other two survive in their usual order.
-        assert [c["kind"] for c in cards] == ["preprocess", "assemble"]
+        # Align is gone; the other three survive in their usual order.
+        assert [c["kind"] for c in cards] == [
+            "preprocess", "classify_reads", "assemble",
+        ]
 
     async def test_every_card_is_a_plain_dict_with_the_full_key_set(self):
         """This goes out as JSON -- a SuggestionCard would not serialise, and

@@ -934,6 +934,52 @@ def build_annotate_genome_card(obj) -> SuggestionCard | None:
     )
 
 
+def build_classify_reads_card(obj) -> SuggestionCard | None:
+    """Taxonomic classification: what species these reads actually contain.
+
+    Deliberately positioned against the read-quality QC card: that one
+    reports adapter and duplication levels, this one answers identity --
+    verifying the labeled organism and catching cross-species
+    contamination (spec K2-S1). Availability tracks the binary probe
+    only; the database's absence changes the launch dialog's copy, never
+    the card state (spec K2-S2).
+    """
+    if obj.format.kind is not FormatKind.FASTQ:
+        return None
+
+    title = "Identify organisms"
+    description = (
+        "Classify reads by species with Kraken2 to verify the sample's "
+        "organism and detect cross-species contamination -- a different "
+        "question from read-quality QC's adapter and duplication checks."
+    )
+
+    kraken_tool = tools.kraken2()
+    if not kraken_tool.available:
+        return SuggestionCard(
+            kind="classify_reads",
+            category="CLASSIFY_READS",
+            title=title,
+            description=description,
+            status=CardStatus.UNAVAILABLE,
+            reason=kraken_tool.error or "Kraken2 is unavailable.",
+        )
+
+    return SuggestionCard(
+        kind="classify_reads",
+        category="CLASSIFY_READS",
+        title=title,
+        description=description,
+        status=CardStatus.AVAILABLE,
+        launch={
+            "endpoint": "/pipelines/classify-reads",
+            # db_key is added by the frontend dialog; the body here is the
+            # part the card knows.
+            "body": {"object_id": str(obj.id)},
+        },
+    )
+
+
 def build_assemble_card(obj) -> SuggestionCard | None:
     """De novo assembly.
 
@@ -2323,6 +2369,7 @@ CARD_BUILDERS: tuple[tuple[str, object], ...] = (
     ),
     ("annotate", lambda obj, ctx: build_annotate_card(obj, ctx.annotation_inputs)),
     ("annotate_genome", lambda obj, ctx: build_annotate_genome_card(obj)),
+    ("classify_reads", lambda obj, ctx: build_classify_reads_card(obj)),
     ("assemble", lambda obj, ctx: build_assemble_card(obj)),
     ("completeness", lambda obj, ctx: build_completeness_card(obj)),
     ("consensus", lambda obj, ctx: build_consensus_card(obj, ctx.alignment_target)),

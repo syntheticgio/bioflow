@@ -49,6 +49,7 @@ ENDPOINT_JOB_TYPES: dict[str, frozenset[str]] = {
     "/pipelines/variants": frozenset({"call_variants"}),
     "/pipelines/annotate": frozenset({"annotate_variants"}),
     "/pipelines/annotate-genome": frozenset({"annotate_genome"}),
+    "/pipelines/classify-reads": frozenset({"classify_reads"}),
     "/pipelines/assemble": frozenset({"assemble_reads"}),
     "/pipelines/completeness": frozenset({"assess_completeness"}),
     "/pipelines/gc-tracks": frozenset({"analyze_gc_tracks"}),
