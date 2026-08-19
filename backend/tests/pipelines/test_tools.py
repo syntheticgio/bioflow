@@ -281,6 +281,7 @@ class TestSerialization:
             "prefetch",
             "datasets",
             "featurecounts",
+            "salmon",
             "ivar",
             "quast",
             "craq",
