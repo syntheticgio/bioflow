@@ -13,6 +13,7 @@ count files that look interchangeable describe different gene universes.
 
 import re
 
+from app.errors import ValidationError
 from app.logging import get_logger
 
 log = get_logger(__name__)
@@ -55,3 +56,101 @@ def parse_quant(text: str) -> tuple[dict[str, float], dict]:
         "estimated_reads": sum(per_transcript.values()),
     }
     return per_transcript, facts
+
+
+# NCBI CDS deflines carry bracketed attributes after the sequence ID:
+#   >lcl|NC_001133.9_cds_NP_009332.1_1 [gene=PAU8] [locus_tag=YAL068C] ...
+# Verified against GCF_000146045.2 (S. cerevisiae R64) rather than recalled --
+# see the plan's defline verification task.
+_ATTR_RE = re.compile(r"\[(\w+)=([^\]]*)\]")
+
+# locus_tag first, deliberately. `counts_runner.attributes_for_format` groups
+# NCBI GFF3 by locus_tag, so preferring `gene` here would produce a gene
+# universe that does not match featureCounts output for the same organism --
+# two counts files that look interchangeable and are not.
+_GENE_ATTRIBUTES = ("locus_tag", "gene")
+
+
+def parse_tx2gene(headers: list[str]) -> dict[str, str]:
+    """Transcript ID to gene ID, from a transcriptome FASTA's deflines.
+
+    Raises rather than guessing. The tempting fallback -- when a defline
+    carries no gene attribute, use the transcript ID as its own gene -- is
+    what makes this function dangerous: it produces a counts file with one
+    "gene" per transcript that merges cleanly, passes every downstream sanity
+    check, and quietly tests a gene universe the user never chose. Nothing
+    downstream can detect it. So an unmappable header is an error naming the
+    header, which a user can act on.
+    """
+    mapping: dict[str, str] = {}
+    for header in headers:
+        line = header[1:] if header.startswith(">") else header
+        line = line.strip()
+        if not line:
+            continue
+
+        transcript_id = line.split(None, 1)[0]
+        attrs = dict(_ATTR_RE.findall(line))
+
+        gene_id = None
+        for key in _GENE_ATTRIBUTES:
+            value = (attrs.get(key) or "").strip()
+            if value:
+                gene_id = value
+                break
+
+        if gene_id is None:
+            raise ValidationError(
+                "This transcriptome's sequence names do not say which gene "
+                "each transcript belongs to, so transcript estimates cannot "
+                f"be summed into genes. First one: {transcript_id!r}. "
+                "A CDS or RNA FASTA downloaded from NCBI carries "
+                "[locus_tag=...] or [gene=...] on every sequence.",
+                details={"header": line[:200], "transcript_id": transcript_id},
+            )
+
+        mapping[transcript_id] = gene_id
+
+    return mapping
+
+
+def summarize_to_gene(
+    per_transcript: dict[str, float], tx2gene: dict[str, str]
+) -> tuple[dict[str, int], dict]:
+    """Transcript-level estimates summed into integer gene-level counts.
+
+    The tximport equivalent, and the reason Salmon output can feed the same
+    differential expression test featureCounts output does.
+
+    Two details that would each be a silent error if done the other way.
+    Rounding happens once, after summing: a gene with three transcripts at 0.4
+    estimated reads each has a read's worth of evidence, and rounding per
+    transcript first would throw all of it away, thousands of times over.
+    And every gene in the map is present in the output even at zero, because
+    the gene universe belongs to the reference rather than to the sample --
+    `de_runner.merge_counts` refuses samples whose gene sets differ at all, so
+    dropping a gene that happened to get no reads in one sample would break
+    the merge for the whole experiment.
+    """
+    unknown = set(per_transcript) - set(tx2gene)
+    if unknown:
+        raise ValidationError(
+            f"{len(unknown)} transcripts in the quantification are not in the "
+            "transcript-to-gene map, so their reads would be silently "
+            f"dropped. First: {sorted(unknown)[0]!r}. This usually means the "
+            "index was built from a different file than the one being "
+            "summarized.",
+            details={"unknown": sorted(unknown)[:5], "count": len(unknown)},
+        )
+
+    totals: dict[str, float] = {gene: 0.0 for gene in tx2gene.values()}
+    for transcript, reads in per_transcript.items():
+        totals[tx2gene[transcript]] += reads
+
+    counts = {gene: round(value) for gene, value in totals.items()}
+    facts = {
+        "genes_in_reference": len(counts),
+        "genes_detected": sum(1 for v in counts.values() if v > 0),
+        "counted_fragments": sum(counts.values()),
+    }
+    return counts, facts

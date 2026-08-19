@@ -9,6 +9,7 @@ its index sidecars.
 
 import pytest
 
+from app.errors import ValidationError
 from app.pipelines import salmon_runner
 
 # A real quant.sf header plus three rows. Columns are Name, Length,
@@ -47,3 +48,111 @@ class TestParseQuant:
         )
         assert per_tx == {}
         assert facts["transcripts_in_index"] == 0
+
+
+# Real NCBI CDS deflines, verbatim from GCF_000146045.2 (S. cerevisiae R64) --
+# fetched and confirmed in this plan's defline-verification task rather than
+# recalled or synthesized. Full-file counts on that download: 6027 total
+# sequences, 100% carry locus_tag=, only 87.8% carry gene= -- so a fixture
+# with every record having a gene= would never exercise the fallback path a
+# real transcriptome hits on over 1 in 10 of its records.
+HEADERS = [
+    ">lcl|NC_001133.9_cds_NP_009332.1_1 [gene=PAU8] [locus_tag=YAL068C] "
+    "[db_xref=SGD:S000002142,GeneID:851229] [protein=seripauperin PAU8] "
+    "[protein_id=NP_009332.1] [location=complement(1807..2169)] [gbkey=CDS]",
+    # No gene= at all -- a real record, not a synthetic edge case. This is
+    # what makes the locus_tag-first fallback path realistic rather than
+    # merely theoretical.
+    ">lcl|NC_001133.9_cds_NP_878038.1_2 [locus_tag=YAL067W-A] "
+    "[db_xref=SGD:S000028593,GeneID:1466426] "
+    "[protein=uncharacterized protein] [protein_id=NP_878038.1] "
+    "[location=2480..2707] [gbkey=CDS]",
+    ">lcl|NC_001133.9_cds_NP_009333.1_3 [gene=SEO1] [locus_tag=YAL067C] "
+    "[db_xref=SGD:S000000062,GeneID:851230] "
+    "[protein=putative permease SEO1] [protein_id=NP_009333.1] "
+    "[location=complement(7235..9016)] [gbkey=CDS]",
+    # Second CDS of the same gene: the case that makes summarization more
+    # than a rename.
+    ">lcl|NC_001133.9_cds_NP_009334.1_4 [gene=SEO1] [locus_tag=YAL067C] "
+    "[protein=Seo1p isoform] [protein_id=NP_009334.1] [gbkey=CDS]",
+]
+
+
+class TestParseTx2Gene:
+    def test_maps_each_transcript_to_its_locus_tag(self):
+        mapping = salmon_runner.parse_tx2gene(HEADERS)
+        assert mapping == {
+            "lcl|NC_001133.9_cds_NP_009332.1_1": "YAL068C",
+            # No gene= on this record -- locus_tag is the only source.
+            "lcl|NC_001133.9_cds_NP_878038.1_2": "YAL067W-A",
+            "lcl|NC_001133.9_cds_NP_009333.1_3": "YAL067C",
+            # Both CDS of SEO1 collapse onto one gene, which is what makes
+            # summarization more than a rename.
+            "lcl|NC_001133.9_cds_NP_009334.1_4": "YAL067C",
+        }
+
+    def test_prefers_locus_tag_over_gene(self):
+        # locus_tag is what counts_runner.attributes_for_format groups NCBI
+        # GFF3 by. Preferring `gene=` would produce a gene universe that does
+        # not match featureCounts output for the same organism.
+        mapping = salmon_runner.parse_tx2gene(
+            [">lcl|X_cds_1 [gene=ABC1] [locus_tag=Y0001W]"]
+        )
+        assert mapping == {"lcl|X_cds_1": "Y0001W"}
+
+    def test_falls_back_to_gene_when_no_locus_tag(self):
+        mapping = salmon_runner.parse_tx2gene([">lcl|X_cds_1 [gene=ABC1]"])
+        assert mapping == {"lcl|X_cds_1": "ABC1"}
+
+    def test_refuses_a_header_it_cannot_map(self):
+        # REQ-TX2GENE-1. The alternative -- treating the transcript as its own
+        # gene -- yields a counts file that merges cleanly and is wrong.
+        with pytest.raises(ValidationError) as exc:
+            salmon_runner.parse_tx2gene([">some_bare_transcript_id"])
+        assert "some_bare_transcript_id" in str(exc.value)
+
+    def test_refusal_names_the_offending_header_not_just_a_count(self):
+        with pytest.raises(ValidationError) as exc:
+            salmon_runner.parse_tx2gene(HEADERS + [">unmappable_one"])
+        assert "unmappable_one" in str(exc.value)
+
+
+class TestSummarizeToGene:
+    def test_sums_transcripts_belonging_to_one_gene(self):
+        per_tx = {"t1": 10.4, "t2": 5.2, "t3": 4.4}
+        tx2gene = {"t1": "geneA", "t2": "geneB", "t3": "geneB"}
+        counts, _ = salmon_runner.summarize_to_gene(per_tx, tx2gene)
+        # geneB is 5.2 + 4.4 = 9.6, rounded once at the end -> 10.
+        assert counts == {"geneA": 10, "geneB": 10}
+
+    def test_rounds_after_summing_not_before(self):
+        # Three transcripts at 0.4 each are one read's worth of evidence.
+        # Rounding per transcript first would discard all of it.
+        per_tx = {"t1": 0.4, "t2": 0.4, "t3": 0.4}
+        tx2gene = {"t1": "g", "t2": "g", "t3": "g"}
+        counts, _ = salmon_runner.summarize_to_gene(per_tx, tx2gene)
+        assert counts == {"g": 1}
+
+    def test_genes_with_no_reads_are_kept(self):
+        # The gene universe must be the reference's, not the sample's.
+        # Dropping zero-count genes would make two samples disagree on their
+        # gene sets, which de_runner.merge_counts refuses outright.
+        per_tx = {"t1": 0.0, "t2": 5.0}
+        tx2gene = {"t1": "geneA", "t2": "geneB"}
+        counts, facts = salmon_runner.summarize_to_gene(per_tx, tx2gene)
+        assert counts == {"geneA": 0, "geneB": 5}
+        assert facts["genes_in_reference"] == 2
+        assert facts["genes_detected"] == 1
+
+    def test_refuses_a_transcript_absent_from_the_map(self):
+        # Salmon reported a transcript the map does not know. Summing the rest
+        # silently would drop reads from the totals.
+        with pytest.raises(ValidationError) as exc:
+            salmon_runner.summarize_to_gene({"unknown_tx": 5.0}, {"t1": "g"})
+        assert "unknown_tx" in str(exc.value)
+
+    def test_counted_fragments_reports_the_integer_total(self):
+        per_tx = {"t1": 10.4, "t2": 5.2}
+        tx2gene = {"t1": "geneA", "t2": "geneB"}
+        _, facts = salmon_runner.summarize_to_gene(per_tx, tx2gene)
+        assert facts["counted_fragments"] == 15
