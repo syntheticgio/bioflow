@@ -1411,6 +1411,7 @@ ANNOTATE_GENOME_MEM_MB = 16384
 # Sized for bwa-mem2's alignment step, not for Polypolish -- see the handler's
 # own note on why peak RSS scales with the draft rather than the reads.
 POLISH_MEM_MB = 16384
+POLISH_LONG_MEM_MB = 16384
 
 # Matches the handler's own @handler(...) registration -- see
 # assess_assembly_qv's docstring for the real-data measurement this figure
@@ -4153,13 +4154,23 @@ async def launch_quantify(
 
 # feature_coverage_handlers.run_feature_coverage only understands these two
 # annotation shapes ("gff" or "bed" -- it raises PermanentError on anything
-# else). GTF is deliberately absent: _is_annotation (which gates both
-# resolve_annotation and annotations_for_project) accepts FormatKind.GFF and
-# FormatKind.GTF, so a project whose only annotation is a GTF would resolve
-# here and then have nowhere to map -- see launch_feature_coverage's
-# docstring for how that case is refused rather than silently mis-tagged.
+# else). GTF maps to the same "gff" string as GFF3: bedtools coverage and
+# feature_coverage_runner's row parser only care about column POSITIONS
+# (seq_id/type/start/end/strand/attributes at 0/2/3/4/6/8), which GTF and
+# GFF3 share -- they differ only in how column 8's attribute string is
+# punctuated (`key "value";` vs `key=value;`), which _gff_name handles for
+# both. This is the opposite of featureCounts (counts_runner
+# .attributes_for_format), which genuinely needs GTF's `-g gene_id`
+# convention and cannot read GFF3's attribute names -- that asymmetry is why
+# annotations_for_project sorts GTF first for quantify while feature_coverage
+# is equally happy with either. BED is kept in the map for a format
+# feature_coverage's own row parser already understands, even though
+# _is_annotation (below) never actually resolves a BED here today -- see
+# launch_feature_coverage for why that entry is harmless rather than reachable
+# dead code.
 _FEATURE_COVERAGE_ANNOTATION_FORMATS = {
     FormatKind.GFF: "gff",
+    FormatKind.GTF: "gff",
     FormatKind.BED: "bed",
 }
 
@@ -4220,7 +4231,7 @@ async def launch_feature_coverage(
     if annotation_format is None:
         raise ValidationError(
             f"{annotation.name!r} is {annotation.format.kind.value}, which "
-            f"feature coverage cannot use -- it reads GFF or BED, not GTF.",
+            f"feature coverage cannot use -- it reads GFF, GTF, or BED.",
             details={"object_id": str(annotation.id), "kind": annotation.format.kind.value},
         )
 
@@ -5755,6 +5766,154 @@ async def launch_polish(
         draft_id=str(draft.id),
         read_files=len(chosen),
         depth=payload["depth"],
+        tool_version=tool.version,
+    )
+    return job
+
+
+async def launch_polish_long(
+    *,
+    draft_object_id: PydanticObjectId,
+    owner: str,
+    reads_object_id: PydanticObjectId | None = None,
+    bacteria: bool = False,
+    resource_override: bool = False,
+) -> Job:
+    """Queue a Medaka run: long reads correcting a draft assembly.
+
+    Same provenance shape as `launch_polish` -- the handler aligns the reads
+    to the draft itself, so the alignment target is correct by construction
+    rather than by check. Unlike Polypolish, the aligner is not ours to
+    name: Medaka resolves its own minimap2 preset from the model.
+
+    Reads are resolved from the project when not named explicitly, and only
+    when the choice is unambiguous. `reference_assembly.long_read_sets` is
+    what decides which candidates are eligible, and there is no mate slot --
+    ONT and PacBio data is unpaired.
+
+    `bacteria` opts into ONT's bacterial-methylation model. It is a
+    parameter rather than an inference: nothing in the object graph reliably
+    says a draft is a bacterial isolate, and ONT ships that model as a
+    research release.
+    """
+    from app.queue import queue
+    from app.services import object_service, reference_assembly, run_service
+
+    refuse_if_over_budget(
+        declared_mb=POLISH_LONG_MEM_MB,
+        budget_mb=await current_admission_budget_mb(),
+        resource_override=resource_override,
+    )
+
+    tool = tools.require(tools.medaka())
+
+    draft = await object_service.get_object(draft_object_id, owner=owner)
+    reference_assembly.check_draft_assembly(draft)
+
+    if reads_object_id is None:
+        candidates = reference_assembly.long_read_sets(
+            await object_service.list_objects(
+                draft.project_id, owner=owner, status=ObjectStatus.READY
+            )
+        )
+        if not candidates:
+            raise ValidationError(
+                "Polishing with Medaka needs long reads, and this project "
+                "has none",
+                details={"draft_id": str(draft.id)},
+            )
+        if len(candidates) > 1:
+            raise ValidationError(
+                "This project has several long-read sets; name the one to "
+                "polish with",
+                details={
+                    "draft_id": str(draft.id),
+                    "candidates": [
+                        [str(o.id) for o in group] for group in candidates
+                    ],
+                },
+            )
+        chosen = candidates[0][0]
+    else:
+        chosen = await object_service.get_object(reads_object_id, owner=owner)
+        if not reference_assembly.is_long_read(chosen):
+            raise ValidationError(
+                f"{chosen.name!r} is not long-read data; Medaka corrects a "
+                "draft using the long reads it was assembled from, and its "
+                "models are trained on long-read error profiles",
+                details={"object_id": str(chosen.id)},
+            )
+
+    draft_digest, draft_path = await _resolve_readable(draft)
+    payload: dict = {
+        "draft_object_id": str(draft.id),
+        "draft_name": draft.name,
+        "threads": 8,
+        "bacteria": bacteria,
+    }
+    if draft_digest:
+        payload["draft_sha256"] = draft_digest
+    if draft_path:
+        payload["draft_path"] = draft_path
+
+    reads_digest, reads_path = await _resolve_readable(chosen)
+    payload["reads_object_id"] = str(chosen.id)
+    payload["reads_name"] = chosen.name
+    if reads_digest:
+        payload["reads_sha256"] = reads_digest
+    if reads_path:
+        payload["reads_path"] = reads_path
+
+    run = await run_service.create_run(
+        kind=RunKind.REFERENCE_ASSEMBLY,
+        project_id=draft.project_id,
+        label=f"Polish {draft.name} (Medaka)",
+        inputs=[
+            RunInput(
+                object_id=draft.id,
+                name=draft.name,
+                role=RunInputRole.DRAFT_ASSEMBLY,
+            ),
+            RunInput(
+                object_id=chosen.id,
+                name=chosen.name,
+                role=RunInputRole.READS,
+            ),
+        ],
+        params={"threads": payload["threads"], "bacteria": bacteria},
+        owner=owner,
+        tool="medaka",
+    )
+
+    job = await queue.enqueue(
+        "polish_long_assembly",
+        owner=owner,
+        payload=payload,
+        job_class=JobClass.COMPUTE,
+        resources=JobResources(
+            cpu=8, mem_mb=POLISH_LONG_MEM_MB, io=IoClass.HEAVY
+        ),
+        max_attempts=1,
+        dedup_key=f"polish_long:{draft.id}:{chosen.id}",
+        project_id=draft.project_id,
+        object_id=draft.id,
+        resource_override=resource_override,
+    )
+    if job is None:
+        await run_service.discard_run(run.id, owner=run.owner)
+        raise ConflictError(
+            "Medaka polishing is already queued or running for this assembly",
+            details={"object_id": str(draft.id)},
+        )
+
+    await run_service.link_job(run.id, job.id, RunJobRole.POLISH)
+    log.info(
+        "polish_long_launched",
+        job_id=str(job.id),
+        run_id=str(run.id),
+        draft_id=str(draft.id),
+        reads_id=str(chosen.id),
+        bacteria=bacteria,
         tool_version=tool.version,
     )
     return job

@@ -19,6 +19,7 @@ def _object(
     project_id=None,
     derived_from=None,
     facts=None,
+    metadata=None,
 ):
     return SimpleNamespace(
         id=PydanticObjectId(),
@@ -29,6 +30,7 @@ def _object(
         project_id=project_id or PydanticObjectId(),
         derived_from=derived_from or [],
         facts=facts or {},
+        metadata=metadata or {},
     )
 
 
@@ -392,3 +394,105 @@ class TestPrimerBedValidation:
         )
         with pytest.raises(ValidationError, match="not ready"):
             reference_assembly.check_primer_bed(bed, reference)
+
+
+class TestIsLongRead:
+    def test_nanopore_platform_is_long(self):
+        obj = _object(
+            name="reads.fastq",
+            kind=FormatKind.FASTQ,
+            role=None,
+            facts={"sra_platform": "OXFORD_NANOPORE"},
+        )
+        assert reference_assembly.is_long_read(obj) is True
+
+    def test_illumina_platform_is_not_long(self):
+        obj = _object(
+            name="reads.fastq",
+            kind=FormatKind.FASTQ,
+            role=None,
+            facts={"sra_platform": "ILLUMINA"},
+        )
+        assert reference_assembly.is_long_read(obj) is False
+
+    def test_nanopore_with_short_chemistry_is_still_long(self):
+        """Platform beats chemistry, the same way it does in is_short_read.
+
+        A real MinION run (ERR16145610.fastq) infers `short` chemistry
+        because chemistry is inferred from read *lengths*. Trusting that
+        would send ONT reads to a short-read polisher.
+        """
+        obj = _object(
+            name="reads.fastq",
+            kind=FormatKind.FASTQ,
+            role=None,
+            facts={"sra_platform": "OXFORD_NANOPORE", "qc_read_chemistry": "short"},
+        )
+        assert reference_assembly.is_long_read(obj) is True
+        assert reference_assembly.is_short_read(obj) is False
+
+    def test_unknown_platform_and_chemistry_is_not_long(self):
+        """Unknown stays unknown -- deliberately unlike is_short_read.
+
+        is_short_read counts an unlabelled FASTQ as short because
+        _qc_platform defaults to ILLUMINA. Inheriting that default here
+        would make every unlabelled file look like a Medaka candidate too,
+        and both cards would fire on data neither can vouch for.
+        """
+        obj = _object(
+            name="reads.fastq", kind=FormatKind.FASTQ, role=None, facts={}
+        )
+        assert reference_assembly.is_long_read(obj) is False
+
+    def test_non_fastq_is_not_long(self):
+        """Not the negation of is_short_read.
+
+        `not is_short_read(protein_fasta)` is True; that is the protein.faa
+        mistake in a new costume.
+        """
+        obj = _object(
+            name="protein.faa",
+            kind=FormatKind.FASTA,
+            role=None,
+            facts={"molecule_type": "protein"},
+        )
+        assert reference_assembly.is_long_read(obj) is False
+
+    def test_unknown_platform_with_long_chemistry_is_long(self):
+        """CAPILLARY is neither LONG_READ_PLATFORMS nor SHORT_READ_PLATFORMS
+        (qc_stats.py), so it is the case that actually reaches the chemistry
+        tie-break -- unlike an object with no platform recorded at all,
+        which _qc_platform defaults to ILLUMINA (a short-read platform)
+        before chemistry is ever consulted.
+        """
+        obj = _object(
+            name="reads.fastq",
+            kind=FormatKind.FASTQ,
+            role=None,
+            facts={"sra_platform": "CAPILLARY", "qc_read_chemistry": "long"},
+        )
+        assert reference_assembly.is_long_read(obj) is True
+
+
+class TestLongReadSets:
+    def test_groups_one_nanopore_file_as_one_set(self):
+        objs = [
+            _object(
+                name="reads.fastq",
+                kind=FormatKind.FASTQ,
+                role=None,
+                facts={"sra_platform": "OXFORD_NANOPORE"},
+            )
+        ]
+        assert len(reference_assembly.long_read_sets(objs)) == 1
+
+    def test_excludes_short_reads(self):
+        objs = [
+            _object(
+                name="reads.fastq",
+                kind=FormatKind.FASTQ,
+                role=None,
+                facts={"sra_platform": "ILLUMINA"},
+            )
+        ]
+        assert reference_assembly.long_read_sets(objs) == []

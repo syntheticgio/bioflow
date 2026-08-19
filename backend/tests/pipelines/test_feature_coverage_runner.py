@@ -92,3 +92,50 @@ def test_parse_coverage_matches_real_bedtools_output(tmp_path):
     assert rows[2]["name"] == "abcA"
     assert rows[2]["breadth"] == 1.0
     assert report["median_breadth"] == 0.4975124
+
+
+def test_gff_name_prefers_name_over_id():
+    assert fcr._gff_name("ID=gene-abcA;Name=abcA") == "abcA"
+
+
+def test_gff_name_falls_back_to_id_stripping_gene_prefix():
+    assert fcr._gff_name("ID=gene-abcB;Parent=mRNA1") == "abcB"
+
+
+def test_gff_name_falls_back_to_raw_string_when_no_name_or_id():
+    assert fcr._gff_name("Parent=mRNA1;locus_tag=xyz") == "Parent=mRNA1;locus_tag=xyz"
+
+
+def test_gff_name_handles_gtf_style_attributes():
+    # Real GTF attribute string shape (see counts_runner.attributes_for_format's
+    # docstring for the same example against GCF_000146045.2): no `=`
+    # anywhere, so the GFF3 `key=value` split must fall back to GTF's
+    # `key "value";` punctuation rather than silently returning garbage.
+    attrs = 'gene_id "YAL068C"; transcript_id "NM_001180043.1";'
+    assert fcr._gff_name(attrs) == "YAL068C"
+
+
+def test_gff_name_handles_gtf_style_with_gene_name():
+    attrs = 'gene_id "YAL068C"; gene_name "PAU8"; transcript_id "NM_001180043.1";'
+    assert fcr._gff_name(attrs) == "PAU8"
+
+
+def test_gff_name_gtf_style_strips_gene_prefix():
+    attrs = 'gene_id "gene-abcA"; transcript_id "t1";'
+    assert fcr._gff_name(attrs) == "abcA"
+
+
+def test_parse_coverage_gtf_style_attributes(tmp_path):
+    # GTF is position-compatible with GFF3 for feature_coverage's purposes
+    # (see _FEATURE_COVERAGE_ANNOTATION_FORMATS in pipeline_service.py) --
+    # both map to annotation_format="gff" and share the same column layout,
+    # differing only in attribute punctuation.
+    out = tmp_path / "coverage_gtf.tsv"
+    out.write_text(
+        'chrI\tRefSeq\texon\t100\t400\t.\t+\t.\tgene_id "YAL068C"; '
+        'transcript_id "NM_001180043.1";\t12\t250\t301\t0.8305648\n'
+    )
+    report = fcr.parse_coverage(out, annotation_format="gff")
+    assert report["feature_count"] == 1
+    assert report["features"][0]["name"] == "YAL068C"
+    assert report["features"][0]["type"] == "exon"

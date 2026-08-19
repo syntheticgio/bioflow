@@ -78,6 +78,7 @@ _GAP_LABELS_BY_KIND: dict[GapKind, str] = {
 _BRANCH_MERGE_VERBS: dict[str, str] = {
     "align_reads": "paired as mate pairs with",
     "polish_assembly": "merged with",
+    "polish_long_assembly": "merged with",
     "scaffold_assembly": "merged with",
     "assemble_reads": "assembled together with",
 }

@@ -286,6 +286,24 @@ RUN chmod +x /srv/scripts/install-salmon.sh \
     && SALMON_VERSION="${SALMON_VERSION}" \
        /srv/scripts/install-salmon.sh
 
+# --- Medaka ----------------------------------------------------------------
+#
+# ONT's neural-network consensus tool, and the only polishing path for
+# long-read assemblies -- Polypolish above is short-read-only. Its own late
+# layer for the same reason Clair3 and SPAdes are late: it is large (medaka
+# plus a CPU torch) and slow, and an edit anywhere above should not
+# reinstall it.
+#
+# Installed on both architectures, unlike Polypolish: bioconda ships
+# linux-aarch64 builds, which makes this the only polisher available on
+# Apple Silicon. See scripts/install-medaka.sh for why pytorch-cpu is
+# pinned there, and
+# docs/superpowers/specs/2026-08-18-medaka-long-read-polishing-design.md.
+ARG MEDAKA_VERSION=2.2.2
+COPY scripts/install-medaka.sh /srv/scripts/install-medaka.sh
+RUN chmod +x /srv/scripts/install-medaka.sh \
+    && MEDAKA_VERSION="${MEDAKA_VERSION}" \
+       /srv/scripts/install-medaka.sh
 
 # --- NCBI Datasets CLI ------------------------------------------------------
 #
@@ -636,6 +654,26 @@ COPY pyproject.toml ./
 RUN mkdir -p app && touch app/__init__.py \
     && pip install --no-cache-dir '.[dev]' \
     && pip uninstall -y biopipe-backend
+
+# Medaka's env goes on PATH only now, after every bare `pip install` in this
+# image that targets the system Python -- including this file's own
+# dependency install immediately above. A bare `pip install` resolves `pip`
+# via PATH: placed before this line it lands in the system site-packages as
+# intended; placed after it would silently land inside
+# /opt/medaka/env/lib/python3.12/site-packages instead, the same way this bug
+# happened the first time -- NanoPlot's `pip install` (and, it turned out,
+# this project's own `pip install '.[dev]'`) picked up Medaka's env because
+# this ENV line used to sit right after the Medaka layer near the top of the
+# file, which pulled pandas/scipy/pyarrow and eventually the entire backend
+# dependency tree into Medaka's isolated env and inflated /opt/medaka from
+# tens of MB to multiple GB with no error anywhere. This line is also not
+# just a build-ordering convenience that later becomes safe to delete once
+# config.py resolves medaka_path/medaka_binary_path by absolute path:
+# medaka_consensus itself calls `medaka` and `mini_align` by bare name
+# internally, so removing this from PATH would break every real polish job
+# the moment it reaches those internal calls, with nothing catching it short
+# of a real run failing.
+ENV PATH="/opt/medaka/env/bin:${PATH}"
 
 COPY app ./app
 COPY tests ./tests

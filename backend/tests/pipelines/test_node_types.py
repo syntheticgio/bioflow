@@ -158,6 +158,7 @@ class TestRunKindResolution:
         assert by_tool == {
             "ivar": "consensus",
             "polypolish": "polish",
+            "medaka": "polish_long",
             "ragtag": "scaffold",
         }
 
