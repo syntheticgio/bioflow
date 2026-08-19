@@ -485,3 +485,36 @@ def test_harvest_resolves_symlinks(tmp_path):
     )
     assert found[OutputKind.CONTIGS] == real.resolve()
     assert not found[OutputKind.CONTIGS].is_symlink()
+
+
+class TestGfaToFasta:
+    """hifiasm writes contigs only as GFA -- no FASTA at all -- while
+    OutputKind.CONTIGS is required and becomes the REFERENCE object
+    everything downstream aligns against. This converter is what bridges
+    that gap (spec R13-R15). S-line layout confirmed against a real
+    0.25.0 run: S <name> <seq> LN:i:... rd:i:...
+    """
+
+    def test_converts_s_lines_and_ignores_everything_else(self):
+        gfa = (
+            "S\tptg000001l\tACGTACGT\tLN:i:8\trd:i:340\n"
+            "L\tptg000001l\t+\tptg000002l\t-\t0M\n"
+            "S\tptg000002l\tTTTT\tLN:i:4\n"
+            "A\tptg000001l\t0\t+\tr1\t0\t8\tid:i:0\n"
+        )
+        fasta = assembly_runner.gfa_to_fasta(gfa)
+        assert fasta == ">ptg000001l\nACGTACGT\n>ptg000002l\nTTTT\n"
+
+    def test_raises_on_a_gfa_with_no_sequences(self):
+        """An exit-0 hifiasm run that assembled nothing must not become a
+        valid, empty FASTA that everything downstream silently aligns
+        against (spec R15)."""
+        with pytest.raises(ValueError, match="no sequences"):
+            assembly_runner.gfa_to_fasta("H\tVN:Z:1.0\nL\ta\t+\tb\t-\t0M\n")
+
+    def test_raises_on_empty_input(self):
+        with pytest.raises(ValueError, match="no sequences"):
+            assembly_runner.gfa_to_fasta("")
+
+    def test_tolerates_s_line_with_no_tags(self):
+        assert assembly_runner.gfa_to_fasta("S\tctg1\tACGT\n") == ">ctg1\nACGT\n"
