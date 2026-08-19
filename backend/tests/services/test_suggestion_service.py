@@ -20,6 +20,7 @@ from app.services.suggestion_service import (
     build_align_card,
     build_annotate_card,
     build_assemble_card,
+    build_feature_coverage_card,
     build_preprocess_card,
     build_quantify_card,
     build_variants_card,
@@ -1584,6 +1585,70 @@ class TestQuantifyCard:
     def test_a_vcf_gets_no_card_at_all(self):
         with installed_featurecounts(True):
             assert build_quantify_card(_vcf(), [_annotation()]) is None
+
+
+@contextmanager
+def installed_bedtools(available=True):
+    """Pin the bedtools probe the feature coverage card reads.
+
+    `tools.bedtools` is a plain `@lru_cache`d function read fresh at call
+    time by `build_feature_coverage_card`, not captured at import into a
+    frozen dataclass the way `aligner_registry`'s specs capture their probes
+    -- so a straightforward monkeypatch on the name `suggestion_service`
+    imported reaches the call, the same seam `installed_featurecounts` above
+    relies on for the quantify card.
+    """
+    with patch(
+        "app.services.suggestion_service.tools.bedtools",
+        return_value=_FakeTool(available, name="bedtools"),
+    ) as probe:
+        yield probe
+
+
+class TestFeatureCoverageCard:
+    def test_the_probe_patch_actually_takes_effect(self):
+        """Guards every test below it, for the reason CLAUDE.md spells out:
+        the image ships bedtools *installed*, so an available-card assertion
+        passes whether or not the patch worked. Only the unavailable
+        direction can tell a working seam from an escaped one.
+        """
+        with installed_bedtools(False):
+            card = build_feature_coverage_card(_bam(), [_annotation()])
+        assert card.status is CardStatus.UNAVAILABLE
+        assert "not installed" in card.reason
+
+    def test_a_bam_with_an_annotation_is_runnable(self):
+        with installed_bedtools(True):
+            card = build_feature_coverage_card(_bam(obj_id="xyz"), [_annotation()])
+        assert card.status is CardStatus.AVAILABLE
+        assert card.kind == "feature_coverage"
+        assert card.category == "ASSEMBLY_QC"
+        assert card.launch == {
+            "endpoint": "/pipelines/feature-coverage",
+            "body": {"bam_id": "xyz"},
+        }
+
+    def test_no_annotation_gates_the_card_with_an_actionable_reason(self):
+        with installed_bedtools(True):
+            card = build_feature_coverage_card(_bam(), [])
+        assert card.status is CardStatus.UNAVAILABLE
+        assert "no annotation" in card.reason
+
+    def test_a_missing_tool_is_reported_before_a_missing_annotation(self):
+        """Both are true when neither is present. The tool is the one the
+        user cannot fix by downloading a genome, so it is the one worth
+        saying."""
+        with installed_bedtools(False):
+            card = build_feature_coverage_card(_bam(), [])
+        assert "not installed" in card.reason
+
+    def test_a_fastq_gets_no_card_at_all(self):
+        with installed_bedtools(True):
+            assert build_feature_coverage_card(_fake_obj(), [_annotation()]) is None
+
+    def test_a_vcf_gets_no_card_at_all(self):
+        with installed_bedtools(True):
+            assert build_feature_coverage_card(_vcf(), [_annotation()]) is None
 
 
 class TestScaffoldCardOrchestration:

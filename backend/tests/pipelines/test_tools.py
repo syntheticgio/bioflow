@@ -1162,11 +1162,11 @@ def test_seqkit_probe_reports_missing_binary(monkeypatch):
     assert tool.available is False
 
 
-def test_bedtools_is_not_runnable():
-    """No job handler branches on bedtools yet -- a per-feature coverage
-    feature is planned but not built -- so it must not read as an
-    actionable pipeline step."""
-    assert tools.TOOL_META["bedtools"].runnable is False
+def test_bedtools_is_runnable():
+    """The Feature coverage card and launch_feature_coverage handler (#632,
+    stage 1) give bedtools a real dispatch path now, so it reads as an
+    actionable pipeline step like ivar or craq."""
+    assert tools.TOOL_META["bedtools"].runnable is True
 
 
 def test_seqkit_is_not_runnable():

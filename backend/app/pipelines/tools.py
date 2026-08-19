@@ -2347,16 +2347,14 @@ TOOL_META: dict[str, ToolMeta] = {
         citation_url="https://doi.org/10.1093/bioinformatics/btq033",
         license="MIT",
         usage=(
-            "Installed alongside the Merqury k-mer QV scripts, which call it "
-            "internally. Direct BioFlow features backed by it are planned "
-            "(per-feature coverage first); until one ships, nothing dispatches "
-            "to it directly."
+            "Backs the Feature coverage card: computes per-feature read "
+            "coverage of an alignment against a project annotation. Also "
+            "called internally by the Merqury k-mer QV scripts."
         ),
-        # No job handler branches on bedtools directly today -- a per-feature
-        # coverage feature is planned but not built. Flip to True when that
-        # handler lands (see the `runnable` field comment above for why this
-        # matters).
-        runnable=False,
+        # Flipped to True once the Feature coverage card and its
+        # launch_feature_coverage handler shipped (#632, stage 1) -- bedtools
+        # is now dispatched to directly, not just installed alongside Merqury.
+        runnable=True,
     ),
     "seqkit": ToolMeta(
         pipelines=(PipelineType.UTILITY,),
