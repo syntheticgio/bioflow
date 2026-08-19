@@ -3639,6 +3639,7 @@ async def _sv_payload(
     reference: DataObject,
     bai: DataObject,
     fai: DataObject,
+    chemistry,
     params: sniffles_runner.SnifflesParams,
 ) -> dict:
     """The call_structural_variants payload, with every input addressed by
@@ -3665,6 +3666,12 @@ async def _sv_payload(
         if path:
             payload[f"{key}_path"] = path
 
+    # Mirrors `_variant_payload`: without this, `sv_handlers._check_chemistry`
+    # has nothing to re-check at execution time and its defense-in-depth
+    # against a replayed or stale job is a no-op.
+    if chemistry is not None:
+        payload["chemistry"] = chemistry.value
+
     return payload
 
 
@@ -3673,6 +3680,7 @@ async def launch_structural_variant_calling(
     bam_id: PydanticObjectId,
     params: dict | None,
     owner: str,
+    reference_id: PydanticObjectId | None = None,
     resource_override: bool = False,
 ):
     """Queue a Sniffles2 structural variant calling run over an aligned BAM.
@@ -3712,7 +3720,7 @@ async def launch_structural_variant_calling(
             },
         )
 
-    reference = await _resolve_variant_reference(bam, None, owner=owner)
+    reference = await _resolve_variant_reference(bam, reference_id, owner=owner)
 
     bai = await _sidecar_of_role(bam, SidecarRole.BAI)
     if bai is None:
@@ -3734,7 +3742,12 @@ async def launch_structural_variant_calling(
     merged = sniffles_runner.SnifflesParams.from_dict(params)
 
     payload = await _sv_payload(
-        bam=bam, reference=reference, bai=bai, fai=fai, params=merged
+        bam=bam,
+        reference=reference,
+        bai=bai,
+        fai=fai,
+        chemistry=chemistry,
+        params=merged,
     )
 
     run = await run_service.create_run(

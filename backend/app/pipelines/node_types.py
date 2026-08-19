@@ -181,7 +181,10 @@ async def _launch_variant_calling(*, inputs: dict, params: dict, owner: str):
 
 async def _launch_structural_variant_calling(*, inputs: dict, params: dict, owner: str):
     return await pipeline_service.launch_structural_variant_calling(
-        bam_id=inputs["alignment"], params=params, owner=owner
+        bam_id=inputs["alignment"],
+        params=params,
+        owner=owner,
+        reference_id=inputs.get("reference"),
     )
 
 

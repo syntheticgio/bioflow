@@ -187,6 +187,63 @@ class TestAdapterSignatures:
             )
 
 
+class TestStructuralVariantLaunch:
+    """The `reference` port's adapter wiring.
+
+    `NODE_TYPES["call_structural_variants"]`'s `reference` port carries a
+    comment claiming the launcher infers the reference when it isn't wired
+    (mirroring `call_variants`), but until this test existed nothing checked
+    that wiring the port actually reached the launcher -- the adapter dropped
+    `inputs["reference"]` on the floor and the launcher accepted no
+    `reference_id` parameter at all. Both are fixed; this guards the forward.
+    """
+
+    @pytest.mark.asyncio
+    async def test_wiring_the_reference_port_reaches_the_launcher(self, monkeypatch):
+        captured = {}
+
+        async def fake_launch(**kwargs):
+            captured.update(kwargs)
+            return "job-1"
+
+        monkeypatch.setattr(
+            pipeline_service, "launch_structural_variant_calling", fake_launch
+        )
+
+        spec = NODE_TYPES["call_structural_variants"]
+        bam_id = PydanticObjectId()
+        ref_id = PydanticObjectId()
+        await spec.launch(
+            inputs={"alignment": bam_id, "reference": ref_id},
+            params={},
+            owner="local",
+        )
+
+        assert captured["bam_id"] == bam_id
+        assert captured["reference_id"] == ref_id
+
+    @pytest.mark.asyncio
+    async def test_an_unwired_reference_port_infers_rather_than_erroring(
+        self, monkeypatch
+    ):
+        captured = {}
+
+        async def fake_launch(**kwargs):
+            captured.update(kwargs)
+            return "job-1"
+
+        monkeypatch.setattr(
+            pipeline_service, "launch_structural_variant_calling", fake_launch
+        )
+
+        spec = NODE_TYPES["call_structural_variants"]
+        bam_id = PydanticObjectId()
+        await spec.launch(inputs={"alignment": bam_id}, params={}, owner="local")
+
+        assert captured["bam_id"] == bam_id
+        assert captured["reference_id"] is None
+
+
 class TestAnnotationExportLaunch:
     """The adapter's sidecar handling -- the design's one implicit step."""
 
