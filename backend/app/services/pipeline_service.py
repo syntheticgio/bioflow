@@ -3660,7 +3660,11 @@ async def _sv_payload(
 
 
 async def launch_structural_variant_calling(
-    *, bam_id: PydanticObjectId, params: dict | None, owner: str
+    *,
+    bam_id: PydanticObjectId,
+    params: dict | None,
+    owner: str,
+    resource_override: bool = False,
 ):
     """Queue a Sniffles2 structural variant calling run over an aligned BAM.
 
@@ -3679,6 +3683,7 @@ async def launch_structural_variant_calling(
     refuse_if_over_budget(
         declared_mb=STRUCTURAL_VARIANT_CALLING_MEM_MB,
         budget_mb=await current_admission_budget_mb(),
+        resource_override=resource_override,
     )
 
     bam = await object_service.get_object(bam_id, owner=owner)

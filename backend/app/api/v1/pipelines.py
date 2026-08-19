@@ -2030,6 +2030,9 @@ class StructuralVariantRequest(BaseModel):
     # alignment rather than a generic object.
     bam_id: PydanticObjectId
     params: dict = {}
+    # "Launch anyway" from the refusal card. Skips the enqueue-time BLOCK and
+    # persists on the job, where claim.lua admits it only as sole occupant.
+    resource_override: bool = False
 
 
 @router.post(
@@ -2041,7 +2044,10 @@ async def launch_structural_variant_calling(
     """Queue a Sniffles2 structural variant calling run over an aligned,
     indexed long-read BAM."""
     job = await pipeline_service.launch_structural_variant_calling(
-        bam_id=body.bam_id, params=body.params, owner=owner
+        bam_id=body.bam_id,
+        params=body.params,
+        owner=owner,
+        resource_override=body.resource_override,
     )
     return JobOut.of(job)
 
