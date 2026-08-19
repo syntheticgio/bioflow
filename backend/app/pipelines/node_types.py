@@ -601,7 +601,7 @@ NODE_TYPES: dict[str, NodeTypeSpec] = {
         label="Merge structural variants",
         launch_name="pipeline_service.launch_merge_structural_variants",
         launch=_launch_merge_structural_variants,
-        run_kind=RunKind.STRUCTURAL_VARIANT_CALLING,
+        run_kind=RunKind.STRUCTURAL_VARIANT_MERGING,
         inputs=(
             PortSpec(
                 "snf_callsets",
