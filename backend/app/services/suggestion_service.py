@@ -19,7 +19,7 @@ from enum import StrEnum
 from app.config import settings
 from app.errors import ValidationError
 from app.logging import get_logger
-from app.models import DataObject, FormatKind, ObjectRole, ObjectStatus
+from app.models import DataObject, FormatKind, ObjectRole, ObjectStatus, SidecarRole
 from app.pipelines import (
     align_runner,
     aligner_registry,
