@@ -1,6 +1,7 @@
 import { useState } from "react";
 import {
   type ChartPadding,
+  lineThroughGaps,
   plotGeometry,
   pointerFraction,
 } from "../lib/chartScaffold";
@@ -342,6 +343,209 @@ export function QualityChart({ curve }: { curve: QualityPoint[] }) {
         {hover
           ? `position ${hover.position}: Q${hover.mean.toFixed(1)} (${hover.count.toLocaleString()} reads)`
           : "mean Phred quality per position · hover for detail"}
+      </div>
+    </div>
+  );
+}
+
+interface QualityOverlayPoint {
+  position: number;
+  before: number | null;
+  after: number | null;
+}
+
+/**
+ * The same per-cycle quality curve as `QualityChart`, drawn twice: the file as
+ * it arrived and the file as trimming left it.
+ *
+ * A separate component rather than a two-series mode on `QualityChart`,
+ * because the two answer different questions and say so differently. That one
+ * grades a file against absolute thresholds -- fixed 0-42 axis, quality bands,
+ * a filled area under one curve. This one is a *comparison*: the fill would
+ * make one series look like the subject and the other like an annotation, and
+ * the reading that matters is where the two diverge. What they share --
+ * geometry, hover resolution, the fixed axis, the band labels -- comes from
+ * the same scaffold either way.
+ *
+ * `after` is null past the point where trimming shortened the read. The line
+ * simply stops there rather than dropping to zero, which would read as a
+ * catastrophic quality collapse at exactly the position trimming succeeded.
+ */
+export function QualityOverlayChart({ curve }: { curve: QualityOverlayPoint[] }) {
+  const {
+    width: w,
+    height: h,
+    pad,
+    plotW,
+    plotH,
+    hover,
+    onMouseMove,
+    clearHover,
+  } = useChartScaffold(460, 210, { top: 10, right: 46, bottom: 40, left: 30 }, (fraction) => {
+    const idx = Math.round(fraction * (curve.length - 1));
+    return curve[Math.max(0, Math.min(curve.length - 1, idx))];
+  });
+  if (!curve?.length) return null;
+
+  const maxPos = curve[curve.length - 1].position;
+  // Same fixed 0-42 axis as QualityChart, for the same reason: Q20 and Q30 are
+  // absolute, and a chart that rescales makes a bad file look like a good one.
+  const yMax = 42;
+
+  const x = (p: number) => pad.left + ((p - 1) / Math.max(maxPos - 1, 1)) * plotW;
+  const y = (q: number) => pad.top + plotH - (Math.min(q, yMax) / yMax) * plotH;
+
+  const pathFor = (side: "before" | "after") =>
+    lineThroughGaps(
+      curve.map((point) => ({
+        x: x(point.position),
+        y: point[side] == null ? null : y(point[side] as number),
+      })),
+    );
+
+  const series = [
+    // Before is the muted one: it is the starting point, and the eye should
+    // land on what trimming produced.
+    { side: "before" as const, label: "before", color: "var(--text-faint)", dash: "4 3" },
+    { side: "after" as const, label: "after", color: "var(--accent)", dash: undefined },
+  ];
+
+  const bands = [
+    { from: 30, to: yMax, color: "var(--success)", label: "good" },
+    { from: 20, to: 30, color: "var(--warn)", label: "fair" },
+    { from: 0, to: 20, color: "var(--error)", label: "poor" },
+  ];
+
+  return (
+    <div>
+      <svg
+        width="100%"
+        viewBox={`0 0 ${w} ${h}`}
+        style={{ maxWidth: w, display: "block" }}
+        onMouseLeave={clearHover}
+      >
+        {bands.map((b) => (
+          <text
+            key={b.label}
+            x={w - pad.right + 5}
+            y={(y(b.to) + y(b.from)) / 2 + 3}
+            fontSize="9"
+            fill={b.color}
+            opacity={0.85}
+          >
+            {b.label}
+          </text>
+        ))}
+        {[10, 20, 30, 40].map((q) => (
+          <g key={q}>
+            <line
+              x1={pad.left}
+              x2={w - pad.right}
+              y1={y(q)}
+              y2={y(q)}
+              stroke="var(--border)"
+              strokeWidth="1"
+            />
+            <text
+              x={pad.left - 5}
+              y={y(q) + 3}
+              textAnchor="end"
+              fontSize="9"
+              fill="var(--text-faint)"
+            >
+              {q}
+            </text>
+          </g>
+        ))}
+
+        {series.map((s) => (
+          <path
+            key={s.side}
+            d={pathFor(s.side)}
+            fill="none"
+            stroke={s.color}
+            strokeWidth="1.8"
+            strokeDasharray={s.dash}
+          />
+        ))}
+
+        {hover && (
+          <>
+            <line
+              x1={x(hover.position)}
+              x2={x(hover.position)}
+              y1={pad.top}
+              y2={pad.top + plotH}
+              stroke="var(--text-faint)"
+              strokeDasharray="3 3"
+            />
+            {series.map((s) =>
+              hover[s.side] == null ? null : (
+                <circle
+                  key={s.side}
+                  cx={x(hover.position)}
+                  cy={y(hover[s.side] as number)}
+                  r="3.5"
+                  fill={s.color}
+                />
+              ),
+            )}
+          </>
+        )}
+
+        <rect
+          x={pad.left}
+          y={pad.top}
+          width={plotW}
+          height={plotH}
+          fill="transparent"
+          onMouseMove={onMouseMove}
+        />
+
+        <text x={pad.left} y={h - 20} fontSize="9" fill="var(--text-faint)">
+          1
+        </text>
+        <text
+          x={w - pad.right}
+          y={h - 20}
+          textAnchor="end"
+          fontSize="9"
+          fill="var(--text-faint)"
+        >
+          {maxPos}
+        </text>
+        <text x={w / 2} y={h - 20} textAnchor="middle" fontSize="9" fill="var(--text-faint)">
+          position in read (bp)
+        </text>
+
+        {/* Legend inside the SVG, so an exported or screenshotted chart still
+            says which curve is which. */}
+        {series.map((s, i) => (
+          <g key={s.side} transform={`translate(${pad.left + i * 76} ${h - 6})`}>
+            <line
+              x1={0}
+              x2={16}
+              y1={-3}
+              y2={-3}
+              stroke={s.color}
+              strokeWidth="1.8"
+              strokeDasharray={s.dash}
+            />
+            <text x={20} y={0} fontSize="9" fill="var(--text-faint)">
+              {s.label}
+            </text>
+          </g>
+        ))}
+      </svg>
+
+      <div style={{ fontSize: 11, color: "var(--text-faint)", marginTop: 2 }}>
+        {hover
+          ? `position ${hover.position}: ` +
+            `Q${hover.before?.toFixed(1) ?? "—"} → ` +
+            (hover.after == null
+              ? "trimmed away"
+              : `Q${hover.after.toFixed(1)}`)
+          : "mean Phred quality per position, before and after trimming · hover for detail"}
       </div>
     </div>
   );

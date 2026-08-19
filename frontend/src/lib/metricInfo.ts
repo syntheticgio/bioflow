@@ -406,6 +406,13 @@ export const METRIC_INFO: Record<string, MetricInfo> = {
     description:
       "The distribution of GC content across individual reads. A single peak at the organism's expected GC is healthy; a second peak generally means a second organism is present.",
   },
+  "ui.chart_trim_quality_overlay": {
+    term: "Quality per position, before and after trimming",
+    description:
+      "Mean Phred score at each read position, measured on the same reads before and after the trim. Where the two curves separate is where trimming acted: a lifted 3\u2019 tail means quality decay was clipped, a raised start means adapter was removed, and two curves that sit on top of each other mean the trim did almost nothing \u2014 usually a sign the parameters were wrong for this file.",
+    computed:
+      "Both sides come from one fastp pass over the same file, binned onto identical positions and downsampled to at most 100 points. The \u201cafter\u201d line stops where trimming shortened the read rather than dropping to zero.",
+  },
   "ui.chart_n_per_position": {
     term: "N content per position",
     description:

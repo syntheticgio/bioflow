@@ -9,6 +9,12 @@ export interface TrimSide {
   read2_mean_length: number | null;
 }
 
+export interface QualityOverlayPoint {
+  position: number;
+  before: number | null;
+  after: number | null;
+}
+
 export interface TrimReport {
   tool: string;
   tool_version: string | null;
@@ -23,6 +29,16 @@ export interface TrimReport {
   };
   duplication_rate: number | null;
   insert_size_peak: number | null;
+  /**
+   * Read1's mean Phred per cycle, measured before and after trimming in the
+   * same fastp pass and binned onto one shared set of positions. Absent on
+   * objects trimmed before #639 shipped, and on runs where fastp reported
+   * only one side -- the chart self-suppresses either way.
+   *
+   * `after` runs out at the tail when trimming shortened the read; a null
+   * there means "no longer a cycle", not "not measured".
+   */
+  quality_overlay?: QualityOverlayPoint[];
   adapters?: {
     trimmed_reads: number | null;
     trimmed_bases: number | null;
