@@ -1281,7 +1281,7 @@ export const api = {
 
   /** Merge per-sample .snf callsets into a joint SV callset. */
   mergeStructuralVariants: (body: { snf_object_ids: string[]; output_name?: string }) =>
-    request<JobOut>("/pipelines/merge_structural_variants", {
+    request<JobSummary>("/pipelines/merge_structural_variants", {
       method: "POST",
       body: JSON.stringify(body),
     }),
