@@ -9,9 +9,7 @@ its index sidecars.
 
 import pytest
 
-from app.errors import ValidationError
 from app.pipelines import salmon_runner
-
 
 # A real quant.sf header plus three rows. Columns are Name, Length,
 # EffectiveLength, TPM, NumReads -- NumReads last, and fractional, which is

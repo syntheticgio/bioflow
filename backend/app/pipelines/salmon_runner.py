@@ -12,10 +12,7 @@ count files that look interchangeable describe different gene universes.
 """
 
 import re
-import shlex
-from pathlib import Path
 
-from app.errors import ValidationError
 from app.logging import get_logger
 
 log = get_logger(__name__)
