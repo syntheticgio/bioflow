@@ -795,9 +795,24 @@ tree are an established pattern (e.g., `frontend/src/components/AlignerParamFiel
 and `frontend/src/components/ExpressionCharts.test.tsx`). From a worktree,
 `./ops/worktree-up.sh` serves the same UI at localhost:5273 against that
 worktree's code. Backend changes are covered by `pytest`; run it inside the `api`
-container (`docker compose exec api python -m pytest tests/ -q`) rather than a
-bare host `.venv`, since the host venv hits Mongo replica-set connection
+container (`make test`, or `docker compose exec -T api pytest tests/ -q`) rather
+than a bare host `.venv`, since the host venv hits Mongo replica-set connection
 errors that the container's network doesn't have.
+
+**Call `pytest` directly, never `python -m pytest`.** The image puts a tool
+venv (`/opt/medaka/env/bin`) ahead of the app interpreter on `PATH`, so both
+`python` and `python3` resolve to an environment with none of the app's
+dependencies in it -- "No module named pytest", from an image where pytest is
+demonstrably installed. When a real interpreter is needed, name it by absolute
+path: `/usr/local/bin/python3.12`.
+
+**`make test` runs the suite in parallel** (8 workers, then a sequential phase
+for `heavy`-marked tests), which is roughly 40s against ~147s serially. Every
+worker gets its own test database, so this is safe even with another agent's
+suite running at the same time -- see
+[#679](https://github.com/syntheticgio/bioflow/issues/679). `make test-serial`
+is the escape hatch when interleaved output makes a single failure hard to
+read, and `PYTEST_WORKERS=N make test` changes the width.
 
 **That `docker compose exec api` command is only correct from the main repo
 root.** Run it inside a worktree and it silently tests *main's* code, not the
@@ -812,18 +827,33 @@ From a worktree, use `backend/run-worktree-tests.sh` instead:
 ./backend/run-worktree-tests.sh tests/ -q
 ```
 
+It also runs in parallel by default, in the same two phases `make test` uses,
+and passing your own `-n`, `-m` or `--dist` opts out of the split and runs
+exactly what you asked for.
+
 It starts a throwaway container that mounts the *worktree's* source on the
 running stack's network, plus a throwaway single-node Mongo replica set of
-its own. The private Mongo matters, not just the private source: `conftest.py`
-hardcodes the test database name `biopipe_test` and drops every collection in
-it at session start, so a worktree run sharing Mongo with the stack's own
-`api` container (or with another worktree's test run) wipes the other's data
-mid-test. That surfaces as a rotating handful of DB-touching tests failing --
-different ones each run, all passing in isolation -- which reads as flakiness
-in the code when it is actually two test runs fighting over one database.
+its own.
+
+**The private Mongo is now belt-and-braces rather than the load-bearing
+protection it once was.** Until
+[#693](https://github.com/syntheticgio/bioflow/pull/693), `conftest.py`
+hardcoded the test database name `biopipe_test`, so a worktree run sharing
+Mongo with the stack's own `api` container (or with another worktree's run)
+wiped the other's data mid-test. That surfaced as a rotating handful of
+DB-touching tests failing -- different ones each run, all passing in
+isolation -- which reads as flakiness in the code when it is actually two
+test runs fighting over one database.
 Measured on one unchanged tree: 7 failed, then 1872 passed, then 5 failed,
 sharing Mongo with the stack; five consecutive runs at an identical count with
 a private one.
+
+Per-run and per-worker database names now prevent that collision on their own
+-- two full suites were run simultaneously against a *single* Mongo, both
+green with counts identical to their sequential baselines -- so the private
+Mongo is kept for the isolation it still buys (a worktree's run cannot touch
+the stack's data at all, whatever a future test does) rather than because the
+suite would otherwise corrupt itself.
 
 **Check a rule against the real database, not only its unit tests.** The
 Actions tab's suggestion rules passed a full green suite while getting two
