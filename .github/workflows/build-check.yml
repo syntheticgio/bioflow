@@ -226,7 +226,22 @@ jobs:
         # storage/test_compress needs to contrast against the stdlib fallback.
         run: |
           sudo apt-get install -y --no-install-recommends \
-            minimap2 samtools tabix flye
+            minimap2 samtools tabix flye fastp bcftools bowtie2 hisat2 \
+            sra-toolkit
+          # The NCBI datasets CLI is not packaged; fetch the static binary the
+          # same way backend/Dockerfile does. Route tests hit its probe before
+          # their own assertions (a missing tool 500s where they expect 404).
+          sudo curl -fsSL \
+            "https://ftp.ncbi.nlm.nih.gov/pub/datasets/command-line/v2/linux-amd64/datasets" \
+            -o /usr/local/bin/datasets
+          sudo chmod +x /usr/local/bin/datasets
+          datasets --version
+          # align_runner builds "/bin/sh -o pipefail -c ..." pipelines and two
+          # tests execute them for real. The runner's dash rejects -o pipefail
+          # (exit 2 even for `true | true`); the backend image's shell accepts
+          # it, so point sh at bash to match.
+          sudo ln -sf bash /bin/sh
+          /bin/sh -o pipefail -c 'true | true'
           # bwa-mem2 is not packaged for Debian/Ubuntu; use the upstream
           # prebuilt x86-64 bundle, installed the same way backend/Dockerfile
           # does: a wrapper, not a symlink -- the `bwa-mem2` entrypoint is a
