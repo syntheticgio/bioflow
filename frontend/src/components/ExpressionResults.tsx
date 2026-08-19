@@ -3,7 +3,14 @@ import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { api } from "../api/client";
 import type { DeRow, ObjectDetail as ObjectDetailData } from "../api/types";
 import { AiSummary } from "./AiSummary";
-import { MAPlot, SamplePcaPlot, VolcanoPlot, type PcaPoint } from "./ExpressionCharts";
+import {
+  MAPlot,
+  SampleCorrelationHeatmap,
+  SamplePcaPlot,
+  VolcanoPlot,
+  type PcaPoint,
+  type SampleCorrelation,
+} from "./ExpressionCharts";
 import { InfoMarker } from "./InfoMarker";
 import { NodeSelector } from "./NodeSelector";
 
@@ -28,6 +35,7 @@ type DeFacts = {
   significant_up?: number;
   significant_down?: number;
   sample_pca?: PcaPoint[];
+  sample_correlation?: SampleCorrelation;
   pydeseq2_version?: string;
   tested_by?: string;
 };
@@ -213,6 +221,22 @@ export function ExpressionResults({ obj }: { obj: ObjectDetailData }) {
             other group usually means a mislabelled sample — worth resolving
             before reading anything below, since the test assumed the labels
             were right.
+          </div>
+        </div>
+      )}
+
+      {f.sample_correlation && f.sample_correlation.samples?.length > 0 && (
+        <div className="section">
+          <div className="section-title">
+            Sample correlation
+            <InfoMarker metric="ui.chart_sample_correlation" />
+          </div>
+          <SampleCorrelationHeatmap data={f.sample_correlation} />
+          <div className="section-note">
+            How strongly each pair of samples agrees, over the same genes the
+            projection above uses. Replicates should form a bright block on the
+            diagonal. A block that does not line up with the conditions is
+            structure the first two components missed — often a batch effect.
           </div>
         </div>
       )}

@@ -712,6 +712,13 @@ export const METRIC_INFO: Record<string, MetricInfo> = {
     computed:
       "Computed on log₂(normalised count + 1) over the most variable genes, then projected by SVD. The axis percentages say how much of the total variance each component carries — a low pair means the samples do not separate cleanly in two dimensions, not that the plot is wrong.",
   },
+  "ui.chart_sample_correlation": {
+    term: "Sample correlation",
+    description:
+      "How strongly every pair of samples agrees, as an N x N shaded matrix with samples grouped by condition. It answers what the projection above cannot: two replicates can sit adjacent on PC1/PC2 while correlating poorly, since those two components may carry only a modest share of the variance, and a batch effect orthogonal to both is invisible in the scatter but obvious as a block here.",
+    computed:
+      "Spearman's rho over the same log-normalised top-variance genes the projection uses, so the two plots always describe the same gene set. Spearman rather than Pearson because even after log\u2082 a handful of very highly expressed genes carry most of the remaining spread, and ranking bounds each gene's contribution. The colour scale spans the observed off-diagonal range rather than a fixed \u22121 to 1 \u2014 real samples in one experiment correlate somewhere in the 0.9s, and a fixed scale flattens exactly the differences worth seeing. Not drawn below three samples, where there is no structure to show.",
+  },
   "ui.chart_volcano": {
     term: "Volcano plot",
     description:
