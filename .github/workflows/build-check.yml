@@ -203,7 +203,7 @@ jobs:
     name: Backend tests (full pytest suite)
     if: ${{ !inputs.skip_backend_full }}
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v7
 
@@ -218,13 +218,42 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y build-essential zlib1g-dev libhts-dev curl
 
+      - name: Install pipeline tools
+        # The suite normally runs inside the backend image, which ships these.
+        # Launch-path tests probe them for real (shutil.which + --version), so
+        # a bare runner fails with "minimap2 is not available" / "flye is not
+        # installed" rather than skipping. tabix provides bgzip, which
+        # storage/test_compress needs to contrast against the stdlib fallback.
+        run: |
+          sudo apt-get install -y --no-install-recommends \
+            minimap2 samtools tabix flye
+          # bwa-mem2 is not packaged for Debian/Ubuntu; use the upstream
+          # prebuilt x86-64 bundle, installed the same way backend/Dockerfile
+          # does: a wrapper, not a symlink -- the `bwa-mem2` entrypoint is a
+          # dispatcher that looks for its SIMD variants next to argv[0], so a
+          # symlink in /usr/local/bin sends it hunting for variants that are
+          # not there.
+          curl -fsSL https://github.com/bwa-mem2/bwa-mem2/releases/download/v2.2.1/bwa-mem2-2.2.1_x64-linux.tar.bz2 \
+            | sudo tar -xj -C /opt
+          printf '#!/bin/sh\nexec "/opt/bwa-mem2-2.2.1_x64-linux/bwa-mem2" "$@"\n' \
+            | sudo tee /usr/local/bin/bwa-mem2 >/dev/null
+          sudo chmod +x /usr/local/bin/bwa-mem2
+          # No --version flag: it prints usage (with the version) and exits
+          # non-zero, so tolerate the exit code and just prove it dispatches.
+          bwa-mem2 version || true
+
       - name: Install backend dev dependencies
         run: pip install -e 'backend/.[dev]'
 
       - name: Create data directory
+        # Mirrors what initialize_home() lays out at API startup. The
+        # .biopipe/VERSION sentinel is what require_home() checks before every
+        # write path; without it the storage layer refuses to run and dozens
+        # of ingest/share/results tests fail with StorageUnavailableError.
         run: |
-          sudo mkdir -p /data
-          sudo chmod 777 /data
+          sudo mkdir -p /data/.biopipe /data/objects /data/staging /data/tmp
+          echo "biopipe-home-v1" | sudo tee /data/.biopipe/VERSION
+          sudo chmod -R 777 /data
 
       - name: Start MongoDB with replica set
         run: |
