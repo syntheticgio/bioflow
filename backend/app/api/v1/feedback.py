@@ -26,6 +26,11 @@ from app.services.feedback_service import notify_feedback_created
 
 router = APIRouter(prefix="/feedback", tags=["feedback"])
 
+# Strong references to in-flight notification tasks: the event loop holds only
+# a weak reference to scheduled tasks, so without this a task can be GC'd
+# before it runs (RUF006).
+_notify_tasks: set[asyncio.Task] = set()
+
 
 class FeedbackCreate(BaseModel):
     contact: str = Field(min_length=1, max_length=CONTACT_MAX_LENGTH)
@@ -59,7 +64,7 @@ async def submit_feedback(body: FeedbackCreate) -> FeedbackOut:
     # never stalls the 201 response. The insert above has already committed,
     # so the feedback is never lost; notify_feedback_created catches every
     # error internally and only loses the notification on failure.
-    asyncio.create_task(
+    task = asyncio.create_task(
         notify_feedback_created(
             feedback_id=str(feedback.id),
             contact=feedback.contact,
@@ -67,6 +72,8 @@ async def submit_feedback(body: FeedbackCreate) -> FeedbackOut:
             comment=feedback.comment,
         )
     )
+    _notify_tasks.add(task)
+    task.add_done_callback(_notify_tasks.discard)
     return FeedbackOut.of(feedback)
 
 
