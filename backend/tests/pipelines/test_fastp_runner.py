@@ -248,7 +248,8 @@ class TestProgressParsing:
         assert "3M reads" in p.message()
 
 
-# Trimmed from a real run; the curve arrays are elided as the parser drops them.
+# Trimmed from a real run. The content curves are elided (the parser drops
+# them); the quality curves are kept, since parse_report now reads them.
 SAMPLE_REPORT = {
     "summary": {
         "fastp_version": "0.24.0",
@@ -286,10 +287,17 @@ SAMPLE_REPORT = {
         "read1_adapter_sequence": "AGATCGGAAGAGC",
         "read2_adapter_sequence": "unspecified",
     },
+    "read1_after_filtering": {
+        "total_reads": 19500,
+        "total_cycles": 6,
+        # Trimming clipped the two decayed 3' cycles off and lifted the rest.
+        "quality_curves": {"mean": [37.0] * 6},
+    },
     "read1_before_filtering": {
         "total_reads": 20000,
         "total_cycles": 8,
-        "quality_curves": {"mean": [36.0] * 8},
+        # A 3' decay in the last two cycles, which is what trimming removed.
+        "quality_curves": {"mean": [36.0] * 6 + [20.0, 12.0]},
         "content_curves": {
             "A": [0.25] * 8,
             "T": [0.25] * 8,
@@ -336,11 +344,80 @@ class TestParseReport:
         showing that to a user as an adapter sequence would be wrong."""
         assert report["adapters"]["read2_sequence"] is None
 
-    def test_drops_the_per_cycle_curves(self, report):
-        """Several hundred floats per read direction belong in the HTML report,
-        not in every object document."""
+    def test_drops_the_curves_nothing_draws(self, report):
+        """Base-content curves and the insert-size histogram are five more
+        arrays per direction that no view renders; only the quality overlay
+        earns its place in the object document."""
         assert "read1_before_filtering" not in report
+        assert "content_curves" not in json.dumps(report)
         assert "histogram" not in json.dumps(report)
+
+
+class TestQualityOverlay:
+    """The before/after per-cycle curves, which are what say *where* trimming
+    acted rather than only how much it removed."""
+
+    @pytest.fixture
+    def overlay(self, tmp_path):
+        p = tmp_path / "fastp.json"
+        p.write_text(json.dumps(SAMPLE_REPORT))
+        return fastp_runner.parse_report(p)["quality_overlay"]
+
+    def test_pairs_both_sides_at_one_position(self, overlay):
+        assert overlay[0] == {"position": 1, "before": 36.0, "after": 37.0}
+
+    def test_the_two_series_share_the_same_x_positions(self, overlay):
+        """A true comparison, not two curves on different scales: every point
+        carries both sides, so the chart cannot draw them misaligned."""
+        assert [p["position"] for p in overlay] == list(range(1, 9))
+        assert all("before" in p and "after" in p for p in overlay)
+
+    def test_the_trimmed_tail_is_null_rather_than_stretched(self, overlay):
+        """Trimming shortened the read from 8 cycles to 6. Rescaling the
+        shorter curve onto the longer axis would invent quality at cycles that
+        no longer exist."""
+        assert [p["after"] for p in overlay[6:]] == [None, None]
+        assert [p["before"] for p in overlay[6:]] == [20.0, 12.0]
+
+    def test_a_long_read_is_downsampled_to_the_point_budget(self, tmp_path):
+        raw = json.loads(json.dumps(SAMPLE_REPORT))
+        raw["read1_before_filtering"]["quality_curves"]["mean"] = [30.0] * 250
+        raw["read1_after_filtering"]["quality_curves"]["mean"] = [32.0] * 250
+        p = tmp_path / "fastp.json"
+        p.write_text(json.dumps(raw))
+        overlay = fastp_runner.parse_report(p)["quality_overlay"]
+        assert len(overlay) == fastp_runner.MAX_CURVE_POINTS
+        assert overlay[0]["position"] == 1
+        assert overlay[-1]["position"] <= 250
+
+    def test_downsampling_averages_rather_than_samples(self, tmp_path):
+        """A single failed cycle picked away by every-Nth sampling would hide
+        exactly what the chart is for; an averaged bin still pulls the line
+        down."""
+        curve = [40.0] * 250
+        curve[1] = 0.0  # cycle 2, which every-2nd-point sampling would skip
+        raw = json.loads(json.dumps(SAMPLE_REPORT))
+        raw["read1_before_filtering"]["quality_curves"]["mean"] = curve
+        raw["read1_after_filtering"]["quality_curves"]["mean"] = [40.0] * 250
+        p = tmp_path / "fastp.json"
+        p.write_text(json.dumps(raw))
+        overlay = fastp_runner.parse_report(p)["quality_overlay"]
+        assert overlay[0]["before"] < 40.0
+
+    def test_one_side_alone_is_not_a_comparison(self, tmp_path):
+        raw = json.loads(json.dumps(SAMPLE_REPORT))
+        del raw["read1_after_filtering"]
+        p = tmp_path / "fastp.json"
+        p.write_text(json.dumps(raw))
+        assert "quality_overlay" not in fastp_runner.parse_report(p)
+
+    def test_a_report_with_no_curves_omits_the_key(self, tmp_path):
+        """Objects trimmed before this shipped have no curves in their stored
+        facts either; the key being absent is what lets the frontend
+        self-suppress rather than draw an empty chart."""
+        p = tmp_path / "fastp.json"
+        p.write_text(json.dumps({"summary": {}}))
+        assert "quality_overlay" not in fastp_runner.parse_report(p)
 
     def test_a_missing_report_is_not_fatal(self, tmp_path):
         """The trimmed reads are still valid output; losing the summary should

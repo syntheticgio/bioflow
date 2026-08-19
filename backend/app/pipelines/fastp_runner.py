@@ -221,6 +221,76 @@ def _n_content_curve(raw: dict) -> list[dict] | None:
     ]
 
 
+# Per-cycle curves are downsampled to at most this many points per side before
+# being persisted. A 250-cycle read is a few hundred floats per direction; the
+# chart is 460px wide and cannot draw more than about a hundred distinct
+# positions anyway, so the extra precision would be stored and never seen.
+# Follows the precedent set by #147, which persists a 100-point downsampled
+# curve rather than the raw data.
+MAX_CURVE_POINTS = 100
+
+
+def _bins(total: int, limit: int = MAX_CURVE_POINTS) -> list[tuple[int, int]]:
+    """Half-open (start, end) index ranges covering `total` cycles.
+
+    One bin per cycle when the curve is already short enough; otherwise
+    `limit` bins whose sizes differ by at most one, so the last bin is never a
+    lone leftover point averaged against nothing.
+    """
+    if total <= limit:
+        return [(i, i + 1) for i in range(total)]
+    return [
+        ((b * total) // limit, ((b + 1) * total) // limit) for b in range(limit)
+    ]
+
+
+def _bin_mean(chunk: list[float]) -> float | None:
+    if not chunk:
+        return None
+    return round(sum(chunk) / len(chunk), 2)
+
+
+def _mean_quality_curve(raw: dict, block: str) -> list[float] | None:
+    """fastp's mean per-cycle Phred curve for one read-direction block."""
+    curve = raw.get(block, {}).get("quality_curves", {}).get("mean")
+    if not curve:
+        return None
+    return [float(v) for v in curve]
+
+
+def _quality_overlay(raw: dict) -> list[dict] | None:
+    """Before/after mean quality per cycle, on one shared set of positions.
+
+    This is what makes the trim report a comparison: fastp measures the same
+    file twice in one pass, so the two curves describe the same reads. They
+    are emitted as one list of `{position, before, after}` rather than two
+    parallel lists, so the pairing is a property of the data rather than
+    something the chart has to reconstruct -- and the binning is derived once,
+    from the longer of the two sides, which is what keeps both series on
+    identical X positions. Trimming shortens reads, so `after` simply runs out
+    at the tail and is left null there rather than being stretched to fill the
+    same axis.
+
+    Read1 only, matching `_n_content_curve`. Returns None unless both sides
+    are present: one curve alone is not a comparison, and the scalar table
+    already covers what a single side would say.
+    """
+    before = _mean_quality_curve(raw, "read1_before_filtering")
+    after = _mean_quality_curve(raw, "read1_after_filtering")
+    if not before or not after:
+        return None
+
+    longest = max(len(before), len(after))
+    points: list[dict] = []
+    for start, end in _bins(longest):
+        b = _bin_mean(before[start:end])
+        a = _bin_mean(after[start:end])
+        if b is None and a is None:
+            continue
+        points.append({"position": start + 1, "before": b, "after": a})
+    return points or None
+
+
 def parse_qc_facts(path: Path) -> dict:
     """QC facts for an object, from fastp's report-only JSON.
 
@@ -333,9 +403,24 @@ class TrimProgress:
 def parse_report(path: Path) -> dict:
     """Extract the before/after comparison from fastp's JSON.
 
-    Only the scalar summary is kept. The full report also carries per-cycle
-    quality and content curves -- several hundred floats per read direction --
-    which belong in the HTML report rather than in every object document.
+    The scalar summary, plus one per-cycle curve: read1's mean quality on both
+    sides, downsampled to `MAX_CURVE_POINTS` bins (see `_quality_overlay`).
+
+    This function long kept the scalars only, on the reasoning that per-cycle
+    curves belong in fastp's HTML report rather than in every object document.
+    That reasoning was revisited for #639. The curves are what say *where*
+    trimming acted -- a clipped 3' decay, an adapter tail, or nothing much
+    moving at all, which is the case worth catching -- and the scalar deltas
+    cannot express any of it. Size was the other half of the argument, and
+    downsampling answers it: 100 binned points per side is a few KB, next to
+    facts this app already persists at greater length (`vcf_stats_density_bins`,
+    the Circos GC tracks). The QC path was already persisting per-cycle curves
+    for exactly this kind of chart, so keeping them out here was this one
+    function's rule rather than the codebase's.
+
+    Still deliberately dropped: the base-content curves (A/C/G/T/GC per cycle,
+    five more arrays per direction) and read2's quality, neither of which any
+    view draws.
     """
     try:
         raw = json.loads(path.read_text())
@@ -364,6 +449,10 @@ def parse_report(path: Path) -> dict:
         "duplication_rate": raw.get("duplication", {}).get("rate"),
         "insert_size_peak": raw.get("insert_size", {}).get("peak"),
     }
+
+    overlay = _quality_overlay(raw)
+    if overlay:
+        report["quality_overlay"] = overlay
 
     if adapters:
         report["adapters"] = {
