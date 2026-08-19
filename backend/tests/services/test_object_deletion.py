@@ -15,6 +15,14 @@ from tests.services.helpers import TEST_OWNER
 pytestmark = [
     pytest.mark.usefixtures("beanie_models"),
     pytest.mark.asyncio(loop_scope="module"),
+    # Pinned to one xdist worker (requires --dist loadgroup). Unlike the rest
+    # of the suite, these drive the real `settings.*_dir` roots under /data
+    # rather than a tmp_path: `reap_report_dirs` scans a whole root and decides
+    # what to delete by looking the directory name up as an object id. Since
+    # each worker owns a separate test database, a second worker's reap sees no
+    # row for this one's just-created live directory and deletes it as an
+    # orphan -- so these must not run beside each other.
+    pytest.mark.xdist_group("shared-data-report-dirs"),
 ]
 
 
