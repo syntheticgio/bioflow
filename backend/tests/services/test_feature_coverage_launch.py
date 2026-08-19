@@ -289,6 +289,55 @@ async def test_resolves_lone_annotation_and_enqueues_exact_payload_keys():
 
 
 @pytest.mark.asyncio
+async def test_refuses_gtf_annotation_not_in_the_format_map():
+    """_FEATURE_COVERAGE_ANNOTATION_FORMATS deliberately excludes
+    FormatKind.GTF (see the comment above that dict in pipeline_service.py):
+    _is_annotation accepts GFF, BED, and GTF, so a project whose only
+    annotation is a GTF resolves here and must be refused rather than
+    silently mapped to the wrong bedtools flavor."""
+    bam = _bam()
+    reference = _reference(project_id=bam.project_id)
+    annotation = _annotation(project_id=bam.project_id, kind=FormatKind.GTF)
+    bai = _sidecar("bai")
+    fai = _sidecar("fai")
+
+    from app.models import SidecarRole
+
+    async def fake_sidecar_of_role(obj, role):
+        if role is SidecarRole.BAI:
+            return bai
+        if role is SidecarRole.FAI:
+            return fai
+        return None
+
+    with (
+        patch(
+            "app.services.pipeline_service.current_admission_budget_mb",
+            _budget_of(999_999),
+        ),
+        patch(
+            "app.services.object_service.get_object",
+            AsyncMock(return_value=bam),
+        ),
+        patch(
+            "app.services.pipeline_service._resolve_variant_reference",
+            AsyncMock(return_value=reference),
+        ),
+        patch(
+            "app.services.pipeline_service.resolve_annotation",
+            AsyncMock(return_value=annotation),
+        ),
+        patch(
+            "app.services.pipeline_service._sidecar_of_role",
+            fake_sidecar_of_role,
+        ),
+    ):
+        with pytest.raises(ValidationError, match="not GTF") as excinfo:
+            await pipeline_service.launch_feature_coverage(bam_id=bam.id, owner="t")
+    assert excinfo.value.details["kind"] == "gtf"
+
+
+@pytest.mark.asyncio
 async def test_dedup_collision_raises_conflict_error():
     bam = _bam()
     reference = _reference(project_id=bam.project_id)
