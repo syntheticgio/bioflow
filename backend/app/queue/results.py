@@ -3072,5 +3072,6 @@ _APPLIERS = {
     "assess_assembly_continuity": _apply_assess_assembly_continuity,
     "consensus_from_alignment": _apply_consensus_from_alignment,
     "polish_assembly": _apply_polish_assembly,
+    "polish_long_assembly": _apply_polish_assembly,
     "scaffold_assembly": _apply_scaffold_assembly,
 }

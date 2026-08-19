@@ -30,7 +30,14 @@ from app.config import settings
 from app.errors import PermanentError, RetryableError
 from app.logging import get_logger
 from app.models import IoClass, JobClass, JobResources
-from app.pipelines import align_runner, ivar_runner, polypolish_runner, ragtag_runner, tools
+from app.pipelines import (
+    align_runner,
+    ivar_runner,
+    medaka_runner,
+    polypolish_runner,
+    ragtag_runner,
+    tools,
+)
 from app.queue.executor import run_subprocess
 from app.queue.pipeline_handlers import _failure, _named_link, _prepare_workdir, _resolve_input
 from app.queue.registry import HandlerMode, JobContext, handler
@@ -331,6 +338,7 @@ def polish_assembly(ctx: JobContext) -> dict:
         raise RetryableError("polypolish exited successfully but wrote no sequence")
 
     facts = polypolish_runner.parse_polish_stderr("\n".join(output_lines))
+    facts["polish_tool"] = "polypolish"
     facts["polish_tool_version"] = tool.version
     facts["polish_aligner"] = aligner.name
     facts["polish_aligner_version"] = aligner.version
@@ -353,6 +361,121 @@ def polish_assembly(ctx: JobContext) -> dict:
         "reads_object_id": ctx.payload.get("reads_object_id"),
         "mate_object_id": ctx.payload.get("mate_object_id"),
         "output": {"tmp_path": str(polished), "name": "polished.fasta"},
+        "facts": facts,
+    }
+
+
+# Medaka's cost is inference, which is CPU-bound here by construction of
+# the pytorch-cpu pin. Unlike polish_assembly -- where the comment
+# correctly notes peak RSS describes bwa-mem2's index and therefore scales
+# with the *draft* -- Medaka's peak scales with batch size and model and is
+# near-flat in draft size, while runtime scales with depth times draft
+# length. A memory-model fit that assumes the Polypolish shape is wrong in
+# both directions.
+POLISH_LONG_LEASE_SECONDS = 8 * 3600
+
+
+@handler(
+    "polish_long_assembly",
+    mode=HandlerMode.SUBPROCESS,
+    job_class=JobClass.COMPUTE,
+    resources=JobResources(cpu=8, mem_mb=16384, io=IoClass.HEAVY),
+    # Deterministic tool, deterministic input: a retry fails identically.
+    # Same reasoning as polish_assembly.
+    max_attempts=1,
+)
+def polish_long_assembly(ctx: JobContext) -> dict:
+    """Correct residual base errors in a draft assembly using long reads.
+
+    One stage, not Polypolish's five: `medaka_consensus` runs minimap2,
+    `medaka inference` and `medaka sequence` itself. That is why no aligner
+    is resolved here and no alignment command is built -- Medaka picks its
+    minimap2 preset from the model it resolves, and overriding that would
+    replace a model-dependent choice with a fixed guess.
+
+    The alignment being internal is also what makes provenance answerable
+    "by construction" rather than by validation, exactly as it is for
+    `polish_assembly`: the reads are aligned to this draft inside the job,
+    so the alignment target cannot be anything else.
+
+    Two facts are recorded that have no Polypolish counterpart, and both
+    exist because Medaka fails quietly rather than loudly. It resolves its
+    network from basecaller metadata in the reads and falls back to a legacy
+    default when it finds none -- succeeding, with worse output, and no
+    error -- so `polish_model` and `polish_model_auto_resolved` are what
+    make that diagnosable afterwards. And it prints no per-contig tally the
+    way Polypolish does, so `polish_changed_positions` is computed from the
+    draft and the consensus rather than parsed.
+    """
+    tool = tools.require(tools.medaka())
+
+    work = _prepare_workdir(ctx, "polish_long")
+
+    draft = _resolve_input(ctx.payload, "draft")
+    draft = _named_link(work, draft, ctx.payload.get("draft_name"))
+
+    if ctx.payload.get("reads_object_id") is None:
+        raise PermanentError("polish_long_assembly requires a long-read file")
+    reads = _resolve_input(ctx.payload, "reads")
+    reads = _named_link(work, reads, ctx.payload.get("reads_name"))
+
+    log_path = settings.logs_dir / f"{ctx.job_id}.log"
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+
+    ctx.extend_lease(POLISH_LONG_LEASE_SECONDS)
+
+    threads = max(1, int(ctx.payload.get("threads") or 8))
+    bacteria = bool(ctx.payload.get("bacteria"))
+
+    outdir = work / "medaka"
+    ctx.progress(phase="polishing", pct=0.1, message="polishing with medaka")
+
+    # Medaka announces its resolved model on stderr before inference. Same
+    # collector shape polish_assembly uses for Polypolish's summary:
+    # run_subprocess merges stderr into the line stream, and on_line is the
+    # only way to see those lines rather than only writing them to log_path.
+    output_lines: list[str] = []
+    code = run_subprocess(
+        ctx,
+        medaka_runner.build_consensus_command(
+            medaka_path=tool.path,
+            draft=draft,
+            reads=reads,
+            outdir=outdir,
+            threads=threads,
+            bacteria=bacteria,
+        ),
+        log_path=str(log_path),
+        on_line=output_lines.append,
+    )
+    if code != 0:
+        raise _failure(code, log_path, "medaka_consensus")
+
+    consensus = outdir / medaka_runner.CONSENSUS_FILENAME
+    if not consensus.exists() or consensus.stat().st_size == 0:
+        raise RetryableError("medaka exited successfully but wrote no consensus")
+
+    facts = medaka_runner.parse_model_line("\n".join(output_lines))
+    facts.update(medaka_runner.count_changed_positions(draft, consensus))
+    facts["polish_tool"] = "medaka"
+    facts["polish_tool_version"] = tool.version
+    facts["polish_bacteria_mode"] = bacteria
+    facts["polish_read_files"] = 1
+
+    ctx.progress(phase="done", pct=1.0, message="polishing complete")
+    log.info(
+        "polish_long_finished",
+        job_id=ctx.job_id,
+        changed=facts.get("polish_changed_positions"),
+        model=facts.get("polish_model"),
+        auto=facts.get("polish_model_auto_resolved"),
+    )
+
+    return {
+        "job_id": ctx.job_id,
+        "draft_object_id": ctx.payload.get("draft_object_id"),
+        "reads_object_id": ctx.payload.get("reads_object_id"),
+        "output": {"tmp_path": str(consensus), "name": "consensus.fasta"},
         "facts": facts,
     }
 
