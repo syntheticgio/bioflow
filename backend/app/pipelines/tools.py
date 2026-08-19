@@ -2396,8 +2396,9 @@ TOOL_META: dict[str, ToolMeta] = {
         license="BSD-3-Clause",
         usage=(
             "Runs one sample at a time against a transcriptome index, which is "
-            "built once per transcriptome and reused across every sample in "
-            "the project. Transcript-level estimates are summed to genes "
+            "built fresh inside the job's workdir for every run and discarded "
+            "afterward, rather than cached and reused across samples. "
+            "Transcript-level estimates are summed to genes "
             "before they are stored, so the result is an ordinary counts file "
             "that the differential expression test accepts alongside "
             "featureCounts output -- though not mixed into the same "
