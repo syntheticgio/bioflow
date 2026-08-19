@@ -75,6 +75,7 @@ import { QuantifyDialog } from "./QuantifyDialog";
 import { DifferentialExpressionDialog } from "./DifferentialExpressionDialog";
 import { VariantDialog } from "./VariantDialog";
 import { QcReport } from "./QcReport";
+import { TaxonomyFacts } from "./TaxonomyFacts";
 import { TrimReport } from "./TrimReport";
 import { SraPanel } from "./SraPanel";
 import { TabPanel, Tabs, type TabDef } from "./Tabs";
@@ -1513,6 +1514,12 @@ function QcTab({
               trim comparison because it describes the starting point that
               comparison is against. */}
           <QcReport facts={obj.facts} objectId={obj.id} />
+
+          {/* What the reads actually are, not just how clean they are --
+              placed right after QC since both answer "what does this file
+              contain/look like", ahead of the before/after trim
+              comparison. */}
+          <TaxonomyFacts facts={obj.facts} />
 
           {/* Before/after comparison, on the source file rather than the
               output: "what did trimming do to my reads" is a question about
