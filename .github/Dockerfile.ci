@@ -30,6 +30,14 @@ RUN apt-get update \
         # found" (2026-08-19). `docker-cli`, not `docker.io`: the latter is
         # the full engine and ships no /usr/bin/docker on this base.
         docker-cli \
+        # `ps`, for tests/queue/test_subprocess.py's _pid_alive: it
+        # distinguishes a live process from an unreaped zombie. Without it
+        # that helper's `except OSError` treats every zombie as alive, and
+        # the process-group cancellation tests fail claiming the group was
+        # never signalled when it was. Bites in a job container specifically,
+        # where PID 1 is the job's shell and does not reap orphans the way a
+        # real init does.
+        procps \
         # npm, for ops/tests/test_release_preflight.py: release.sh bumps the
         # launcher's package.json through `npm version`, and seven of those
         # tests drive it for real. A GitHub runner has npm preinstalled, so
@@ -71,3 +79,25 @@ RUN curl -fsSL --retry 3 --retry-connrefused --max-time 180 \
 RUN mkdir -p /data/.biopipe /data/objects /data/staging /data/tmp \
     && echo "biopipe-home-v1" > /data/.biopipe/VERSION \
     && chmod -R 777 /data
+
+# 6. The backend's Python dependencies, pre-installed.
+#
+# Only pyproject.toml is copied, and the app itself is deliberately NOT
+# installed: what gets baked in is the dependency set, which changes rarely,
+# while the source changes every commit. Each job still runs
+# `pip install -e backend/.[dev]` against its own checkout -- that step then
+# finds every requirement already satisfied and only has to link the package,
+# turning ~17s of downloading into about a second.
+#
+# The consequence to know about: this layer goes stale when pyproject.toml
+# gains a dependency, and ci-runner.yml does not rebuild on that. Nothing
+# breaks when it does -- the job's own pip install fetches whatever is
+# missing, exactly as it does today, just more slowly until the image is
+# rebuilt. Add `backend/pyproject.toml` to that workflow's `paths:` if the
+# rebuild should follow the dependency automatically.
+COPY backend/pyproject.toml /tmp/backend/pyproject.toml
+RUN cd /tmp/backend \
+    && mkdir -p app && touch app/__init__.py \
+    && pip install --no-cache-dir '.[dev]' \
+    && pip uninstall -y biopipe-backend \
+    && rm -rf /tmp/backend
