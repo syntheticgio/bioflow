@@ -275,6 +275,17 @@ RUN chmod +x /srv/scripts/install-spades.sh \
     && SPADES_VERSION="${SPADES_VERSION}" \
        /srv/scripts/install-spades.sh
 
+# --- Salmon ----------------------------------------------------------------
+#
+# Alignment-free transcript quantification. Prebuilt binaries per architecture from COMBINE-lab.
+# Debian trixie's packaged salmon (1.10.2+ds1-1+b5) arm64 build crashes with SIGILL (exit 132)
+# on Apple Silicon / ARM VMs due to CPU instruction set mismatches (#667).
+ARG SALMON_VERSION=1.12.1
+COPY scripts/install-salmon.sh /srv/scripts/install-salmon.sh
+RUN chmod +x /srv/scripts/install-salmon.sh \
+    && SALMON_VERSION="${SALMON_VERSION}" \
+       /srv/scripts/install-salmon.sh
+
 # --- Medaka ----------------------------------------------------------------
 #
 # ONT's neural-network consensus tool, and the only polishing path for
