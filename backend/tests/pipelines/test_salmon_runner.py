@@ -8,6 +8,7 @@ its index sidecars.
 """
 
 import pytest
+from pathlib import Path
 
 from app.errors import ValidationError
 from app.pipelines import salmon_runner
@@ -156,9 +157,6 @@ class TestSummarizeToGene:
         tx2gene = {"t1": "geneA", "t2": "geneB"}
         _, facts = salmon_runner.summarize_to_gene(per_tx, tx2gene)
         assert facts["counted_fragments"] == 15
-
-
-from pathlib import Path
 
 
 class TestIndexCommand:
