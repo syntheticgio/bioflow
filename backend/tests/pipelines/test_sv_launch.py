@@ -10,14 +10,31 @@ from app.pipelines.align_runner import ReadChemistry
 from app.services import pipeline_service
 
 
-def test_short_read_bam_is_refused_before_a_job_is_queued():
+def test_short_read_bam_reaches_delly_at_launch():
     """The gate belongs at launch, not only on the card.
 
-    A card is a suggestion; the endpoint is reachable directly. Refusing
-    only in the UI would let a short-read BAM through the API and produce a
-    junk callset with nothing saying so.
+    A card is a suggestion; the endpoint is reachable directly. Before #620
+    this asserted short reads were refused outright. They are now routed to
+    Delly instead -- but the launch path must still refuse a chemistry no
+    caller covers, which `test_unknown_chemistry_is_refused_at_launch`
+    below pins.
     """
-    assert sniffles_runner.sv_calling_allowed_for(ReadChemistry.SHORT) is False
+    from app.pipelines import sv_caller
+
+    assert sniffles_runner.sv_calling_allowed_for(ReadChemistry.SHORT) is True
+    assert (
+        sv_caller.caller_for_chemistry(ReadChemistry.SHORT)
+        is sv_caller.SvCaller.DELLY
+    )
+
+
+def test_unknown_chemistry_is_refused_at_launch():
+    """UNKNOWN means QC has not run. This is the gate the test above used
+    to provide for short reads, and it must not be lost in the swap."""
+    from app.pipelines import sv_caller
+
+    assert sniffles_runner.sv_calling_allowed_for(ReadChemistry.UNKNOWN) is False
+    assert sv_caller.caller_for_chemistry(ReadChemistry.UNKNOWN) is None
 
 
 def test_params_reject_a_zero_support_threshold():
@@ -88,3 +105,30 @@ async def test_sv_payload_omits_chemistry_when_unresolved():
         )
 
     assert "chemistry" not in payload
+
+
+class TestCallerDispatch:
+    """The handler must report which caller actually ran."""
+
+    def test_delly_params_are_used_for_a_short_read_payload(self):
+        """The handler picks the params class matching the caller. Parsing a
+        Delly payload with SnifflesParams would silently accept
+        `min_sv_length`, a knob Delly has no flag for."""
+        from app.pipelines import delly_runner, sv_caller
+
+        caller = sv_caller.caller_for_chemistry(ReadChemistry.SHORT)
+        assert caller is sv_caller.SvCaller.DELLY
+
+        params = delly_runner.DellyParams.from_dict({"threads": 8})
+        assert params.threads == 8
+        assert not hasattr(params, "min_sv_length")
+
+    def test_provenance_round_trips_the_handler_result(self):
+        """The contract between the handler's result dict and
+        sv_provenance. Without the caller key, every Delly VCF is stamped as
+        Sniffles output -- see Task 4."""
+        from app.pipelines.sv_caller import SvCaller
+        from app.queue.results import sv_provenance
+
+        result = {"caller": SvCaller.DELLY.value, "tool_version": "2.6.0"}
+        assert sv_provenance(result)["variants_called_by"] == "delly"

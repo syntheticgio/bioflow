@@ -49,6 +49,7 @@ from app.pipelines import (
     csq_parse,
     cutadapt_runner,
     de_runner,
+    delly_runner,
     fastp_runner,
     lineage_inference,
     pairing,
@@ -3696,16 +3697,17 @@ async def launch_structural_variant_calling(
     reference_id: PydanticObjectId | None = None,
     resource_override: bool = False,
 ):
-    """Queue a Sniffles2 structural variant calling run over an aligned BAM.
+    """Queue a structural variant calling run over an aligned BAM.
 
     Mirrors `launch_variant_calling`'s structure: requires the `.bai` and the
     reference `.fai` to already exist rather than building them, and refuses
     up front rather than letting a doomed job reach the worker. The chemistry
     gate is the one thing this launcher checks that `launch_variant_calling`
-    does not -- Sniffles2 is a long-read caller, and a short-read BAM would
-    otherwise produce a junk callset with nothing saying so. Checked here, at
-    the one place the API is actually reachable, rather than only on the
-    suggestion card, which is advisory and skippable.
+    does not -- since #620 it selects the caller rather than refusing, routing
+    long reads to Sniffles2 and short reads to Delly, and refusing only a
+    chemistry no caller covers. Checked here, at the one place the API is
+    actually reachable, rather than only on the suggestion card, which is
+    advisory and skippable.
     """
     from app.queue import queue
     from app.services import object_service
@@ -3720,13 +3722,14 @@ async def launch_structural_variant_calling(
     _check_variant_callable(bam)
 
     chemistry = await read_chemistry_for_alignment(bam)
-    if not sniffles_runner.sv_calling_allowed_for(
+    caller = sv_caller.caller_for_chemistry(
         chemistry or align_runner.ReadChemistry.UNKNOWN
-    ):
+    )
+    if caller is None:
         raise ValidationError(
-            f"{bam.name!r} does not look like long reads "
+            f"{bam.name!r} has no recognised sequencing platform "
             f"(chemistry={chemistry.value if chemistry else 'unknown'}). "
-            f"Structural variant calling needs a long-read alignment.",
+            f"Run QC on its reads first.",
             details={
                 "bam_id": str(bam.id),
                 "chemistry": chemistry.value if chemistry else None,
@@ -3750,13 +3753,12 @@ async def launch_structural_variant_calling(
             details={"reference_id": str(reference.id), "needs": "build_index"},
         )
 
-    caller = sv_caller.caller_for_chemistry(
-        chemistry or align_runner.ReadChemistry.UNKNOWN
-    )
-
-    tools.require(tools.sniffles())
-
-    merged = sniffles_runner.SnifflesParams.from_dict(params)
+    if caller is sv_caller.SvCaller.DELLY:
+        tools.require(tools.delly())
+        merged = delly_runner.DellyParams.from_dict(params)
+    else:
+        tools.require(tools.sniffles())
+        merged = sniffles_runner.SnifflesParams.from_dict(params)
 
     payload = await _sv_payload(
         bam=bam,
@@ -3770,7 +3772,7 @@ async def launch_structural_variant_calling(
     run = await run_service.create_run(
         kind=RunKind.STRUCTURAL_VARIANT_CALLING,
         project_id=bam.project_id,
-        label=f"{bam.name} → structural variants (sniffles2)",
+        label=f"{bam.name} → structural variants ({caller.value})",
         inputs=[
             RunInput(object_id=bam.id, name=bam.name, role=RunInputRole.READS),
             RunInput(
@@ -3781,7 +3783,7 @@ async def launch_structural_variant_calling(
         ],
         params=merged.as_dict(),
         owner=owner,
-        tool="sniffles2",
+        tool=caller.value,
     )
 
     job = await queue.enqueue(
