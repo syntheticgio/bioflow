@@ -283,6 +283,63 @@ class TestAssemblyEstimate:
         )
         assert without_genome == with_genome
 
+    def test_spades_meta_estimate_uses_read_volume_not_genome_size(self):
+        """The whole point of the second model: a community assembly normally
+        has no genome size, and without a meta model the estimate would be
+        None -- an unguarded run rather than a conservative one."""
+        from app.pipelines import resource_estimator
+        from app.pipelines.assemblers import Assembler
+
+        est = resource_estimator.estimate_assembly_mb(
+            assembler=Assembler.SPADES,
+            genome_bases=None,
+            threads=4,
+            read_bases=52_799_700,
+            meta=True,
+        )
+        assert est is not None
+        assert est > 0
+
+    def test_spades_meta_estimate_covers_the_measured_peaks(self):
+        """Both bake-off runs from #731, whose peaks the model must not
+        under-call: under-provisioning is an OOM, and an OOM-killed run also
+        poisons the timing models.
+
+        Measured with metaSPAdes 4.3.0 at 4 threads over a 5-organism
+        synthetic community with a 30x abundance spread.
+        """
+        from app.pipelines import resource_estimator
+        from app.pipelines.assemblers import Assembler
+
+        for read_bases, observed_peak_mb in ((52_799_700, 776), (158_398_800, 2154)):
+            est = resource_estimator.estimate_assembly_mb(
+                assembler=Assembler.SPADES,
+                genome_bases=None,
+                threads=4,
+                read_bases=read_bases,
+                meta=True,
+            )
+            assert est >= observed_peak_mb, (read_bases, est, observed_peak_mb)
+
+    def test_non_meta_spades_estimate_still_uses_the_genome_model(self):
+        """The three single-genome modes must be arithmetically untouched by
+        the meta model existing."""
+        from app.pipelines import resource_estimator
+        from app.pipelines.assemblers import Assembler
+
+        est = resource_estimator.estimate_assembly_mb(
+            assembler=Assembler.SPADES,
+            genome_bases=5_000_000,
+            threads=4,
+            read_bases=500_000_000,
+            meta=False,
+        )
+        spec_model = __import__(
+            "app.pipelines.assembler_registry", fromlist=["spec_for"]
+        ).spec_for(Assembler.SPADES).memory_model
+        expected_genome_mb = (5_000_000 * spec_model.bytes_per_genome_base) / 1024**2
+        assert est > expected_genome_mb
+
     def test_flye_meta_estimate_grows_with_read_bases(self):
         from app.pipelines import resource_estimator
         from app.pipelines.assemblers import Assembler

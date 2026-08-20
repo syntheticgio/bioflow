@@ -13,11 +13,15 @@ export interface AssemblerSchema {
 
 export interface AssemblyParams {
   assembler: AssemblerName;
+  /** The running mode, whose choices come from the assembler's schema. SPAdes
+   *  spells metagenome mode here (`"meta"`, metaSPAdes) because it is
+   *  exclusive with its other modes; Flye spells it in `meta` below because
+   *  it is orthogonal to its accuracy mode. */
   mode: string;
   threads: number;
   iterations: number;
   /** Metagenome mode (Flye's `--meta`), for a mixed-community sample rather
-   *  than a single organism. */
+   *  than a single organism. Flye only -- see `mode` for SPAdes. */
   meta?: boolean;
   /** Bases. Null when nothing in the project could say, which is the normal
    *  case for de novo work rather than a misconfiguration. */

@@ -163,10 +163,15 @@ def _spades_command(
     cmd = [tool_path, "-o", str(out_dir), "-t", str(params.threads), "-m", str(memory_gb)]
 
     # `standard` is BioFlow's name for neither flag; SPAdes has no such option.
+    # These stay mutually exclusive because SPAdes rejects the combinations:
+    # `--meta` with either `--isolate` or `--careful` is an error, and emitting
+    # both would fail minutes in, after read error correction.
     if params.mode == "isolate":
         cmd.append("--isolate")
     elif params.mode == "careful":
         cmd.append("--careful")
+    elif params.mode == "meta":
+        cmd.append("--meta")
 
     if mate is not None:
         cmd += ["-1", str(reads), "-2", str(mate)]

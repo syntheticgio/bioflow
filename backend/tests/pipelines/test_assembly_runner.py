@@ -189,6 +189,50 @@ class TestSpadesCommand:
         assert "--isolate" not in cmd
         assert "--careful" not in cmd
 
+    def test_meta_mode_passes_the_flag(self):
+        cmd = _spades_cmd(params=SpadesParams(mode="meta"))
+        assert "--meta" in cmd
+
+    def test_meta_mode_passes_neither_isolate_nor_careful(self):
+        """SPAdes rejects `--meta --isolate` and `--meta --careful` outright,
+        and does so minutes in, after read error correction. A builder that
+        emitted both would fail late and unhelpfully."""
+        cmd = _spades_cmd(params=SpadesParams(mode="meta"))
+        assert "--isolate" not in cmd
+        assert "--careful" not in cmd
+
+    @pytest.mark.parametrize(
+        "mode,expected_flags",
+        [
+            ("isolate", ["--isolate"]),
+            ("careful", ["--careful"]),
+            ("standard", []),
+        ],
+    )
+    def test_existing_modes_emit_exactly_what_they_did(self, mode, expected_flags):
+        """Full-argv equality, not a `"--meta" not in cmd` check.
+
+        Adding a mode edits a builder every existing SPAdes run goes through,
+        so the assertion that matters is that the other three argvs are
+        byte-identical -- which also catches a reordering or a dropped flag
+        that a negative check would sail past.
+        """
+        cmd = _spades_cmd(params=SpadesParams(mode=mode, threads=4))
+        assert cmd == [
+            "/usr/local/bin/spades.py",
+            "-o",
+            "/work/out",
+            "-t",
+            "4",
+            "-m",
+            "8",
+            *expected_flags,
+            "-1",
+            "/work/r1.fastq.gz",
+            "-2",
+            "/work/r2.fastq.gz",
+        ]
+
     def test_memory_ceiling_is_in_whole_gigabytes(self):
         """-m is in GB and SPAdes terminates on reaching it."""
         cmd = _spades_cmd(memory_bytes=8 * 1024**3)

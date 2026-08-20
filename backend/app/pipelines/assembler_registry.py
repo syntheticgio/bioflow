@@ -246,9 +246,33 @@ SPADES_SPEC = AssemblerSpec(
         bytes_per_read_base=0.6,
         fixed_overhead_mb=4096,
     ),
+    # metaSPAdes, where genome size stops being a meaningful input -- the same
+    # problem FLYE_SPEC.meta_memory_model solves, and solved the same way:
+    # against read volume instead. Without this, a community assembly (which
+    # normally has no genome size) estimates to None and is guarded by nothing.
+    #
+    # Measured on this hardware rather than taken from published guidance,
+    # which the single-genome model above could not be: two metaSPAdes 4.3.0
+    # runs over a 5-organism synthetic community with a 30x abundance spread,
+    # 4 threads, peak RSS via GNU time --
+    #
+    #     52.8 Mbp of reads ->  776 MB
+    #    158.4 Mbp of reads -> 2154 MB
+    #
+    # a near-linear 13.7 bytes per read base on an ~87 MB intercept. Rounded
+    # up to 16 and given a 1 GB floor, on #727's stated bias: wrong in the low
+    # direction is an OOM (which also poisons the timing models), wrong in the
+    # high direction is a warning someone can override.
+    meta_memory_model=AssemblyMemoryModel(
+        bytes_per_genome_base=0.0,
+        bytes_per_read_base=16.0,
+        fixed_overhead_mb=1024,
+    ),
     outputs=(
         # Filenames confirmed against a real 4.3.0 run of the bundled
-        # test dataset, not read from documentation.
+        # test dataset, not read from documentation. Confirmed again under
+        # `--meta` for #731: contigs.fasta and assembly_graph_with_scaffolds.gfa
+        # are both still produced, so meta mode needs no separate outputs.
         #
         # No scaffolds.fasta entry, deliberately: `harvest()` returns
         # `dict[OutputKind, Path]` keyed by kind, and there is no separate
@@ -275,12 +299,20 @@ SPADES_SPEC = AssemblerSpec(
             help=(
                 "Isolate is recommended for high-coverage bacterial isolates "
                 "and is the usual choice. Careful reduces mismatches and short "
-                "indels but is only for small genomes. The two cannot be "
-                "combined."
+                "indels but is only for small genomes. Metagenome is for a "
+                "mixed-community sample rather than a single organism, and "
+                "requires paired reads. No two of these can be combined."
             ),
             choices=(
                 Choice(value="isolate", label="Isolate (high-coverage, recommended)"),
                 Choice(value="careful", label="Careful (small genomes only)"),
+                # metaSPAdes. A mode rather than a checkbox, unlike Flye's
+                # `meta` field above: SPAdes rejects `--meta --isolate` and
+                # `--meta --careful` outright, so the exclusivity this select
+                # already enforces is exactly the exclusivity the tool wants.
+                # Flye's `--meta` is orthogonal to its accuracy mode, which is
+                # why the two are shaped differently on purpose.
+                Choice(value="meta", label="Metagenome (paired reads only)"),
                 Choice(value="standard", label="Standard"),
             ),
         ),

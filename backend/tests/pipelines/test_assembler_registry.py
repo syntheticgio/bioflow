@@ -64,10 +64,34 @@ def test_spades_does_not_declare_scaffolds_fasta():
     assert filenames == {"contigs.fasta", "assembly_graph_with_scaffolds.gfa"}
 
 
-def test_spades_offers_exactly_the_three_modes():
+def test_spades_offers_exactly_the_four_modes():
     assert assembler_registry.modes_for(Assembler.SPADES) == frozenset(
-        {"isolate", "careful", "standard"}
+        {"isolate", "careful", "meta", "standard"}
     )
+
+
+def test_spades_spells_metagenome_mode_as_a_mode_not_a_checkbox():
+    """The opposite of Flye, and deliberately so.
+
+    SPAdes rejects `--meta` combined with `--isolate` or `--careful`, so the
+    exclusivity the select already enforces is exactly the exclusivity the
+    tool wants. Flye's `--meta` is orthogonal to its accuracy mode and is a
+    `bool` field for that reason -- implementing the two the same way would be
+    wrong in one direction or the other.
+    """
+    spec = assembler_registry.spec_for(Assembler.SPADES)
+    assert not any(f.key == "meta" for f in spec.fields)
+    assert "meta" in assembler_registry.modes_for(Assembler.SPADES)
+
+
+def test_spades_has_a_meta_memory_model_keyed_on_read_volume():
+    """A community has no single genome size, so the standard model's only
+    input is unavailable -- without this the estimate is None and the run is
+    guarded by nothing at all."""
+    spec = assembler_registry.spec_for(Assembler.SPADES)
+    assert spec.meta_memory_model is not None
+    assert spec.meta_memory_model.bytes_per_genome_base == 0.0
+    assert spec.meta_memory_model.bytes_per_read_base > 0
 
 
 def test_spades_does_not_offer_a_kmer_field():
@@ -92,11 +116,20 @@ def test_flye_declares_a_meta_memory_model():
     assert spec.meta_memory_model.bytes_per_read_base > 0
 
 
-def test_only_flye_declares_a_meta_memory_model():
-    """ABySS and SPAdes have no meta mode; a meta_memory_model on them would
-    be dead configuration nothing selects."""
-    for assembler in (Assembler.ABYSS, Assembler.SPADES, Assembler.HIFIASM):
-        assert assembler_registry.spec_for(assembler).meta_memory_model is None
+def test_a_meta_memory_model_exists_exactly_where_a_meta_mode_does():
+    """The two must agree in both directions.
+
+    A meta mode without a model estimates to None for a community (which has
+    no genome size to feed the standard model) and is guarded by nothing; a
+    model without a mode is dead configuration nothing ever selects. SPAdes
+    gained both in #731, having had neither when this test was written for
+    #727.
+    """
+    has_meta_mode = {Assembler.FLYE, Assembler.SPADES}
+    for assembler in Assembler:
+        spec = assembler_registry.spec_for(assembler)
+        declares_model = spec.meta_memory_model is not None
+        assert declares_model is (assembler in has_meta_mode), assembler
 
 
 def test_short_reads_still_route_to_abyss_after_spades_is_installed():
