@@ -1311,10 +1311,16 @@ def test_bedtools_is_runnable():
     assert tools.TOOL_META["bedtools"].runnable is True
 
 
-def test_seqkit_is_not_runnable():
-    """No job handler branches on seqkit yet, so it must not read as an
-    actionable pipeline step."""
-    assert tools.TOOL_META["seqkit"].runnable is False
+def test_seqkit_is_runnable():
+    """The Extract sequences card and run_sequence_extraction handler (#632,
+    stage 4) give seqkit a real dispatch path, so it reads as an actionable
+    pipeline step rather than a binary that merely ships in the image.
+
+    Asserted the same way round as bedtools above, and for the same reason:
+    this pair is the only thing that catches `runnable` going stale, which is
+    what the field's own docstring in tools.py describes happening to
+    cutadapt and Trimmomatic."""
+    assert tools.TOOL_META["seqkit"].runnable is True
 
 
 def test_delly_is_probed():

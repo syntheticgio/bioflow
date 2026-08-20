@@ -1,7 +1,14 @@
 """Annotation comparison: bedtools jaccard and bedtools intersect -v.
 
 Answers: "How much do these two annotations of the same assembly agree?"
-Uses sorted inputs per RS-5.
+
+Neither command below carries `-sorted`/`-g`, unlike the other bedtools
+consumers here, and that is deliberate rather than an RS-5 omission:
+`jaccard` requires sorted input unconditionally and rejects anything else
+with a non-zero exit, so the flag would add nothing it does not already
+enforce. Sorting is still mandatory -- the handler sorts both annotations
+before calling either builder -- it is simply enforced by bedtools rather
+than requested by a flag.
 """
 
 from pathlib import Path
