@@ -52,7 +52,12 @@ export type ObjectRole =
   /** The GFA graph beside a de novo assembly's contigs. A role rather than a
    * sidecar: it is a result someone opens in Bandage, not scaffolding for
    * another tool. */
-  | "assembly_graph";
+  | "assembly_graph"
+  /** Transcript models StringTie proposed from one sample's alignment, as
+   * GTF. Distinct from "annotation": a downloaded GFF3 is authoritative,
+   * this is a hypothesis about one sample. Same split as "counts" vs
+   * "de_results". */
+  | "assembled_transcripts";
 
 /**
  * What kind of scaffolding a sidecar is. Distinct from ObjectRole: a role says

@@ -202,6 +202,14 @@ function categorizeFile(obj: DataObject): FileCategory {
   if (obj.role === "annotation") return "annotations";
   if (obj.role === "protein" || obj.role === "transcript") return "sequences";
   if (obj.role === "counts" || obj.role === "de_results") return "expression";
+  // A StringTie GTF is a proposed transcript model, one sample's computed
+  // result -- not an authoritative downloaded annotation. Must be checked
+  // before the format-based GTF/GFF fallback below, or it lands in
+  // "annotations" beside real NCBI annotations, exactly the conflation this
+  // role exists to prevent. Filed under "expression" alongside counts/DE
+  // results, the closest existing category for a computed, per-sample
+  // result rather than an uploaded reference.
+  if (obj.role === "assembled_transcripts") return "expression";
 
   const kind = obj.format.kind.toLowerCase();
   if (kind === "fastq" || kind === "fasta") return "reads";
