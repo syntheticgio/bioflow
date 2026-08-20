@@ -250,8 +250,11 @@ function DepthTrack({
             {hovered.name ? `${hovered.name} · ` : ""}
             {contig}:{hovered.start.toLocaleString()}-
             {hovered.end.toLocaleString()} · {hovered.depth.toFixed(1)}×
+            {/* formatRatio already reads "1.67x typical depth" -- appending
+                "of mean" to it produced "1.67x typical depth of mean", and
+                "typical" is the median rather than the mean anyway. */}
             {baseline != null && depthRatio(hovered.depth, baseline) != null && (
-              <> · {formatRatio(depthRatio(hovered.depth, baseline)!)} of mean</>
+              <> · {formatRatio(depthRatio(hovered.depth, baseline)!)}</>
             )}
           </>
         ) : (
