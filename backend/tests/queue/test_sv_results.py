@@ -244,6 +244,15 @@ def test_sv_provenance_falls_back_for_a_pre_620_result():
     assert sv_provenance({})["variants_called_by"] == "sniffles2"
 
 
+def test_sv_provenance_does_not_override_a_present_but_falsy_caller():
+    """`or "sniffles2"` would silently override an explicit empty/None
+    caller with the fallback. The fallback must apply only when the key is
+    truly absent -- not whenever the value is falsy."""
+    from app.queue.results import sv_provenance
+
+    assert sv_provenance({"caller": ""})["variants_called_by"] == ""
+
+
 class TestMergeSvApplier:
     async def test_apply_merge_structural_variants(self, tmp_path):
         bam = await _bam(OWNER)

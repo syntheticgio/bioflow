@@ -2897,7 +2897,7 @@ def sv_provenance(result: dict) -> dict:
     absent.
     """
     return {
-        "variants_called_by": result.get("caller") or "sniffles2",
+        "variants_called_by": result["caller"] if "caller" in result else "sniffles2",
         "variant_caller_version": result.get("tool_version"),
         "variant_params": result.get("params") or {},
     }
