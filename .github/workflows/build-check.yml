@@ -1,25 +1,31 @@
 # Verifies code quality and build integrity on every PR into main.
 #
-# Four jobs:
-#   frontend-check   — lint + unit tests + prod image build (ubuntu-latest)
-#   launcher-check   — unit tests + the tsc/vite build tauri runs (ubuntu-latest)
-#   backend-smoke    — bug-only ruff lint + import smoke test + ops script tests
-#   backend-full-test — full pytest suite with Mongo replica-set service
+# Five jobs:
+#   changes            — detects whether the PR touches anything besides
+#                         Markdown/LICENSE; gates the other four
+#   frontend-check     — lint + unit tests + prod image build (ubuntu-latest)
+#   launcher-check     — unit tests + the tsc/vite build tauri runs (ubuntu-latest)
+#   backend-smoke      — bug-only ruff lint + import smoke test + ops script tests
+#   backend-full-test  — full pytest suite with Mongo replica-set service
 #
 # Backend Docker images are NOT built on PRs: they compile bwa-mem2, Clair3,
 # and compleasm from source and are expensive. The backend is instead
 # smoke-tested here (bug lint + import + ops tests). The full pytest suite runs
 # as a separate job with a Mongo replica-set container.
+#
+# The four downstream jobs are each required checks in the branch ruleset, so
+# they must report *something* on every PR -- a workflow-level `paths-ignore`
+# used to skip them entirely on docs-only PRs, which leaves the check
+# "absent" rather than "success" or "skipped", and a ruleset waiting on an
+# absent check blocks forever (#732). Each job runs unconditionally now and
+# early-exits with a quick success when `changes` finds nothing but
+# Markdown/LICENSE, so the required name always reports.
 
 name: Build check
 
 on:
   pull_request:
     branches: [main]
-    paths-ignore:
-      - '**/*.md'
-      - '**/*.mdx'
-      - 'LICENSE'
   workflow_dispatch:
     inputs:
       skip_frontend:
@@ -45,15 +51,42 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # Runs unconditionally (unlike the four jobs below, an `if:`-skipped job
+  # is also "absent" to the ruleset, but nothing requires this one) and
+  # decides whether this PR touches anything besides Markdown/LICENSE.
+  # `dorny/paths-filter` diffs against the PR's merge base without a full
+  # checkout, so this finishes in seconds ahead of the real jobs.
+  changes:
+    name: Detect docs-only changes
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      docs_only: ${{ steps.filter.outputs.code == 'false' }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            code:
+              - '!(**/*.md|**/*.mdx|LICENSE)'
+
   frontend-check:
     name: Frontend (lint + test + build)
+    needs: changes
     if: ${{ !inputs.skip_frontend }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
+      - name: Skip -- docs-only PR
+        if: needs.changes.outputs.docs_only == 'true'
+        run: echo "Docs-only PR (see #732); nothing for this job to check."
+
       - uses: actions/checkout@v7
+        if: needs.changes.outputs.docs_only != 'true'
 
       - name: Setup Node.js
+        if: needs.changes.outputs.docs_only != 'true'
         uses: actions/setup-node@v7
         with:
           node-version: '22'
@@ -61,14 +94,17 @@ jobs:
           cache-dependency-path: frontend/package-lock.json
 
       - name: Install dependencies
+        if: needs.changes.outputs.docs_only != 'true'
         working-directory: frontend
         run: npm ci
 
       - name: Lint (tsc --noEmit)
+        if: needs.changes.outputs.docs_only != 'true'
         working-directory: frontend
         run: npm run lint
 
       - name: Test (vitest)
+        if: needs.changes.outputs.docs_only != 'true'
         working-directory: frontend
         run: npm run test
 
@@ -80,9 +116,11 @@ jobs:
       # — without it, build-push-action falls back to the default `docker`
       # driver which can't export the cache.
       - name: Setup Docker Buildx
+        if: needs.changes.outputs.docs_only != 'true'
         uses: docker/setup-buildx-action@v4
 
       - name: Build prod image
+        if: needs.changes.outputs.docs_only != 'true'
         uses: docker/build-push-action@v7
         with:
           context: ./frontend
@@ -93,13 +131,20 @@ jobs:
 
   launcher-check:
     name: Launcher (test + build)
+    needs: changes
     if: ${{ !inputs.skip_launcher }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
+      - name: Skip -- docs-only PR
+        if: needs.changes.outputs.docs_only == 'true'
+        run: echo "Docs-only PR (see #732); nothing for this job to check."
+
       - uses: actions/checkout@v7
+        if: needs.changes.outputs.docs_only != 'true'
 
       - name: Setup Node.js
+        if: needs.changes.outputs.docs_only != 'true'
         uses: actions/setup-node@v7
         with:
           node-version: '22'
@@ -107,10 +152,12 @@ jobs:
           cache-dependency-path: launcher/package-lock.json
 
       - name: Install dependencies
+        if: needs.changes.outputs.docs_only != 'true'
         working-directory: launcher
         run: npm ci
 
       - name: Test (vitest)
+        if: needs.changes.outputs.docs_only != 'true'
         working-directory: launcher
         run: npm run test
 
@@ -126,11 +173,13 @@ jobs:
       # `include: ["src"]` and no vitest global types, so `tsc` failed -- and
       # nothing in the PR path compiled the launcher at all.
       - name: Build (tsc -b && vite build)
+        if: needs.changes.outputs.docs_only != 'true'
         working-directory: launcher
         run: npm run build
 
   backend-smoke:
     name: Backend smoke (import + ops tests)
+    needs: changes
     if: ${{ !inputs.skip_backend }}
     runs-on: ubuntu-latest
     # Default (no timeout-minutes) is GitHub's 360-minute hard cap. A stalled
@@ -151,9 +200,15 @@ jobs:
     container:
       image: ghcr.io/syntheticgio/bioflow-ci-runner:latest
     steps:
+      - name: Skip -- docs-only PR
+        if: needs.changes.outputs.docs_only == 'true'
+        run: echo "Docs-only PR (see #732); nothing for this job to check."
+
       - uses: actions/checkout@v7
+        if: needs.changes.outputs.docs_only != 'true'
 
       - name: Trust the workspace
+        if: needs.changes.outputs.docs_only != 'true'
         # The checkout is owned by the runner's uid while the job container
         # runs as root, so git refuses it: "detected dubious ownership in
         # repository". ops/tests/test_release_preflight.py shells out to git
@@ -182,6 +237,7 @@ jobs:
       # defaults (#466). --output-format=concise keeps a failure to one line
       # per finding.
       - name: Lint for bugs with ruff (F821, F401)
+        if: needs.changes.outputs.docs_only != 'true'
         run: |
           pip install ruff
           ruff check --config backend/pyproject.toml \
@@ -190,12 +246,14 @@ jobs:
                      backend/app backend/tests ops e2e
 
       - name: Install backend dev dependencies
+        if: needs.changes.outputs.docs_only != 'true'
         run: pip install -e 'backend/.[dev]'
 
       # Exercises the full import chain (every router, service, and the MCP
       # server module) without connecting to Mongo or Redis — create_app()
       # only wires up routes; lifespan (which connects to DBs) runs later.
       - name: Import smoke test
+        if: needs.changes.outputs.docs_only != 'true'
         run: python -c "import app.main; print('backend imports OK')"
 
       # The ops tests are self-contained (subprocess + tmp_path fixtures,
@@ -203,6 +261,7 @@ jobs:
       # version-bump scripts that release.yml and release-launcher.yml
       # depend on.
       - name: Ensure npm
+        if: needs.changes.outputs.docs_only != 'true'
         # ops/tests/test_release_preflight.py drives release.sh for real, and
         # it bumps the launcher's package.json with `npm version`. A GitHub
         # runner ships npm; this container did not until 2026-08-19, and
@@ -217,6 +276,7 @@ jobs:
           npm --version
 
       - name: Ops script tests
+        if: needs.changes.outputs.docs_only != 'true'
         run: pytest ops/tests/ -v
 
       # Static analysis of the shell scripts, added in #492. Worth stating
@@ -228,6 +288,7 @@ jobs:
       # globbing, unused variables -- and the tree was already clean when it
       # was added, so a failure here is a regression, not a backlog.
       - name: Lint shell scripts with shellcheck
+        if: needs.changes.outputs.docs_only != 'true'
         run: |
           # shellcheck comes from the CI image; the apt-get that used to
           # install it here is gone along with the mirror stall it risked
@@ -239,6 +300,7 @@ jobs:
 
   backend-full-test:
     name: Backend tests (full pytest suite)
+    needs: changes
     if: ${{ !inputs.skip_backend_full }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -260,9 +322,15 @@ jobs:
       # is no way to pass mongod the --replSet flag transactions require.
       options: --volume /var/run/docker.sock:/var/run/docker.sock
     steps:
+      - name: Skip -- docs-only PR
+        if: needs.changes.outputs.docs_only == 'true'
+        run: echo "Docs-only PR (see #732); nothing for this job to check."
+
       - uses: actions/checkout@v7
+        if: needs.changes.outputs.docs_only != 'true'
 
       - name: Trust the workspace
+        if: needs.changes.outputs.docs_only != 'true'
         # The checkout is owned by the runner's uid while the job container
         # runs as root, so git refuses it: "detected dubious ownership in
         # repository". ops/tests/test_release_preflight.py shells out to git
@@ -271,9 +339,11 @@ jobs:
         run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
 
       - name: Install backend dev dependencies
+        if: needs.changes.outputs.docs_only != 'true'
         run: pip install -e 'backend/.[dev]'
 
       - name: Verify the data home
+        if: needs.changes.outputs.docs_only != 'true'
         # `.github/Dockerfile.ci` already lays /data out with the
         # .biopipe/VERSION sentinel require_home() checks before every write
         # path, so this asserts rather than creates -- if a future image drops
@@ -288,6 +358,7 @@ jobs:
           echo "data home OK: $(cat /data/.biopipe/VERSION)"
 
       - name: Ensure a Docker client
+        if: needs.changes.outputs.docs_only != 'true'
         # The image gained `docker-cli` on 2026-08-19, but ci-runner.yml only
         # rebuilds it on push to main -- so a PR that needs the client before
         # that rebuild lands would fail with "docker: command not found".
@@ -302,6 +373,7 @@ jobs:
           docker --version
 
       - name: Start MongoDB with a replica set
+        if: needs.changes.outputs.docs_only != 'true'
         # `docker run` against the mounted socket, so this is a *sibling* of
         # the job container, not a child. Sibling containers do not share
         # localhost, so the set is initiated and addressed by container name
@@ -333,6 +405,7 @@ jobs:
           done
 
       - name: Run full test suite
+        if: needs.changes.outputs.docs_only != 'true'
         # Parallel, which is what this workflow's own PR (#679/#693) made
         # safe: every worker gets its own Mongo database, so xdist workers
         # cannot truncate each other's data. `--dist loadgroup` is required,
