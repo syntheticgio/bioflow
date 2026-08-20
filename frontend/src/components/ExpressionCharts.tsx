@@ -258,6 +258,114 @@ export function MAPlot({ rows, alpha = 0.05 }: { rows: DeRow[]; alpha?: number }
   );
 }
 
+/**
+ * P-value histogram: the raw p-value distribution across every tested gene,
+ * in fixed bins of 0.05.
+ *
+ * The cheapest check that the model fit at all, and the one that can
+ * invalidate the volcano and MA plots below it:
+ * - uniform across [0,1] with a spike near 0 — healthy: most genes are null,
+ *   and real signal sits at the low end;
+ * - hill-shaped, peaking in the middle — the test is conservative or the
+ *   variance is overestimated, and the volcano reads empty even when there
+ *   is signal;
+ * - a spike near 1 or a U-shape — the model is misspecified (a batch effect,
+ *   a bad design formula), and the volcano and MA are actively misleading.
+ *
+ * Raw p-values, never padj: an adjusted histogram has a different expected
+ * shape and none of that diagnostic value. The bins come from the run's
+ * facts, computed over the full gene set — the plot fetch is truncated and
+ * sorted for the scatter plots, and would drop exactly the null genes the
+ * uniform baseline is made of. The dashed line is the height a bin would
+ * have if the null p-values were perfectly uniform: n over the number of
+ * bins.
+ */
+export function PValueHistogram({
+  bins,
+  n,
+  binWidth = 0.05,
+}: {
+  bins: number[];
+  n: number;
+  binWidth?: number;
+}) {
+  if (!bins.length || n <= 0) return null;
+
+  const w = 720;
+  const h = 320;
+  const pad = { top: 12, right: 16, bottom: 30, left: 44 };
+  const plotW = w - pad.left - pad.right;
+  const plotH = h - pad.top - pad.bottom;
+
+  const expected = n / bins.length;
+  // Headroom so the tallest bar and the reference line clear the top edge.
+  const yMax = Math.max(expected, ...bins) * 1.1;
+  const barW = plotW / bins.length;
+
+  const x = (i: number) => pad.left + (i / bins.length) * plotW;
+  const y = (count: number) => pad.top + plotH - (count / yMax) * plotH;
+
+  return (
+    <svg
+      width="100%"
+      viewBox={`0 0 ${w} ${h}`}
+      style={{ maxWidth: w, display: "block" }}
+      role="img"
+      aria-label={`Histogram of ${n} raw p-values in ${bins.length} bins of ${binWidth}`}
+    >
+      {bins.map((count, i) => (
+        <rect
+          key={i}
+          x={x(i) + 0.5}
+          y={y(count)}
+          width={Math.max(barW - 1, 1)}
+          height={Math.max(pad.top + plotH - y(count), 0)}
+          fill={SIG_DOWN}
+          opacity={0.8}
+        >
+          <title>{`${(i * binWidth).toFixed(2)}–${((i + 1) * binWidth).toFixed(2)}: ${count} genes`}</title>
+        </rect>
+      ))}
+
+      {/* Where the bins sit if the null p-values are perfectly uniform —
+          "is this flat?" is the question the whole chart is about. */}
+      <line
+        x1={pad.left}
+        x2={w - pad.right}
+        y1={y(expected)}
+        y2={y(expected)}
+        stroke="var(--text-faint)"
+        strokeDasharray="4 3"
+        strokeWidth={1}
+        opacity={0.6}
+      />
+
+      {[0, 0.25, 0.5, 0.75, 1].map((t) => (
+        <text
+          key={t}
+          x={pad.left + t * plotW}
+          y={h - 4}
+          fontSize="9"
+          fill="var(--text-faint)"
+          textAnchor={t === 0 ? "start" : t === 1 ? "end" : "middle"}
+        >
+          {t}
+        </text>
+      ))}
+      <text
+        x={4}
+        y={pad.top + plotH / 2}
+        fontSize="9"
+        fill="var(--text-faint)"
+        textAnchor="middle"
+        transform={`rotate(-90 4 ${pad.top + plotH / 2})`}
+      >
+        genes
+      </text>
+    </svg>
+  );
+}
+
 export type PcaPoint = {
   sample: string;
   condition: string;

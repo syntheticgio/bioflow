@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  PValueHistogram,
   SampleCorrelationHeatmap,
   type SampleCorrelation,
 } from "./ExpressionCharts";
@@ -112,5 +113,58 @@ describe("SampleCorrelationHeatmap", () => {
         data: { method: "spearman", samples: [], conditions: [], matrix: [] },
       })
     ).toBeNull();
+  });
+});
+
+describe("PValueHistogram", () => {
+  // The geometry, not the colours: where a bin lands on the axis, and where
+  // the reference line sits relative to the bars, is what makes "is this
+  // flat?" answerable at a glance.
+  function renderHist(bins: number[], n: number) {
+    return (PValueHistogram({ bins, n }) as unknown) == null
+      ? null
+      : (flatten(PValueHistogram({ bins, n }) as unknown) as El[]);
+  }
+
+  it("renders nothing for an empty run", () => {
+    expect(PValueHistogram({ bins: [], n: 0 })).toBeNull();
+    expect(PValueHistogram({ bins: Array(20).fill(0), n: 0 })).toBeNull();
+  });
+
+  it("draws one bar per bin", () => {
+    const els = renderHist(Array(20).fill(1), 20)!;
+    expect(els.filter((e) => e.type === "rect")).toHaveLength(20);
+  });
+
+  it("puts the reference line exactly at the bar tops for a uniform run", () => {
+    // Every bin holds 50 of 1000 genes, so the expected-uniform height IS
+    // the bar height, and the line must sit exactly at the tops.
+    const els = renderHist(Array(20).fill(50), 1000)!;
+    const line = els.find((e) => e.type === "line")!.props as Record<string, unknown>;
+    const bar = els.find((e) => e.type === "rect")!.props as Record<string, unknown>;
+    expect(line.y1 as number).toBeCloseTo(bar.y as number);
+  });
+
+  it("keeps the reference line on canvas when a spike dominates", () => {
+    // 1000 genes in the first bin, 100 in each of the other 19: the expected
+    // height (59.5) is far below the spike, and the line must not be pushed
+    // off the plot by the tallest bar.
+    const bins = Array(20).fill(100);
+    bins[0] = 1000;
+    const els = renderHist(bins, 1190)!;
+    const line = els.find((e) => e.type === "line")!.props as Record<string, unknown>;
+    const spike = els.find((e) => e.type === "rect")!.props as Record<string, unknown>;
+    expect(line.y1 as number).toBeGreaterThan(spike.y as number);
+    expect(line.y1 as number).toBeLessThanOrEqual(320 - 30); // pad.top + plotH
+  });
+
+  it("labels each bar with its bin range and count", () => {
+    const bins = Array(20).fill(0);
+    bins[1] = 3;
+    bins[19] = 7;
+    expect(titles(renderHist(bins, 10)!)).toContain(
+      "0.05–0.10: 3 genes"
+    );
+    expect(titles(renderHist(bins, 10)!)).toContain("0.95–1.00: 7 genes");
   });
 });

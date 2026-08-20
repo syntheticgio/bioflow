@@ -519,7 +519,29 @@ def _facts(
         "significant_genes": len(significant),
         "significant_up": len(up),
         "significant_down": len(significant) - len(up),
+        "p_value_histogram": _pvalue_histogram(rows),
     }
+
+def _pvalue_histogram(rows: list[dict]) -> dict:
+    """The raw p-values binned for every gene DESeq2 actually tested.
+
+    Raw, not adjusted: an adjusted-p histogram has a different expected
+    shape and none of the diagnostic value, and binning in the browser from
+    the plot fetch would drop exactly the null genes the uniform baseline is
+    made of, since that fetch is truncated and sorted for the scatter plots.
+    So it is binned here, once, over the full table.
+
+    A gene with no p-value was not tested, and is excluded rather than
+    binned at zero: zero is a real p-value, and a column of untested genes
+    would read as a spike of perfect signal.
+    """
+    bins = [0] * 20
+    for r in rows:
+        p = r.get("p_value")
+        if p is None:
+            continue
+        bins[min(int(p * 20), 19)] += 1
+    return {"bins": bins, "bin_width": 0.05, "n": sum(bins)}
 
 
 def _round(value, places: int = 4):
