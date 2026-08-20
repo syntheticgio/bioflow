@@ -26,6 +26,7 @@ from app.services.suggestion_service import (
     build_classify_reads_card,
     build_coverage_card,
     build_feature_coverage_card,
+    build_gc_bias_card,
     build_merge_structural_variants_card,
     build_methylation_card,
     build_multiqc_card,
@@ -2212,6 +2213,75 @@ class TestMethylationCard:
         """A builder absent from CARD_BUILDERS is never called, so the card
         exists in tests and nowhere in the app."""
         assert "methylation" in [kind for kind, _ in CARD_BUILDERS]
+
+
+def _reference_object(obj_id="ref1", name="reference.fna", facts=None):
+    """A READY FASTA reference carrying `.name` and `.facts` -- the two
+    fields `build_gc_bias_card` reads off its `alignment_target` parameter.
+
+    `_fake_obj` already carries `.facts` for every fixture in this file but
+    never `.name`, since no existing card reads a reference's name off a
+    bare `_fake_obj`. `build_consensus_card` gets its `reference.name` from
+    a real `DataObject` in production; here `.name` is set the same way
+    `_assembly_object`/`_bam_object` add fields `_fake_obj` doesn't carry.
+    """
+    obj = _fake_obj(kind=FormatKind.FASTA, obj_id=obj_id, facts=facts)
+    obj.name = name
+    return obj
+
+
+class TestGcBiasCard:
+    def test_unavailable_when_no_alignment_target(self):
+        obj = _bam({})
+        card = build_gc_bias_card(obj, None)
+        assert card.status is CardStatus.UNAVAILABLE
+        assert "alignment target" in card.reason.lower()
+
+    def test_unavailable_when_reference_has_no_gc_tracks(self):
+        reference = _reference_object(facts={})
+        obj = _bam({"coverage_status": "ok", "coverage_mode": "windows"})
+        card = build_gc_bias_card(obj, reference)
+        assert card.status is CardStatus.UNAVAILABLE
+        assert "gc tracks" in card.reason.lower()
+
+    def test_unavailable_when_no_windowed_coverage(self):
+        reference = _reference_object(facts={"gc_tracks": {"contigs": [{}]}})
+        obj = _bam({})
+        card = build_gc_bias_card(obj, reference)
+        assert card.status is CardStatus.UNAVAILABLE
+        assert "coverage" in card.reason.lower()
+
+    def test_unavailable_when_coverage_mode_is_regions_not_windows(self):
+        """The fourth precondition, distinct from "no coverage at all":
+        Task 3's launcher refuses a region-mode coverage run separately from
+        a missing one, because the two need different next steps -- rerun
+        with no target BED, versus run coverage at all."""
+        reference = _reference_object(facts={"gc_tracks": {"contigs": [{}]}})
+        obj = _bam({"coverage_status": "ok", "coverage_mode": "regions"})
+        card = build_gc_bias_card(obj, reference)
+        assert card.status is CardStatus.UNAVAILABLE
+        assert "coverage" in card.reason.lower()
+
+    def test_available_when_all_preconditions_met(self):
+        reference = _reference_object(facts={"gc_tracks": {"contigs": [{}]}})
+        obj = _bam(
+            {"coverage_status": "ok", "coverage_mode": "windows"}, obj_id="bam1"
+        )
+        card = build_gc_bias_card(obj, reference)
+        assert card.status is CardStatus.AVAILABLE
+        assert card.launch == {
+            "endpoint": "/pipelines/gc-bias",
+            "body": {"bam_id": "bam1"},
+        }
+
+    def test_a_fastq_gets_no_card_at_all(self):
+        assert build_gc_bias_card(_fake_obj(), None) is None
+
+    def test_a_vcf_gets_no_card_at_all(self):
+        assert build_gc_bias_card(_vcf(), None) is None
+
+    def test_is_registered_in_card_builders(self):
+        assert "gc_bias" in [kind for kind, _ in CARD_BUILDERS]
 
 
 def _transcriptome_object(obj_id="cds1", blob_sha256="digest-cds1"):
