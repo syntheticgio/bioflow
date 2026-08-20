@@ -45,12 +45,75 @@ def test_compute_gc_bias_returns_curve_facts():
         {"gc_min": 30.0, "gc_max": 35.0, "mean_depth": 5.0, "window_count": 1},
         {"gc_min": 70.0, "gc_max": 75.0, "mean_depth": 15.0, "window_count": 1},
     ]
+    assert result["facts"]["gc_bias_partial"] is False
     assert "gc_bias_computed_at" in result["facts"]
 
 
 def test_compute_gc_bias_requires_bam_id():
     with pytest.raises(PermanentError):
         compute_gc_bias(_ctx({}))
+
+
+def test_compute_gc_bias_carries_the_partial_flag_from_the_payload():
+    """Important #1 finding: gc_tracks truncates to MAX_STORED_CONTIGS and
+    sets gc_tracks_partial on its own fact; launch_gc_bias forwards that as
+    the payload's gc_tracks_partial key, and the handler must re-emit it as
+    gc_bias_partial so the chart can warn the curve covers only a fraction
+    of a fragmented assembly."""
+    payload = {
+        "bam_id": "abc123",
+        "gc_contigs": [
+            {"name": "c1", "length": 20, "window_bases": 10, "gc": [30.0, 70.0]},
+        ],
+        "depth_regions": {
+            "c1": [
+                {"start": 0, "end": 10, "depth": 5.0},
+                {"start": 10, "end": 20, "depth": 15.0},
+            ],
+        },
+        "gc_tracks_partial": True,
+    }
+    result = compute_gc_bias(_ctx(payload))
+    assert result["facts"]["gc_bias_partial"] is True
+
+
+def test_compute_gc_bias_partial_flag_absent_from_payload_defaults_false():
+    payload = {
+        "bam_id": "abc123",
+        "gc_contigs": [
+            {"name": "c1", "length": 20, "window_bases": 10, "gc": [30.0, 70.0]},
+        ],
+        "depth_regions": {
+            "c1": [
+                {"start": 0, "end": 10, "depth": 5.0},
+                {"start": 10, "end": 20, "depth": 15.0},
+            ],
+        },
+    }
+    result = compute_gc_bias(_ctx(payload))
+    assert result["facts"]["gc_bias_partial"] is False
+
+
+def test_compute_gc_bias_reports_empty_status_for_an_all_n_reference():
+    """Important #2 finding: an empty curve with status 'ok' is
+    indistinguishable in BamResults.tsx from a job that never ran (an empty
+    array is truthy in JS). All windows scoring gc=None is a legitimate
+    all-N reference case, so it must report 'empty', not 'ok'."""
+    payload = {
+        "bam_id": "abc123",
+        "gc_contigs": [
+            {"name": "c1", "length": 20, "window_bases": 10, "gc": [None, None]},
+        ],
+        "depth_regions": {
+            "c1": [
+                {"start": 0, "end": 10, "depth": 5.0},
+                {"start": 10, "end": 20, "depth": 15.0},
+            ],
+        },
+    }
+    result = compute_gc_bias(_ctx(payload))
+    assert result["facts"]["gc_bias_status"] == "empty"
+    assert result["facts"]["gc_bias_curve"] == []
 
 
 class TestRegistration:

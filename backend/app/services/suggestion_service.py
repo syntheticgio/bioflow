@@ -2699,7 +2699,7 @@ def build_gc_bias_card(obj, alignment_target) -> SuggestionCard | None:
         )
 
     facts = obj.facts or {}
-    if facts.get("coverage_status") != "ok" or facts.get("coverage_mode") != "windows":
+    if facts.get("coverage_status") != "ok":
         return SuggestionCard(
             kind="gc_bias",
             category="ASSEMBLY_QC",
@@ -2707,8 +2707,22 @@ def build_gc_bias_card(obj, alignment_target) -> SuggestionCard | None:
             description=description,
             status=CardStatus.UNAVAILABLE,
             reason=(
-                "This BAM has no windowed coverage computed. Run coverage "
-                "depth analysis on it first (without a target region set)."
+                "This BAM has no coverage computed. Run coverage depth "
+                "analysis on it first."
+            ),
+        )
+    if facts.get("coverage_mode") != "windows":
+        return SuggestionCard(
+            kind="gc_bias",
+            category="ASSEMBLY_QC",
+            title=title,
+            description=description,
+            status=CardStatus.UNAVAILABLE,
+            reason=(
+                "This BAM's coverage was computed against a target region "
+                "set, not uniform windows. gc_bias needs a windowed "
+                "coverage run -- run coverage depth analysis without a "
+                "target BED."
             ),
         )
 

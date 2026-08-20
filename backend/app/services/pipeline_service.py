@@ -5438,10 +5438,26 @@ async def launch_gc_bias(
             details={"bam_id": str(bam.id), "needs": "coverage"},
         ) from e
 
+    # Trimmed to the keys join_windows/per_contig actually read -- the
+    # stored contigs also carry a `skew` array that gc_coverage never uses,
+    # about a third of the payload's size on a full reference. Built as a
+    # new list of dicts rather than mutating gc_tracks_fact["contigs"] in
+    # place, since that list is the fact document's own stored data.
+    gc_contigs = [
+        {
+            "name": c["name"],
+            "length": c["length"],
+            "window_bases": c["window_bases"],
+            "gc": c["gc"],
+        }
+        for c in gc_tracks_fact["contigs"]
+    ]
+
     payload = {
         "bam_id": str(bam.id),
         "project_id": str(bam.project_id),
-        "gc_contigs": gc_tracks_fact["contigs"],
+        "gc_contigs": gc_contigs,
+        "gc_tracks_partial": bool(gc_tracks_fact.get("gc_tracks_partial")),
         "depth_regions": depth_regions,
     }
 

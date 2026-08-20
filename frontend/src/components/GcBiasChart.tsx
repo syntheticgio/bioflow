@@ -15,7 +15,13 @@ import { InfoMarker } from "./InfoMarker";
  * bias_curve), not zero-filled -- so gaps in the line are GC content this
  * reference simply does not contain, not zero-depth regions.
  */
-export function GcBiasChart({ curve }: { curve: GcBiasBin[] }) {
+export function GcBiasChart({
+  curve,
+  partial,
+}: {
+  curve: GcBiasBin[];
+  partial?: boolean;
+}) {
   if (!curve?.length) return null;
 
   const w = 360;
@@ -47,6 +53,11 @@ export function GcBiasChart({ curve }: { curve: GcBiasBin[] }) {
         Coverage vs GC bias
         <InfoMarker metric="ui.chart_gc_bias" />
       </div>
+      {partial && (
+        <div style={{ fontSize: 10, color: "#999", marginBottom: 4, fontStyle: "italic" }}>
+          Showing largest contigs only
+        </div>
+      )}
       <svg
         width="100%"
         viewBox={`0 0 ${w} ${h}`}

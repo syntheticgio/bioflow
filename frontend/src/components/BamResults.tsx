@@ -259,7 +259,7 @@ export function BamResults({ obj }: { obj: ObjectDetailData }) {
           this BAM's windowed coverage and its reference's gc_tracks, so it
           is gated on gc_bias's own fact rather than either prerequisite's. */}
       {f.gc_bias_status === "ok" && f.gc_bias_curve && (
-        <GcBiasChart curve={f.gc_bias_curve} />
+        <GcBiasChart curve={f.gc_bias_curve} partial={f.gc_bias_partial} />
       )}
     </>
   );
