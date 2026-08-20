@@ -313,6 +313,34 @@ class TestSummarize:
         # 0.74 of bases at >= 1x, as a percentage.
         assert facts["coverage_pct_at_1x"] == pytest.approx(74.0)
 
+    def test_windowed_mode_is_recorded_and_carries_a_window_count(self, tmp_path):
+        report = self._report(tmp_path)
+        assert report["mode"] == "windows"
+        assert report["window_count"] == mr.WINDOW_COUNT
+        assert mr.summarize(report)["coverage_mode"] == "windows"
+
+    def test_region_mode_is_recorded_and_counts_regions(self, tmp_path):
+        """A region run and a windowed run produce the same row shape, so
+        the stored report has to say which it was -- uniform windows
+        otherwise read as suspiciously regular target regions."""
+        summary = tmp_path / "cov.mosdepth.summary.txt"
+        summary.write_text(SUMMARY_FIXTURE)
+        with gzip.open(tmp_path / "cov.regions.bed.gz", "wt") as fh:
+            fh.write(NAMED_REGIONS_FIXTURE)
+        report = mr.build_report(prefix=tmp_path / "cov", mode="regions")
+
+        assert report["mode"] == "regions"
+        # Meaningless on a region run: the row count is the target BED's.
+        assert report["window_count"] is None
+
+        facts = mr.summarize(report)
+        assert facts["coverage_mode"] == "regions"
+        assert facts["coverage_region_count"] == 2
+        assert "coverage_window_count" not in facts
+
+    def test_windowed_facts_carry_no_region_count(self, tmp_path):
+        assert "coverage_region_count" not in mr.summarize(self._report(tmp_path))
+
     def test_summarize_tolerates_an_empty_report(self):
         """A mosdepth run that produced nothing must yield no facts rather
         than a dict of Nones that renders as blank rows in the UI."""

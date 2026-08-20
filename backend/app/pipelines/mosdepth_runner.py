@@ -245,16 +245,23 @@ def parse_dist(path: Path) -> dict[int, float]:
     return dist
 
 
-def build_report(*, prefix: Path) -> dict:
+def build_report(*, prefix: Path, mode: str = "windows") -> dict:
     """Collect every mosdepth output beside `prefix` into one report dict.
 
     This is the JSON written to `coverage_dir` and served by the report
     route; `summarize()` reduces it to the handful of facts merged onto the
     BAM object.
+
+    `mode` records which `--by` source produced the rows -- "windows" for the
+    generated uniform tiling, "regions" for a user-supplied target BED. The
+    two are the same shape but not the same thing, and a reader of the stored
+    report cannot tell them apart from the rows alone: uniform windows would
+    read as suspiciously regular regions.
     """
     prefix = Path(prefix)
     summary = parse_summary(prefix.with_suffix(prefix.suffix + ".mosdepth.summary.txt"))
     return {
+        "mode": mode,
         "contigs": summary["contigs"],
         "total": summary["total"],
         "regions": parse_regions(
@@ -263,7 +270,9 @@ def build_report(*, prefix: Path) -> dict:
         "dist": parse_dist(
             prefix.with_suffix(prefix.suffix + ".mosdepth.global.dist.txt")
         ),
-        "window_count": WINDOW_COUNT,
+        # Meaningless in region mode, where the row count is the target BED's
+        # and not a tiling parameter at all.
+        "window_count": WINDOW_COUNT if mode == "windows" else None,
     }
 
 
@@ -279,12 +288,20 @@ def summarize(report: dict) -> dict:
         return {}
 
     facts: dict = {
+        "coverage_mode": report.get("mode") or "windows",
         "coverage_mean_depth": total["mean"],
         "coverage_reference_length": total["length"],
         "coverage_bases_covered": total["bases"],
         "coverage_max_depth": total["max"],
         "coverage_contig_count": len(report.get("contigs") or []),
     }
+
+    if facts["coverage_mode"] == "regions":
+        # The count a person reads on a region run is "how many of my targets
+        # were measured", which the window count never answers.
+        facts["coverage_region_count"] = sum(
+            len(rows) for rows in (report.get("regions") or {}).values()
+        )
 
     dist = report.get("dist") or {}
     for threshold in BREADTH_THRESHOLDS:

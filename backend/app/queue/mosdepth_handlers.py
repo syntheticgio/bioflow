@@ -74,36 +74,53 @@ def run_coverage(ctx: JobContext) -> dict:
     fai.unlink(missing_ok=True)
     fai.symlink_to(_resolve_blob(ctx.payload, "fai"))
 
-    ctx.progress(phase="windows", pct=0.1, message="tiling the reference into windows")
-    contig_lengths = mosdepth_runner.contig_lengths_from_fai(fai)
-    if not contig_lengths:
-        raise PermanentError(
-            "coverage could not read any contig lengths from the reference index"
-        )
-    windows = mosdepth_runner.build_windows_bed(contig_lengths)
-    if not windows:
-        # Every contig shorter than MIN_WINDOW_BASES. Permanent rather than
-        # retryable: the reference will not grow, and a mosdepth run against
-        # an empty --by BED produces an empty report that reads as a bug.
-        raise PermanentError(
-            "coverage found no contig long enough to window "
-            f"(all shorter than {mosdepth_runner.MIN_WINDOW_BASES}bp)"
-        )
-    windows_bed = work / "windows.bed"
-    windows_bed.write_text(mosdepth_runner.render_windows_bed(windows))
+    # Region mode when the launch carried a target BED, windowed otherwise.
+    # The two differ only in what `--by` points at; everything downstream --
+    # parsing, the report, the facts -- is shared, because mosdepth emits the
+    # same `.regions.bed.gz` either way.
+    regions_id = ctx.payload.get("regions_id")
+    mode = "regions" if regions_id else "windows"
 
-    ctx.progress(phase="depth", pct=0.4, message="computing per-window depth")
+    if mode == "regions":
+        ctx.progress(phase="regions", pct=0.1, message="reading the target regions")
+        regions_name = Path(ctx.payload.get("regions_name") or "regions.bed").name
+        regions_bed = work / regions_name
+        regions_bed.unlink(missing_ok=True)
+        regions_bed.symlink_to(_resolve_blob(ctx.payload, "regions"))
+        by_kwargs = {"regions_bed": regions_bed}
+    else:
+        ctx.progress(
+            phase="windows", pct=0.1, message="tiling the reference into windows"
+        )
+        contig_lengths = mosdepth_runner.contig_lengths_from_fai(fai)
+        if not contig_lengths:
+            raise PermanentError(
+                "coverage could not read any contig lengths from the reference index"
+            )
+        windows = mosdepth_runner.build_windows_bed(contig_lengths)
+        if not windows:
+            # Every contig shorter than MIN_WINDOW_BASES. Permanent rather
+            # than retryable: the reference will not grow, and a mosdepth run
+            # against an empty --by BED produces an empty report that reads
+            # as a bug.
+            raise PermanentError(
+                "coverage found no contig long enough to window "
+                f"(all shorter than {mosdepth_runner.MIN_WINDOW_BASES}bp)"
+            )
+        windows_bed = work / "windows.bed"
+        windows_bed.write_text(mosdepth_runner.render_windows_bed(windows))
+        by_kwargs = {"windows_bed": windows_bed}
+
+    ctx.progress(phase="depth", pct=0.4, message="computing depth")
     prefix = work / "cov"
     log_path = work / "mosdepth.log"
-    cmd = mosdepth_runner.build_command(
-        bam=bam, windows_bed=windows_bed, prefix=prefix
-    )
+    cmd = mosdepth_runner.build_command(bam=bam, prefix=prefix, **by_kwargs)
     code = run_subprocess(ctx, cmd, log_path=str(log_path))
     if code != 0:
         raise _failure(code, log_path, "mosdepth")
 
     ctx.progress(phase="report", pct=0.9, message="writing the coverage report")
-    report = mosdepth_runner.build_report(prefix=prefix)
+    report = mosdepth_runner.build_report(prefix=prefix, mode=mode)
     facts = mosdepth_runner.summarize(report)
     if not facts:
         raise PermanentError("mosdepth produced no depth summary for this alignment")
@@ -118,9 +135,14 @@ def run_coverage(ctx: JobContext) -> dict:
         "coverage_status": "ok",
         "coverage_tool_version": mosdepth.version,
         "coverage_computed_at": datetime.now(UTC).isoformat(),
-        "coverage_window_count": mosdepth_runner.WINDOW_COUNT,
         "coverage_report": report_name,
     }
+    if mode == "windows":
+        facts["coverage_window_count"] = mosdepth_runner.WINDOW_COUNT
+    else:
+        # Which target set produced these numbers -- without it a region run's
+        # facts are unattributable once a second BED exists.
+        facts["coverage_regions_id"] = regions_id
 
     ctx.progress(phase="done", pct=1.0, message="results complete")
     log.info(

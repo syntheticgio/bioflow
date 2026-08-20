@@ -250,6 +250,73 @@ class TestCoverageRun:
             mosdepth_handlers.run_coverage(_ctx(payload))
 
 
+class TestRegionMode:
+    def _regions_payload(self, tmp_path):
+        payload = _inputs(tmp_path)
+        bed = tmp_path / "panel.bed"
+        bed.write_text("chrT\t0\t450\tgeneA\n")
+        payload["regions_id"] = "bed-1"
+        payload["regions_name"] = "panel.bed"
+        payload["regions_path"] = str(bed)
+        return payload
+
+    def test_uses_the_target_bed_instead_of_generated_windows(
+        self, mosdepth_available, home, tmp_path, monkeypatch
+    ):
+        payload = self._regions_payload(tmp_path)
+        calls = []
+
+        def fake_run(ctx, cmd, **kw):
+            calls.append(cmd)
+            _write_outputs(Path(cmd[-2]))
+            return 0
+
+        monkeypatch.setattr(mosdepth_handlers, "run_subprocess", fake_run)
+        mosdepth_handlers.run_coverage(_ctx(payload))
+
+        by_arg = Path(calls[0][calls[0].index("--by") + 1])
+        assert by_arg.name == "panel.bed"
+        assert by_arg.read_text() == "chrT\t0\t450\tgeneA\n"
+        # The generated windows BED must not be written at all -- building it
+        # anyway would be dead work whose absence nothing else would notice.
+        assert not (by_arg.parent / "windows.bed").exists()
+
+    def test_facts_record_the_mode_and_the_region_set(
+        self, mosdepth_available, home, tmp_path, monkeypatch
+    ):
+        payload = self._regions_payload(tmp_path)
+
+        def fake_run(ctx, cmd, **kw):
+            _write_outputs(Path(cmd[-2]))
+            return 0
+
+        monkeypatch.setattr(mosdepth_handlers, "run_subprocess", fake_run)
+        facts = mosdepth_handlers.run_coverage(_ctx(payload))["facts"]
+
+        assert facts["coverage_mode"] == "regions"
+        assert facts["coverage_regions_id"] == "bed-1"
+        # A window count on a region run would describe a tiling that never
+        # happened.
+        assert "coverage_window_count" not in facts
+
+    def test_a_short_reference_is_not_refused_in_region_mode(
+        self, mosdepth_available, home, tmp_path, monkeypatch
+    ):
+        """The all-contigs-too-short refusal is a windowing constraint. A
+        target BED names its own intervals, so a short reference is fine --
+        refusing here would block the one mode that still works."""
+        payload = self._regions_payload(tmp_path)
+        Path(payload["fai_path"]).write_text("tiny\t50\t6\t60\t61\n")
+
+        def fake_run(ctx, cmd, **kw):
+            _write_outputs(Path(cmd[-2]))
+            return 0
+
+        monkeypatch.setattr(mosdepth_handlers, "run_subprocess", fake_run)
+        facts = mosdepth_handlers.run_coverage(_ctx(payload))["facts"]
+        assert facts["coverage_mode"] == "regions"
+
+
 class TestRegistration:
     def test_handler_is_registered_under_its_job_type(self):
         """A handler module that handlers.py never imports registers nothing,

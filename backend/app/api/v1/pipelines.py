@@ -797,18 +797,25 @@ async def get_feature_coverage_report(object_id: PydanticObjectId, owner: OwnerD
 
 class CoverageRequest(BaseModel):
     bam_id: PydanticObjectId
+    regions_id: PydanticObjectId | None = None
 
 
 @router.post("/coverage", response_model=JobOut, status_code=status.HTTP_201_CREATED)
 async def launch_coverage(body: CoverageRequest, owner: OwnerDep) -> JobOut:
-    """Queue per-window read-depth analysis for a BAM.
+    """Queue read-depth analysis for a BAM.
 
     Read-only, like feature_coverage and vcf_stats: no derived object, just a
-    report plus summary facts merged onto the BAM. Takes no annotation --
+    report plus summary facts merged onto the BAM. Needs no annotation --
     windows come from the reference's own contig lengths, so unlike
     `/feature-coverage` there is nothing to resolve server-side.
+
+    `regions_id` measures an uploaded target BED instead of uniform windows.
+    Unlike `/feature-coverage`'s optional `annotation_id`, omitting it is not
+    a request for server-side resolution: it selects windowed mode.
     """
-    job = await pipeline_service.launch_coverage(bam_id=body.bam_id, owner=owner)
+    job = await pipeline_service.launch_coverage(
+        bam_id=body.bam_id, owner=owner, regions_id=body.regions_id
+    )
     return JobOut.of(job)
 
 
