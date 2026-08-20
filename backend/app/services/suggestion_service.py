@@ -1653,6 +1653,82 @@ def build_misassembly_card(obj, references) -> SuggestionCard | None:
     )
 
 
+def build_multiqc_card(obj, qc_summarizable) -> SuggestionCard | None:
+    """One aggregate QC report across every file in the project, by MultiQC.
+
+    The only card here whose subject is the project rather than the object
+    it is rendered beside. It is anchored on an object because that is how
+    the Actions tab works -- `list_suggestions` takes an object id -- but
+    the report it launches covers everything, so `obj` is used only to
+    decide *whether* to show the card at all, never as an input to it.
+
+    Shown on read-type objects only. A user looking at a BAM or an assembly
+    is not thinking about read QC, and a card that appears identically on
+    every object in the project would be noise repeated N times rather than
+    one useful shortcut.
+
+    `qc_summarizable` is the orchestrator's count of objects carrying QC
+    output MultiQC can parse -- deliberately a count of *objects with
+    retained output on disk*, not of completed QC runs. Files QC'd before
+    aggregate reporting shipped have facts but no retained JSON, so counting
+    runs would offer a report that then came out empty. `None` means the
+    count could not be taken, which is reported as unavailable rather than
+    guessed at, matching every other builder here.
+    """
+    if obj.format.kind is not FormatKind.FASTQ:
+        return None
+    if obj.status is not ObjectStatus.READY:
+        return None
+
+    title = "Summarize QC across files"
+    description = (
+        "Combine the QC already run on this project's files into one "
+        "report, with a row per sample and a section per tool, using "
+        "MultiQC."
+    )
+
+    def unavailable(reason: str) -> SuggestionCard:
+        return SuggestionCard(
+            kind="multiqc",
+            category="QC",
+            title=title,
+            description=description,
+            status=CardStatus.UNAVAILABLE,
+            reason=reason,
+        )
+
+    tool = tools.multiqc()
+    if not tool.available:
+        return unavailable(tool.error or "MultiQC is not installed.")
+
+    if qc_summarizable is None:
+        return unavailable("Could not tell what QC results this project has.")
+
+    if qc_summarizable < 2:
+        # Deliberately says what to do about it. The likeliest reason a
+        # project of QC'd files reports zero here is that they were QC'd
+        # before retention shipped, and "run QC on more files" alone would
+        # read as wrong to someone looking at a project full of QC'd files.
+        return unavailable(
+            f"Needs QC results from at least 2 files to summarize; this "
+            f"project has {qc_summarizable}. Files QC'd before summary "
+            "reporting was added need QC re-run to be included."
+        )
+
+    return SuggestionCard(
+        kind="multiqc",
+        category="QC",
+        title=title,
+        description=description,
+        why=f"{qc_summarizable} files have QC results to combine.",
+        status=CardStatus.AVAILABLE,
+        launch={
+            "endpoint": "/pipelines/multiqc",
+            "body": {"project_id": str(obj.project_id)},
+        },
+    )
+
+
 def build_synteny_card(obj, references) -> SuggestionCard | None:
     """Whole-genome synteny alignment of a draft assembly against a
     reference, by minimap2, for a synteny dot plot.
@@ -2565,6 +2641,11 @@ class _Prefetched:
     continuity_candidates: object | None
     transcriptomes: list[DataObject]
     sibling_snf_ids: list[str] | None = None
+    # How many of the project's objects carry QC output MultiQC can parse.
+    # An int rather than a list: the only question the card asks is "are
+    # there at least two", and counting in the orchestrator keeps the
+    # per-object disk checks out of the synchronous builder.
+    qc_summarizable: int | None
 
 
 # Fixed order, and the order is behaviour: it is the order cards appear in the
@@ -2666,6 +2747,11 @@ CARD_BUILDERS: tuple[tuple[str, object], ...] = (
         "transcript_assembly",
         lambda obj, ctx: build_transcript_assembly_card(obj, ctx.annotations),
     ),
+    # Last deliberately. It is the only card whose subject is the whole
+    # project rather than the file being looked at, so it reads as a
+    # footer to the per-file actions above it rather than competing with
+    # them for the top of the grid.
+    ("multiqc", lambda obj, ctx: build_multiqc_card(obj, ctx.qc_summarizable)),
 )
 
 
@@ -2888,6 +2974,17 @@ async def suggestions_for(obj) -> list[dict]:
             sibling_snf_ids = await pipeline_service.sibling_snf_callsets(obj)
         except Exception:  # noqa: BLE001 - a listing failure loses one card, not the grid
             sibling_snf_ids = None
+    qc_summarizable = None
+    if project_objects is not None:
+        # Counted here rather than in the builder: it touches the filesystem
+        # once per object, which is exactly the kind of question the
+        # builders are kept synchronous and pure to avoid.
+        try:
+            from app.queue.multiqc_handlers import count_summarizable
+
+            qc_summarizable = count_summarizable(project_objects)
+        except Exception:  # noqa: BLE001 - a count failure loses one card, not the grid
+            qc_summarizable = None
 
     ctx = _Prefetched(
         references=references,
@@ -2903,6 +3000,7 @@ async def suggestions_for(obj) -> list[dict]:
         continuity_candidates=continuity_candidates,
         transcriptomes=transcriptomes,
         sibling_snf_ids=sibling_snf_ids,
+        qc_summarizable=qc_summarizable,
     )
 
     cards: list[dict] = []

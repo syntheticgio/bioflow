@@ -36,7 +36,12 @@ from app.pipelines import (
 )
 from app.pipelines.aligners import Aligner
 from app.pipelines.assemblers import Assembler
-from app.services import object_service, pipeline_service, structure_lookup
+from app.services import (
+    object_service,
+    pipeline_service,
+    project_service,
+    structure_lookup,
+)
 from app.storage.paths import blob_path, resolve_report_file
 
 router = APIRouter(prefix="/pipelines", tags=["pipelines"])
@@ -1802,6 +1807,85 @@ async def launch_misassembly_qc_route(
         resource_override=body.resource_override,
     )
     return JobOut.of(job)
+
+
+class MultiqcRequest(BaseModel):
+    # A project, not an object: the report summarises every file in the
+    # project and belongs to none of them. This is the only launch request
+    # here shaped that way.
+    project_id: PydanticObjectId
+
+
+@router.post("/multiqc", response_model=JobOut, status_code=status.HTTP_201_CREATED)
+async def launch_multiqc_route(body: MultiqcRequest, owner: OwnerDep) -> JobOut:
+    """Queue a MultiQC run: one aggregate QC report for a whole project.
+
+    Read-only, like /misassemblies: produces a report artifact, no derived
+    object and no facts."""
+    job = await pipeline_service.launch_multiqc_report(
+        project_id=body.project_id,
+        owner=owner,
+    )
+    return JobOut.of(job)
+
+
+@router.get("/qc/multiqc/{project_id}/{report_path:path}")
+async def get_multiqc_report(
+    project_id: PydanticObjectId,
+    report_path: str,
+    owner: LinkableOwnerDep,
+) -> FileResponse:
+    """Serve a project's MultiQC report.
+
+    Deliberately not routed through `get_qc_report`, despite the near
+    identical body. That route authorizes by *object* ownership, and this
+    artifact has no object -- generalizing it to take either would make the
+    access rule depend on which branch a path happened to take, which is
+    exactly the shape of check that goes wrong quietly. The project lookup
+    below is this route's whole access rule; the directory layout is not.
+
+    The CSP follows the QUAST exception already in `get_qc_report` rather
+    than the FastQC default. MultiQC's report is a scripted document
+    (Plotly), so under `sandbox` + `default-src 'none'` it renders blank --
+    the same way fastp's charts do. Verified 2026-08-20 that the report
+    embeds every script and style inline and fetches nothing at runtime, so
+    no external origin is allowed here; the single offsite reference in the
+    page is a decorative emoji image that degrades to alt text.
+
+    The XSS surface this accepts is the same class QUAST's branch accepts:
+    the report embeds sample names taken from QC output, so a crafted
+    filename can place attacker-chosen text in the HTML. It is bounded
+    because the report is generated from the project's own QC data, the
+    route is ownership-checked, and the page is opened in its own tab
+    rather than sharing a document with the application.
+    """
+    await project_service.get_project(project_id, owner=owner)
+
+    parts = PurePosixPath(report_path).parts
+    if any(p in ("..", "") for p in parts) or PurePosixPath(report_path).is_absolute():
+        raise NotFoundError(f"No such MultiQC report: {report_path}")
+
+    root = (settings.multiqc_reports_dir / str(project_id)).resolve()
+
+    # Resolved and re-checked against the root, so a symlink inside the
+    # report tree cannot point out of it either -- same belt-and-braces as
+    # get_qc_report.
+    target = (root / report_path).resolve()
+    if not target.is_relative_to(root) or not target.is_file():
+        raise NotFoundError(f"No such MultiQC report: {report_path}")
+
+    csp = (
+        "default-src 'none'; img-src 'self' data:; "
+        "style-src 'unsafe-inline'; script-src 'unsafe-inline' 'unsafe-eval'"
+    )
+
+    return FileResponse(
+        target,
+        headers={
+            "Content-Security-Policy": csp,
+            "X-Content-Type-Options": "nosniff",
+        },
+    )
 
 
 class SyntenyRequest(BaseModel):
