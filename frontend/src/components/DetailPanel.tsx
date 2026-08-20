@@ -76,6 +76,7 @@ import { DifferentialExpressionDialog } from "./DifferentialExpressionDialog";
 import { VariantDialog } from "./VariantDialog";
 import { PhaseDialog } from "./PhaseDialog";
 import { FilterLongReadsDialog } from "./FilterLongReadsDialog";
+import { HaplotagDialog } from "./HaplotagDialog";
 import { QcReport } from "./QcReport";
 import { TaxonomyFacts } from "./TaxonomyFacts";
 import { TrimReport } from "./TrimReport";
@@ -480,6 +481,7 @@ function ObjectDetail({ id }: { id: string }) {
   const [classifyReadsOpen, setClassifyReadsOpen] = useState(false);
   const [filterLongReadsOpen, setFilterLongReadsOpen] = useState(false);
   const [scaffoldOpen, setScaffoldOpen] = useState(false);
+  const [haplotagOpen, setHaplotagOpen] = useState(false);
   const [deOpen, setDeOpen] = useState(false);
   const [phaseOpen, setPhaseOpen] = useState(false);
   // The suggestion card's launch body, when a dialog was opened by "Adjust…"
@@ -561,6 +563,9 @@ function ObjectDetail({ id }: { id: string }) {
         break;
       case "classify_reads":
         setClassifyReadsOpen(true);
+        break;
+      case "haplotag":
+        setHaplotagOpen(true);
         break;
       case "phase":
         setPhaseOpen(true);
@@ -1201,6 +1206,16 @@ function ObjectDetail({ id }: { id: string }) {
           prefill={prefill}
           onClose={() => {
             setPhaseOpen(false);
+            setPrefill(null);
+          }}
+        />
+      )}
+      {haplotagOpen && (
+        <HaplotagDialog
+          object={obj}
+          prefill={prefill}
+          onClose={() => {
+            setHaplotagOpen(false);
             setPrefill(null);
           }}
         />

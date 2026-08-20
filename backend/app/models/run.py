@@ -51,6 +51,10 @@ class RunKind(StrEnum):
     # and the (run_kind, run_tool) pair must stay unique so workflow_derive
     # does not mislabel one node type as the other.
     PHASE_VARIANTS = "phase_variants"
+    # Haplotagging a phased VCF onto an alignment. Separate from PHASE_VARIANTS
+    # for the same display-and-grouping reason: it emits a BAM, not a VCF, and
+    # the (run_kind, run_tool) pair must stay unique.
+    HAPLOTAG = "haplotag"
     # Separate from SRA_DOWNLOAD because RunKind is a display and grouping
     # vocabulary, and "downloaded a genome" reads differently from "downloaded
     # sequencing runs" in the activity view.
@@ -266,6 +270,9 @@ class RunJobRole(StrEnum):
     # Read-based variant phasing. The whole point of its run — a phasing run
     # whose phasing failed produced nothing — so it is not in OPTIONAL_ROLES.
     PHASE_VARIANTS = "phase_variants"
+    # Read-based haplotagging. The whole point of its run -- a haplotag run
+    # whose haplotagging failed produced nothing -- so it is not in OPTIONAL_ROLES.
+    HAPLOTAG = "haplotag"
 
 
 # Roles whose failure does not fail the run. The test is whether the expensive

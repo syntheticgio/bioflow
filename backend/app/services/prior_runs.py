@@ -41,6 +41,7 @@ _CARD_RUN_KINDS: dict[str, RunKind] = {
     "align": RunKind.ALIGNMENT,
     "preprocess": RunKind.TRIM,
     "phase": RunKind.PHASE_VARIANTS,
+    "haplotag": RunKind.HAPLOTAG,
 }
 
 

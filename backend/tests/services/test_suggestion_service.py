@@ -28,6 +28,7 @@ from app.services.suggestion_service import (
     build_feature_coverage_card,
     build_filter_long_reads_card,
     build_gc_bias_card,
+    build_haplotag_card,
     build_merge_structural_variants_card,
     build_methylation_card,
     build_multiqc_card,
@@ -1639,7 +1640,8 @@ class TestSuggestionsFor:
         )
         with installed_csq(True), stub_db(annotation_inputs=inputs):
             cards = await suggestions_for(_vcf())
-        assert [c["kind"] for c in cards] == ["annotate", "phase"]
+        # The VCF offers both phasing and (unavailable, until phased) haplotag.
+        assert [c["kind"] for c in cards] == ["annotate", "phase", "haplotag"]
 
     async def test_the_order_does_not_move_with_availability(self):
         """Fixed order, not sorted by availability: a card that changes
@@ -3472,6 +3474,7 @@ class TestCardBuilderRegistry:
             "classify_reads",
             "filter_long_reads",
             "phase",
+            "haplotag",
         }
 
     def test_every_launch_endpoint_is_a_real_route(self):
@@ -3918,3 +3921,60 @@ class TestMultiqcCard:
         a card repeated identically on every object in the project would be
         noise rather than a shortcut."""
         assert self._card(5, kind=FormatKind.FASTA) is None
+
+
+class TestHaplotagCard:
+    """whatsHap haplotag: stamp a phased VCF's phase sets onto an alignment.
+
+    Offered on any VCF, but only launchable once the VCF has been phased.
+    """
+
+    @staticmethod
+    def _haplotag_card(facts=None, whatshap_available=True, alignments=None):
+        obj = _fake_obj(kind=FormatKind.VCF, facts=facts, obj_id="vcf789")
+        obj.name = "variants.vcf"
+        with patch(
+            "app.services.suggestion_service.tools.whatshap",
+            return_value=_FakeTool(whatshap_available, name="whatshap"),
+        ):
+            return build_haplotag_card(obj, alignments)
+
+    def test_not_offered_on_non_vcf(self):
+        assert build_haplotag_card(
+            _fake_obj(kind=FormatKind.BAM), None
+        ) is None
+
+    def test_unavailable_until_phased(self):
+        """A plain called VCF carries no PS tags, so haplotag has nothing to
+        read -- the card waits for phasing rather than failing obscurely."""
+        card = self._haplotag_card(facts={})
+        assert card.status is CardStatus.UNAVAILABLE
+        assert "Phase" in card.reason
+
+    def test_unavailable_when_whatshap_missing(self):
+        card = self._haplotag_card(
+            facts={"variants_phased_by": "whatshap"},
+            whatshap_available=False,
+        )
+        assert card.status is CardStatus.UNAVAILABLE
+
+    def test_unavailable_without_alignments(self):
+        card = self._haplotag_card(
+            facts={"variants_phased_by": "whatshap"},
+            alignments=([], [], []),
+        )
+        assert card.status is CardStatus.UNAVAILABLE
+
+    def test_available_on_phased_vcf(self):
+        candidate = _fake_obj(kind=FormatKind.BAM, obj_id="bam1")
+        candidate.name = "aln1.bam"
+        candidate.sample = "sample1"
+        card = self._haplotag_card(
+            facts={"variants_phased_by": "whatshap"},
+            alignments=([candidate], [], []),
+        )
+        assert card.status is CardStatus.AVAILABLE
+        assert card.launch["endpoint"] == "/pipelines/haplotag"
+        assert card.launch["body"]["object_id"]
+        assert card.launch["body"]["alignment_ids"] == ["bam1"]
+        assert card.launch["body"]["candidate_alignments"]

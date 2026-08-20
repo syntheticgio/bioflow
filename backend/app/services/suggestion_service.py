@@ -1039,6 +1039,84 @@ def build_phase_card(obj, alignments) -> SuggestionCard | None:
     )
 
 
+def build_haplotag_card(obj, alignments) -> SuggestionCard | None:
+    """Read-backed haplotagging for a phased VCF against one alignment.
+
+    Only offered on a VCF that was already phased with whatsHap -- haplotag
+    reads the PS tags that phasing wrote. `alignments` is the same
+    (short, long, unknown) tuple `alignments_against` returned; the user picks
+    one to carry the phase sets onto its reads.
+    """
+    if obj.format.kind not in (FormatKind.VCF, FormatKind.BCF):
+        return None
+
+    whatshap_tool = tools.whatshap()
+    if not whatshap_tool.available:
+        return SuggestionCard(
+            kind="haplotag",
+            category="VARIANTS",
+            title="Haplotag variants",
+            description="Stamp a phased VCF's phase sets onto an alignment's reads.",
+            status=CardStatus.UNAVAILABLE,
+            reason=whatshap_tool.error or "whatsHap is not available.",
+        )
+
+    # Haplotag needs the phase sets a prior phasing run wrote. A plain called
+    # VCF has none, so the card waits for phasing rather than failing obscurely.
+    if (obj.facts or {}).get("variants_phased_by") != "whatshap":
+        return SuggestionCard(
+            kind="haplotag",
+            category="VARIANTS",
+            title="Haplotag variants",
+            description="Stamp a phased VCF's phase sets onto an alignment's reads.",
+            status=CardStatus.UNAVAILABLE,
+            reason=(
+                "Only a whatsHap-phased VCF can be haplotagged. Phase this "
+                "variant set first."
+            ),
+        )
+
+    candidates: list[DataObject] = []
+    if alignments is not None:
+        candidates = list(alignments[0]) + list(alignments[1]) + list(alignments[2])
+    if not candidates:
+        return SuggestionCard(
+            kind="haplotag",
+            category="VARIANTS",
+            title="Haplotag variants",
+            description="Stamp a phased VCF's phase sets onto an alignment's reads.",
+            status=CardStatus.UNAVAILABLE,
+            reason=(
+                "No alignments against this variant set's reference were found "
+                "in the project. Haplotag needs an aligned BAM to tag."
+            ),
+        )
+
+    candidate_list = [
+        {"id": str(a.id), "name": a.name, "sample": pipeline_service.sample_name_for(a)}
+        for a in candidates
+    ]
+    default = candidates[0]
+    return SuggestionCard(
+        kind="haplotag",
+        category="VARIANTS",
+        title="Haplotag variants",
+        description="Stamp a phased VCF's phase sets onto an alignment's reads.",
+        why=f"Haplotag {obj.name} onto {default.name}.",
+        status=CardStatus.AVAILABLE,
+        launch={
+            "endpoint": "/pipelines/haplotag",
+            "body": {
+                "object_id": str(obj.id),
+                "alignment_ids": [str(default.id)],
+                # Carried for the dialog's convenience: the frontend seeds its
+                # alignment picker from this rather than re-listing the project.
+                "candidate_alignments": candidate_list,
+            },
+        },
+    )
+
+
 def build_annotate_genome_card(obj) -> SuggestionCard | None:
     """Genome annotation for a bacterial or archaeal assembly.
 
@@ -2997,6 +3075,10 @@ class _Prefetched:
     # phasing card wants every alignment against the variant set's reference
     # regardless of chemistry.
     phase_inputs: object | None = None
+    # Alignments against this VCF's reference, for the haplotag card. Reuses the
+    # phasing card's resolution: the same alignments are eligible, and haplotag
+    # picks one to carry the phase sets onto its reads.
+    haplotag_inputs: object | None = None
 
 
 # Fixed order, and the order is behaviour: it is the order cards appear in the
@@ -3033,6 +3115,7 @@ _CONFIGURE_DIALOGS: dict[str, str] = {
     "variants": "variant",
     "annotate": "annotation",
     "phase": "phase",
+    "haplotag": "haplotag",
     "quantify": "quantify",
     "assemble": "assemble",
     "scaffold": "scaffold",
@@ -3069,6 +3152,7 @@ CARD_BUILDERS: tuple[tuple[str, object], ...] = (
     ("gc_bias", lambda obj, ctx: build_gc_bias_card(obj, ctx.alignment_target)),
     ("annotate", lambda obj, ctx: build_annotate_card(obj, ctx.annotation_inputs)),
     ("phase", lambda obj, ctx: build_phase_card(obj, ctx.phase_inputs)),
+    ("haplotag", lambda obj, ctx: build_haplotag_card(obj, ctx.haplotag_inputs)),
     ("annotate_genome", lambda obj, ctx: build_annotate_genome_card(obj)),
     ("classify_reads", lambda obj, ctx: build_classify_reads_card(obj)),
     ("assemble", lambda obj, ctx: build_assemble_card(obj)),
@@ -3215,6 +3299,8 @@ async def suggestions_for(obj) -> list[dict]:
             )
         except Exception:  # noqa: BLE001 - a resolution failure loses one card, not the grid
             phase_inputs = None
+    # Haplotag reuses the same alignments the phasing card resolved.
+    haplotag_inputs = phase_inputs
 
     alignment_target = None
     if obj.format.kind in reference_assembly.ALIGNMENT_KINDS:
@@ -3389,6 +3475,7 @@ async def suggestions_for(obj) -> list[dict]:
         qc_summarizable=qc_summarizable,
         phase_inputs=phase_inputs,
         reference_annotations=reference_annotations,
+        haplotag_inputs=haplotag_inputs,
     )
 
     cards: list[dict] = []

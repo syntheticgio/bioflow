@@ -3675,6 +3675,110 @@ async def _apply_phase_variants(result: dict, *, owner: str) -> None:
             await run_service.record_outputs(run_id, [phased.id], owner=phased.owner)
 
 
+def haplotag_provenance(result: dict) -> dict:
+    """The facts a haplotag run stamps onto the BAM it produced."""
+    facts = {
+        "haplotagged_by": "whatshap",
+        "haplotag_tool_version": result.get("tool_version"),
+    }
+    sample = result.get("sample")
+    if sample:
+        facts["haplotag_sample"] = sample
+    if result.get("ignore_read_groups"):
+        facts["haplotag_ignore_read_groups"] = True
+    return facts
+
+
+async def _apply_haplotag(result: dict, *, owner: str) -> None:
+    """Turn a finished haplotag run into a BAM object, and chain its indexing.
+
+    The haplotagged BAM descends from the phased VCF it read phase sets from,
+    the source alignment it tagged, and the reference -- all three are
+    biologically meaningful, so `derived_from` rather than a sidecar. Sample
+    metadata follows the source BAM, as in `_apply_align_reads`.
+    """
+    from app.queue import queue
+    from app.services import object_service
+
+    output = result.get("output")
+    object_id = result.get("object_id")
+    if not output or not object_id:
+        return
+
+    vcf = await DataObject.get(PydanticObjectId(object_id))
+    if vcf is None:
+        log.warning("haplotag_parent_missing", object_id=object_id)
+        return
+
+    parents = [vcf.id]
+    for key in ("alignment_object_ids", "reference_object_id"):
+        value = result.get(key)
+        if isinstance(value, list):
+            parents.extend(PydanticObjectId(v) for v in value)
+        elif value:
+            parents.append(PydanticObjectId(value))
+
+    source_bam = None
+    alignment_ids = result.get("alignment_object_ids") or []
+    if alignment_ids:
+        source_bam = await DataObject.get(PydanticObjectId(alignment_ids[0]))
+
+    job_id = result.get("job_id")
+    provenance = haplotag_provenance(result=result)
+
+    try:
+        bam = await object_service.ingest_local_file(
+            owner=vcf.owner,
+            project_id=vcf.project_id,
+            path=Path(output["tmp_path"]),
+            name=output["name"],
+            role=ObjectRole.ALIGNMENT,
+            derived_from=parents,
+            produced_by_job=PydanticObjectId(job_id) if job_id else None,
+            facts=dict(provenance),
+            # The source BAM carries the sample-level metadata the haplotagged
+            # copy should keep, so it stays findable by the same sample.
+            metadata=dict(source_bam.metadata) if source_bam else None,
+        )
+    except Exception as e:  # noqa: BLE001
+        log.error("haplotag_output_ingest_failed", object_id=object_id, error=str(e))
+        return
+
+    log.info("haplotag_applied", object_id=object_id, bam_id=str(bam.id))
+
+    from app.services import run_service
+
+    run_id = await run_service.run_for_job(PydanticObjectId(job_id)) if job_id else None
+    if run_id is not None:
+        await run_service.record_outputs(run_id, [bam.id], owner=bam.owner)
+
+    # Chain the follow-on index. Enqueued here rather than at launch because it
+    # needs the BAM's digest, which does not exist until the haplotag has run.
+    if bam.blob_sha256:
+        index_job = await queue.enqueue(
+            "index_bam",
+            owner=bam.owner,
+            payload={
+                "bam_object_id": str(bam.id),
+                "bam_sha256": bam.blob_sha256,
+                "bam_name": bam.name,
+                "project_id": str(bam.project_id),
+            },
+            job_class=JobClass.COMPUTE,
+            resources=JobResources(cpu=1, mem_mb=1024, io=IoClass.LIGHT),
+            max_attempts=2,
+            dedup_key=f"index_bam:{bam.blob_sha256}",
+            project_id=bam.project_id,
+            object_id=bam.id,
+            parent_job_id=PydanticObjectId(job_id) if job_id else None,
+        )
+        # Joins the haplotag's run: it was caused by this run and finishes the
+        # work the user asked for, even though it could not be enqueued until
+        # the BAM existed.
+        if index_job is not None and run_id is not None:
+            await run_service.link_job(run_id, index_job.id, RunJobRole.INDEX_BAM)
+
+
 async def _apply_annotate_variants(result: dict, *, owner: str) -> None:
     """Turn a finished annotation run into a new VCF object and its index.
 
@@ -3824,6 +3928,7 @@ _APPLIERS = {
     "extract_genbank_sequence": _apply_extract_genbank_sequence,
     "annotate_variants": _apply_annotate_variants,
     "phase_variants": _apply_phase_variants,
+    "haplotag": _apply_haplotag,
     "quantify": _apply_quantify,
     "salmon_quantify": _apply_salmon_quantify,
     "transcript_assembly": _apply_transcript_assembly,

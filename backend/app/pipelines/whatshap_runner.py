@@ -1,9 +1,11 @@
 """Running WhatsHap to phase a called-variant VCF against its alignments.
 
-Two subcommands matter here, both emitting a phased VCF carrying PS tags:
+Three subcommands matter here:
 
-- `whatshap phase` phases a single sample against one BAM.
-- `whatshap polyphase` phases multiple samples, one BAM each.
+- `whatshap phase` phases a single sample against one BAM (emits a VCF).
+- `whatshap polyphase` phases multiple samples, one BAM each (emits a VCF).
+- `whatshap haplotag` reads the PS tags a phased VCF already carries and
+  stamps them onto the reads of an alignment, emitting a haplotagged BAM.
 
 The commands are small; the tuning in them is not, and -- like the csq
 runner -- the flag set is settled by running the tool against a real Clair3
@@ -156,6 +158,43 @@ def build_whatshap_polyphase_command(
     return cmd
 
 
+def build_whatshap_haplotag_command(
+    *,
+    whatshap_path: str,
+    reference: Path,
+    vcf: Path,
+    bam: Path,
+    out: Path,
+    threads: int = 4,
+    sample: str | None = None,
+    ignore_read_groups: bool = False,
+) -> list[str]:
+    """`whatshap haplotag` over one phased VCF and one BAM, writing a BAM.
+
+    Unlike `phase`/`polyphase`, which emit a phased VCF, haplotag reads the
+    phase sets (PS tags) already in the VCF and stamps them onto the reads of
+    the alignment, producing a haplotagged BAM. VCF precedes BAM: that is
+    whatsHap's positional order, same as `phase`. `--sample` restricts the
+    tagging to one sample of a multi-sample VCF.
+    """
+    cmd = [
+        whatshap_path,
+        "haplotag",
+        "--reference",
+        str(reference),
+        "--output",
+        str(out),
+        "--threads",
+        str(threads),
+    ]
+    if sample:
+        cmd += ["--sample", sample]
+    if ignore_read_groups:
+        cmd.append("--ignore-read-groups")
+    cmd += [str(vcf), str(bam)]
+    return cmd
+
+
 def is_benign_whatshap_stderr(line: str) -> bool:
     """Whether a stderr line is ordinary whatsHap progress rather than failure.
 
@@ -188,3 +227,15 @@ def phased_name(vcf_name: str, mode: str = PHASE) -> str:
         if vcf_name.endswith(suffix):
             return f"{vcf_name[: -len(suffix)]}{tag}.vcf.gz"
     return f"{vcf_name}{tag}.vcf.gz"
+
+
+def haplotag_name(vcf_name: str) -> str:
+    """The output name for a haplotagged BAM derived from `vcf_name`.
+
+    Mirrors `phased_name`: the stem keeps the inner `.vcf` so a phased
+    `foo.bcftools.phase.vcf.gz` yields `foo.bcftools.phase.haplotag.bam`.
+    """
+    for suffix in _VCF_SUFFIXES:
+        if vcf_name.endswith(suffix):
+            return f"{vcf_name[: -len(suffix)]}.haplotag.bam"
+    return f"{vcf_name}.haplotag.bam"
