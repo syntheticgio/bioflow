@@ -2643,7 +2643,10 @@ class _Prefetched:
     # An int rather than a list: the only question the card asks is "are
     # there at least two", and counting in the orchestrator keeps the
     # per-object disk checks out of the synchronous builder.
-    qc_summarizable: int | None
+    # Defaulted, like sibling_snf_ids above it: a dataclass cannot put a
+    # non-default field after a defaulted one, and None is already this
+    # field's "could not tell" value rather than a placeholder.
+    qc_summarizable: int | None = None
 
 
 # Fixed order, and the order is behaviour: it is the order cards appear in the
