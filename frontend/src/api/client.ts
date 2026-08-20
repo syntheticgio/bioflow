@@ -1258,6 +1258,7 @@ export const api = {
     if (q.variantType) p.set("variant_type", q.variantType);
     if (q.minQual != null) p.set("min_qual", String(q.minQual));
     if (q.consequence) p.set("consequence", q.consequence);
+    if (q.phased != null) p.set("phased", String(q.phased));
     if (q.skipCount) p.set("skip_count", "true");
     return request<VariantsPage>(
       `/pipelines/vcfstats/variants/${objectId}?${p.toString()}`,

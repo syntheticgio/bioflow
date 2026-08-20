@@ -76,12 +76,13 @@ class TestCommandConstruction:
         # this assertion with actual escapes -- "\t" not "\\t" -- because a
         # literal backslash-t makes bcftools emit one unsplittable column and
         # every row lands in the database as a single field.
-        assert cmd[4] == "%CHROM\t%POS\t%REF\t%ALT\t%QUAL\t%FILTER\t%INFO/BCSQ[\t%DP][\t%GT]\n"
+        assert cmd[4] == "%CHROM\t%POS\t%REF\t%ALT\t%QUAL\t%FILTER\t%INFO/BCSQ[\t%DP][\t%GT]\t%PS\n"
         assert cmd[5] == "/work/a.vcf.gz"
 
     def test_query_format_separator_is_a_real_tab(self):
         """Guards the escaping directly: verified against bcftools 1.21, this
-        format yields exactly 8 tab-separated columns."""
+        format yields the table columns in order, with real tabs and a real
+        trailing newline (the phase set is the final column)."""
         from app.pipelines.vcf_stats_runner import QUERY_FORMAT
 
         assert "\t" in QUERY_FORMAT

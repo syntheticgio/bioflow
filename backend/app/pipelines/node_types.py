@@ -217,6 +217,20 @@ async def _launch_annotation(*, inputs: dict, params: dict, owner: str):
     )
 
 
+async def _launch_phase_variants(*, inputs: dict, params: dict, owner: str):
+    # A single BAM (phase) or several (polyphase) may arrive through one
+    # multiple port; coerce to a list so the launcher and handler agree on
+    # shape regardless of how many were wired.
+    alignment = inputs.get("alignment")
+    alignment_ids = alignment if isinstance(alignment, list) else [alignment]
+    return await pipeline_service.launch_phase_variants(
+        object_id=inputs["variants"],
+        owner=owner,
+        alignment_ids=alignment_ids,
+        params=params,
+    )
+
+
 async def _launch_annotation_export(*, inputs: dict, params: dict, owner: str):
     """Export a filtered subset, holding the export behind the results
     sidecar it depends on.
@@ -1219,6 +1233,35 @@ NODE_TYPES: dict[str, NodeTypeSpec] = {
             PortSpec(
                 "proteins",
                 PortType(format=FormatKind.FASTA, role=ObjectRole.PROTEIN),
+            ),
+        ),
+    ),
+    "phase_variants": NodeTypeSpec(
+        label="Phase variants",
+        launch_name="pipeline_service.launch_phase_variants",
+        launch=_launch_phase_variants,
+        run_kind=RunKind.PHASE_VARIANTS,
+        # Creates a PipelineRun -- unlike annotate_variants beside it, which
+        # records none -- because phasing is a compute step with a BAM input
+        # to be held accountable as a run input.
+        inputs=(
+            PortSpec(
+                "variants",
+                PortType(format=FormatKind.VCF, role=ObjectRole.VARIANTS),
+            ),
+            # One BAM (phase) or several (polyphase). multiple=True so a graph
+            # can wire every sample's alignment; the card passes the same ids
+            # through params for the picker-driven path.
+            PortSpec(
+                "alignment",
+                PortType(format=FormatKind.BAM, role=ObjectRole.ALIGNMENT),
+                multiple=True,
+            ),
+        ),
+        outputs=(
+            PortSpec(
+                "phased",
+                PortType(format=FormatKind.VCF, role=ObjectRole.VARIANTS),
             ),
         ),
     ),

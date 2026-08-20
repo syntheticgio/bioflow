@@ -3367,6 +3367,98 @@ def annotation_provenance(result: dict) -> dict:
     }
 
 
+def phase_provenance(result: dict) -> dict:
+    """The facts a phasing run stamps onto the VCF it produced.
+
+    Like annotation, the input VCF survives as the caller's output and phasing
+    is a derivation of it -- so the mode and tool version are the whole of what
+    distinguishes one phased copy from another.
+    """
+    return {
+        "variants_phased_by": "whatshap",
+        "variant_phase_tool_version": result.get("tool_version"),
+        "variant_phase_mode": result.get("mode"),
+    }
+
+
+async def _apply_phase_variants(result: dict, *, owner: str) -> None:
+    """Turn a finished phasing run into a new VCF object and its index.
+
+    Mirrors `_apply_annotate_variants`: the phased VCF descends from the source
+    VCF, the reference it was phased against, and every alignment that informed
+    it, since the phase sets mean nothing without knowing which reads supported
+    them. The `.tbi` is a sidecar of the new VCF, exactly as the other variant
+    appliers attach one.
+    """
+    from app.services import object_service, run_service
+
+    output = result.get("output")
+    vcf_id = result.get("object_id")
+    if not output or not vcf_id:
+        return
+
+    vcf = await DataObject.get(PydanticObjectId(vcf_id))
+    if vcf is None:
+        log.warning("phase_variants_parent_missing", object_id=vcf_id)
+        return
+
+    parents = [vcf.id]
+    for key in ("reference_object_id", "alignment_object_ids"):
+        if key == "alignment_object_ids":
+            for parent_id in result.get(key) or []:
+                parents.append(PydanticObjectId(parent_id))
+        else:
+            parent_id = result.get(key)
+            if parent_id:
+                parents.append(PydanticObjectId(parent_id))
+
+    job_id = result.get("job_id")
+    try:
+        phased = await object_service.ingest_local_file(
+            owner=vcf.owner,
+            project_id=vcf.project_id,
+            path=Path(output["tmp_path"]),
+            name=output["name"],
+            role=ObjectRole.VARIANTS,
+            derived_from=parents,
+            produced_by_job=PydanticObjectId(job_id) if job_id else None,
+            facts=phase_provenance(result),
+            # Sample-level metadata describes the biology, which phasing
+            # does not change -- same reasoning as call_variants' copy.
+            metadata=dict(vcf.metadata),
+        )
+    except Exception as e:  # noqa: BLE001
+        log.error("phase_variants_ingest_failed", object_id=vcf_id, error=str(e))
+        return
+
+    log.info("phase_variants_applied", vcf_id=vcf_id, phased_id=str(phased.id))
+
+    index = result.get("index")
+    if index:
+        try:
+            await object_service.ingest_local_file(
+                owner=phased.owner,
+                project_id=vcf.project_id,
+                path=Path(index["tmp_path"]),
+                name=index["name"],
+                derived_from=[phased.id],
+                produced_by_job=PydanticObjectId(job_id) if job_id else None,
+                sidecar_of=phased.id,
+                sidecar_role=SidecarRole.TBI,
+            )
+        except Exception as e:  # noqa: BLE001
+            log.error(
+                "phase_variants_tbi_ingest_failed",
+                vcf_id=str(phased.id),
+                error=str(e),
+            )
+
+    if job_id:
+        run_id = await run_service.run_for_job(PydanticObjectId(job_id))
+        if run_id is not None:
+            await run_service.record_outputs(run_id, [phased.id], owner=phased.owner)
+
+
 async def _apply_annotate_variants(result: dict, *, owner: str) -> None:
     """Turn a finished annotation run into a new VCF object and its index.
 
@@ -3487,6 +3579,7 @@ _APPLIERS = {
     "materialize_annotation_edits": _apply_materialize_annotation_edits,
     "extract_genbank_sequence": _apply_extract_genbank_sequence,
     "annotate_variants": _apply_annotate_variants,
+    "phase_variants": _apply_phase_variants,
     "quantify": _apply_quantify,
     "salmon_quantify": _apply_salmon_quantify,
     "transcript_assembly": _apply_transcript_assembly,

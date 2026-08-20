@@ -38,6 +38,12 @@ class RunKind(StrEnum):
     # view, and the (run_kind, run_tool) pair must stay unique so
     # workflow_derive does not mislabel one node type as the other.
     STRUCTURAL_VARIANT_MERGING = "structural_variant_merging"
+    # Phasing a called-variant VCF against its alignments. Separate from
+    # VARIANT_CALLING for the same display-and-grouping reason: "phased
+    # variants" is not the same line in an activity view as "called variants",
+    # and the (run_kind, run_tool) pair must stay unique so workflow_derive
+    # does not mislabel one node type as the other.
+    PHASE_VARIANTS = "phase_variants"
     # Separate from SRA_DOWNLOAD because RunKind is a display and grouping
     # vocabulary, and "downloaded a genome" reads differently from "downloaded
     # sequencing runs" in the activity view.
@@ -245,6 +251,9 @@ class RunJobRole(StrEnum):
     # same reasoning as ASSEMBLE/CONSENSUS/POLISH: a run whose assembly
     # failed produced nothing.
     ASSEMBLE_TRANSCRIPTS = "assemble_transcripts"
+    # Read-based variant phasing. The whole point of its run — a phasing run
+    # whose phasing failed produced nothing — so it is not in OPTIONAL_ROLES.
+    PHASE_VARIANTS = "phase_variants"
 
 
 # Roles whose failure does not fail the run. The test is whether the expensive

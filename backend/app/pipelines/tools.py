@@ -456,6 +456,12 @@ def delly() -> Tool:
     return _probe("delly", settings.delly_path, ["--version"])
 
 
+@lru_cache(maxsize=1)
+def whatshap() -> Tool:
+    # `--version` prints "whatshap 2.8" and exits 0.
+    return _probe("whatshap", settings.whatshap_path, ["--version"])
+
+
 def _probe_on_demand_image(name: str, image: str) -> Tool:
     """Whether an ON_DEMAND_IMAGE tool can be run, which is a question about
     Docker rather than about a binary on PATH.
@@ -1787,6 +1793,37 @@ TOOL_META: dict[str, ToolMeta] = {
         # up for this" is asking about the download, not the disk cost.
         download_bytes=2_990_000_000,
     ),
+    "whatshap": ToolMeta(
+        pipelines=(PipelineType.VARIANT,),
+        one_liner="Read-based variant phasing",
+        summary=(
+            "Read-based variant phasing with WhatsHap. Assigns the variants "
+            "on each chromosome copy to haplotype blocks using the linkage "
+            "information in the read alignments, so compound and "
+            "haplotype-resolved questions become answerable from the variant "
+            "table rather than only from the raw VCF."
+        ),
+        strengths=(
+            "Phases from reads alone, no trio or parent data required",
+            "Read-based: accuracy tracks alignment quality, not call quality",
+            "Single-sample (phase) and multi-sample (polyphase) modes",
+            "Emits a phased VCF with PS tags, queryable as phase_set",
+        ),
+        homepage="https://whatshap.readthedocs.io/",
+        repository="https://github.com/whatshap/whatshap",
+        citation="Martin, Yoshimura et al., Nature Computational Science 2021",
+        citation_url="https://doi.org/10.1038/s43588-021-00079-x",
+        # MIT, read from the repo's LICENSE file (GitHub's API reports MIT
+        # directly here, and the file confirms "MIT License").
+        license="MIT",
+        usage=(
+            "Phases a called-variant VCF against its source alignment(s). "
+            "whatshap phase takes one BAM; whatshap polyphase takes one BAM "
+            "per sample. The phased VCF carries PS tags that fill the variant "
+            "table's phase_set column. The BAM is chosen explicitly by the "
+            "card, not inferred from provenance."
+        ),
+    ),
     "flye": ToolMeta(
         pipelines=(PipelineType.ASSEMBLE,),
         one_liner="De novo assembler for long reads",
@@ -2999,6 +3036,7 @@ def reset_cache() -> None:
     sniffles.cache_clear()
     delly.cache_clear()
     deepvariant.cache_clear()
+    whatshap.cache_clear()
     flye.cache_clear()
     abyss.cache_clear()
     spades.cache_clear()

@@ -104,6 +104,10 @@ export interface VariantRow {
   consequence: string | null;
   aa_change: string | null;
   aa_pos: number | null;
+  /** The whatsHap phase set for a phased record, or null when the variant was
+   *  not phased. Present on every row of a phased VCF, absent (null) on every
+   *  row of an unphased one. */
+  phase_set: number | null;
 }
 
 /** What one gene resolved to at UniProt.
@@ -142,6 +146,9 @@ export interface VariantQuery {
   variantType?: string;
   minQual?: number;
   consequence?: string;
+  /** Restrict to phased records: true keeps only phased, false only unphased,
+   *  unset means no restriction. */
+  phased?: boolean;
   skipCount?: boolean;
 }
 

@@ -876,6 +876,44 @@ async def launch_annotate(body: AnnotateRequest, owner: OwnerDep) -> JobOut:
     return JobOut.of(job)
 
 
+class PhaseVariantsRequest(BaseModel):
+    object_id: PydanticObjectId
+    alignment_ids: list[PydanticObjectId]
+    # "phase" phases one sample within a single alignment; "polyphase" phases
+    # across several alignments (distinct samples). What to run is decided by
+    # `whatshap_runner.mode_for`.
+    mode: str = "phase"
+    # Sample name for whatsHap phase (defaults to the BAM's sample). Unused by
+    # polyphase, which takes sample names from each alignment.
+    sample: str | None = None
+    params: dict = Field(default_factory=dict)
+    # Carried from the suggestion card's seed body so the dialog can populate
+    # its alignment picker without re-listing the project; not used here.
+    candidate_alignments: list | None = None
+    # "Launch anyway" from the refusal card. Skips the declared-budget refusal.
+    resource_override: bool = False
+
+
+@router.post("/phase-variants", response_model=JobOut, status_code=status.HTTP_201_CREATED)
+async def launch_phase_variants(body: PhaseVariantsRequest, owner: OwnerDep) -> JobOut:
+    """Queue read-backed phasing of a called VCF against one or more alignments."""
+    job = await pipeline_service.launch_phase_variants(
+        object_id=body.object_id,
+        owner=owner,
+        alignment_ids=body.alignment_ids,
+        # mode/sample arrive at the top level of the request body; fold them
+        # into params so the launcher (and the graph-node path, which carries
+        # them inside params) share one shape.
+        params={
+            **(body.params or {}),
+            "mode": body.mode,
+            "sample": body.sample,
+        },
+        resource_override=body.resource_override,
+    )
+    return JobOut.of(job)
+
+
 @router.get("/vcfstats/variants/{object_id}")
 async def get_vcf_stats_variants(
     object_id: PydanticObjectId,
@@ -889,6 +927,9 @@ async def get_vcf_stats_variants(
     variant_type: str | None = None,
     min_qual: float | None = None,
     consequence: str | None = None,
+    # Restrict to phased records. True keeps only rows with a whatsHap phase
+    # set; False keeps only the unphased; absent means no restriction.
+    phased: bool | None = None,
     skip_count: bool = False,
 ) -> dict:
     """A page of the variant table, filtered.
@@ -923,6 +964,7 @@ async def get_vcf_stats_variants(
         variant_type=variant_type,
         min_qual=min_qual,
         consequence=consequence,
+        phased=phased,
     )
 
     rows = variant_db.query_variants(
