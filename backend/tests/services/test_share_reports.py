@@ -40,6 +40,24 @@ def _cleanup_scratch():
     reclaim_scratch_files()
 
 
+@pytest.fixture(autouse=True)
+def _isolated_report_roots(tmp_path, monkeypatch):
+    """Write share-report fixtures into tmp_path, not the live qc_reports_dir.
+
+    `_write_report` and the assertions read `settings.qc_reports_dir` (a
+    read-only property), while `share_service` copies through
+    `object_service.copy_report_dirs`, which iterates the `_REPORT_ROOTS`
+    tuple captured at import time. Redirect both, the way
+    test_object_deletion's `private_report_roots` does, so a run leaves
+    nothing under /data/qc_reports -- the `fastqc_report.html` filename the
+    real handler never produces has already cost one #624 investigation.
+    """
+    qc_dir = tmp_path / "qc_reports"
+    monkeypatch.setattr(type(settings), "qc_reports_dir", property(lambda _s: qc_dir))
+    monkeypatch.setattr(object_service, "_REPORT_ROOTS", (qc_dir,))
+
+
+
 def _write_report(object_id) -> None:
     report_dir = settings.qc_reports_dir / str(object_id)
     report_dir.mkdir(parents=True, exist_ok=True)
