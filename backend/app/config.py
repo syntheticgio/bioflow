@@ -483,6 +483,24 @@ class Settings(BaseSettings):
         return self.bioinfo_home / "coverage"
 
     @property
+    def methylation_dir(self) -> Path:
+        """Generated per-site base-modification reports (the modkit bedMethyl
+        summary), keyed by BAM object id.
+
+        Distinct from coverage_dir despite the neighbouring shape: that one
+        holds mosdepth read depth, this one holds modkit's per-site
+        methylation calls. The bedMethyl file itself is ingested as its own
+        DataObject (see `_apply_methylation`); this directory holds the
+        report the report route serves, not the artifact a person downloads.
+
+        Outside objects/ deliberately, same rationale as coverage_dir: this
+        is derivative and regenerable from the BAM, so content-addressing it
+        would buy deduplication of something never shared and cost a blob
+        record per run.
+        """
+        return self.bioinfo_home / "methylation"
+
+    @property
     def vcf_stats_dir(self) -> Path:
         """Generated Variant Results artifacts (the variants TSV and the
         SQLite database the table queries), keyed by object id.

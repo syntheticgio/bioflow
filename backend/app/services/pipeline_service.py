@@ -52,6 +52,7 @@ from app.pipelines import (
     delly_runner,
     fastp_runner,
     lineage_inference,
+    modkit_runner,
     pairing,
     polypolish_runner,
     qc_stats,
@@ -1470,6 +1471,9 @@ FEATURE_COVERAGE_MEM_MB = 1024
 
 # Likewise matches mosdepth_handlers.run_coverage's own registration.
 COVERAGE_MEM_MB = 1024
+
+# Matches methylation_handlers.run_methylation's own registration.
+METHYLATION_MEM_MB = 4096
 
 
 def refuse_if_over_budget(
@@ -5262,6 +5266,94 @@ async def launch_coverage(
         )
 
     log.info("coverage_launched", job_id=str(job.id), bam_id=str(bam.id))
+    return job
+
+
+async def launch_methylation(
+    *,
+    bam_id: PydanticObjectId,
+    owner: str,
+    resource_override: bool = False,
+) -> Job:
+    """Queue per-site base-modification (methylation) calling for one BAM.
+
+    Produces a bedMethyl DataObject derived from the BAM, plus summary facts
+    merged onto the BAM. See docs/superpowers/specs/
+    2026-08-20-modkit-methylation-design.md, decisions K1-K4.
+
+    Re-runs `has_modification_tags` (K1) here rather than trusting the card:
+    the card is a convenience that ran the same check moments earlier, but
+    this is the actual gate. A graph-wired or API-driven launch that never
+    rendered a card must refuse exactly as clearly as one that did --
+    otherwise the honest refusal decision K2 exists to guarantee becomes
+    something only the suggestion grid enforces.
+    """
+    from app.queue import queue
+
+    tools.require(tools.modkit())
+
+    refuse_if_over_budget(
+        declared_mb=METHYLATION_MEM_MB,
+        budget_mb=await current_admission_budget_mb(),
+        resource_override=resource_override,
+    )
+
+    bam = await object_service.get_object(bam_id, owner=owner)
+    _check_bam_stats_callable(bam)
+
+    bai = await _sidecar_of_role(bam, SidecarRole.BAI)
+    if bai is None:
+        raise ValidationError(
+            f"{bam.name!r} has no BAM index (.bai). Index it first.",
+            details={"bam_id": str(bam.id), "needs": "index_bam"},
+        )
+
+    # _resolve_readable raises ValidationError itself for a BAM with no
+    # stored content or one that is still remote, so no separate "no
+    # content yet" check is needed here -- see its own docstring.
+    digest, path = await _resolve_readable(bam)
+    bam_local_path = path or blob_path(digest)
+    probe = modkit_runner.has_modification_tags(bam_local_path)
+    if not probe.found:
+        raise ValidationError(
+            f"No base-modification tags found in the first "
+            f"{probe.records_scanned} reads of {bam.name!r}. Modified-base "
+            f"calling has to be enabled at basecalling time (Dorado with a "
+            f"modified-base model); it cannot be added afterwards.",
+            details={"bam_id": str(bam.id), "records_scanned": probe.records_scanned},
+        )
+
+    payload: dict = {
+        "bam_id": str(bam.id),
+        "bam_name": bam.name,
+        "project_id": str(bam.project_id),
+    }
+    for key, obj in (("bam", bam), ("bai", bai)):
+        digest, path = await _resolve_readable(obj)
+        if digest:
+            payload[f"{key}_sha256"] = digest
+        if path:
+            payload[f"{key}_path"] = path
+
+    job = await queue.enqueue(
+        "methylation",
+        owner=owner,
+        payload=payload,
+        job_class=JobClass.COMPUTE,
+        resources=JobResources(cpu=2, mem_mb=METHYLATION_MEM_MB, io=IoClass.HEAVY),
+        max_attempts=2,
+        dedup_key=f"methylation:{bam.blob_sha256}",
+        project_id=bam.project_id,
+        object_id=bam.id,
+        resource_override=resource_override,
+    )
+    if job is None:
+        raise ConflictError(
+            "Methylation analysis is already queued or running for this BAM",
+            details={"bam_id": str(bam.id)},
+        )
+
+    log.info("methylation_launched", job_id=str(job.id), bam_id=str(bam.id))
     return job
 
 

@@ -160,6 +160,11 @@ _STEP_VERBS: dict[str, str] = {
     "transfer_annotation": "transferred annotation from",
     "materialize_annotation_edits": "edited with",
     "extract_genbank_sequence": "extracted the sequence from",
+    # Not in _NO_NARRATIVE_STEP, unlike coverage/feature_coverage beside it:
+    # this produces a bedMethyl artifact a person opens directly (IGV, R, a
+    # spreadsheet), not just statistics written back onto the BAM. See
+    # docs/superpowers/specs/2026-08-20-modkit-methylation-design.md.
+    "methylation": "summarized base modifications with",
 }
 
 # Registered handlers that legitimately produce no narrative step.

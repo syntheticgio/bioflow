@@ -176,6 +176,13 @@ async def _launch_coverage(*, inputs: dict, params: dict, owner: str):
     )
 
 
+async def _launch_methylation(*, inputs: dict, params: dict, owner: str):
+    return await pipeline_service.launch_methylation(
+        bam_id=inputs["alignment"],
+        owner=owner,
+    )
+
+
 async def _launch_variant_calling(*, inputs: dict, params: dict, owner: str):
     return await pipeline_service.launch_variant_calling(
         bam_id=inputs["alignment"],
@@ -606,6 +613,27 @@ NODE_TYPES: dict[str, NodeTypeSpec] = {
             ),
         ),
         outputs=(),
+    ),
+    "methylation": NodeTypeSpec(
+        label="Methylation",
+        launch_name="pipeline_service.launch_methylation",
+        # Derives an object (the bedMethyl track) but records no PipelineRun
+        # -- same shape as annotation_export, not coverage beside it. See
+        # _apply_methylation and decision K4 of the design spec.
+        run_kind=None,
+        launch=_launch_methylation,
+        inputs=(
+            PortSpec(
+                "alignment",
+                PortType(format=FormatKind.BAM, role=ObjectRole.ALIGNMENT),
+            ),
+        ),
+        outputs=(
+            PortSpec(
+                "bedmethyl",
+                PortType(format=FormatKind.BED),
+            ),
+        ),
     ),
     "call_variants": NodeTypeSpec(
         label="Call variants",

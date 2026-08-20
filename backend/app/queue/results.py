@@ -1915,6 +1915,74 @@ async def _apply_coverage(result: dict, *, owner: str) -> None:
     )
 
 
+async def _apply_methylation(result: dict, *, owner: str) -> None:
+    """Ingest a finished modkit pileup's bedMethyl file and record its
+    summary facts on the BAM it described.
+
+    Unlike coverage/feature_coverage beside it, this produces a real derived
+    object -- the bedMethyl track itself, per decision K4 of the design spec
+    -- because a person opens it directly (IGV, R, a spreadsheet), not just
+    the summary numbers. K3 is enforced by the handler, not here: a pileup
+    with zero rows never reaches this applier because `run_methylation`
+    raises before returning a result for it.
+
+    Facts are merged onto the BAM by per-key `facts.<key>` paths, never a
+    whole-dict merge -- `_apply_ingest_headers` can run on the same BAM at
+    nearly the same moment, and a merge computed from a stale `bam.facts`
+    snapshot would erase whichever keys the other had just written (#606).
+    """
+    from app.services import object_service, run_service
+
+    object_id = result.get("object_id")
+    output = result.get("output")
+    facts = result.get("facts") or {}
+    if not object_id or not output or not facts:
+        return
+
+    bam = await DataObject.get(PydanticObjectId(object_id))
+    if bam is None:
+        log.warning("methylation_object_missing", object_id=object_id)
+        return
+
+    job_id = result.get("job_id")
+    try:
+        # `output["name"]` ends in `.bed` (see run_methylation), which is
+        # what lets the ingest path's own format sniffing classify this as
+        # FormatKind.BED without a format override here -- the same route
+        # `_apply_call_variants` relies on for its VCF.
+        bedmethyl = await object_service.ingest_local_file(
+            owner=bam.owner,
+            project_id=bam.project_id,
+            path=Path(output["tmp_path"]),
+            name=output["name"],
+            derived_from=[bam.id],
+            produced_by_job=PydanticObjectId(job_id) if job_id else None,
+        )
+    except Exception as e:  # noqa: BLE001
+        log.error("methylation_bedmethyl_ingest_failed", object_id=object_id, error=str(e))
+        return
+
+    await bam.set(
+        {
+            **{f"facts.{key}": value for key, value in facts.items()},
+            DataObject.updated_at: datetime.now(UTC),
+        }
+    )
+
+    log.info(
+        "methylation_applied",
+        object_id=object_id,
+        bedmethyl_id=str(bedmethyl.id),
+        site_count=facts.get("methylation_site_count"),
+        mean_pct=facts.get("methylation_mean_pct"),
+    )
+
+    if job_id:
+        run_id = await run_service.run_for_job(PydanticObjectId(job_id))
+        if run_id is not None:
+            await run_service.record_outputs(run_id, [bedmethyl.id], owner=bedmethyl.owner)
+
+
 async def _apply_run_transcript_qc(result: dict, *, owner: str) -> None:
     """Record RNA-seq transcript QC on the BAM it described.
 
@@ -3721,6 +3789,7 @@ _APPLIERS = {
     "run_bam_stats": _apply_run_bam_stats,
     "feature_coverage": _apply_feature_coverage,
     "coverage": _apply_coverage,
+    "methylation": _apply_methylation,
     "run_transcript_qc": _apply_run_transcript_qc,
     "run_vcf_stats": _apply_run_vcf_stats,
     "run_annotation_stats": _apply_run_annotation_stats,
