@@ -15,12 +15,14 @@ from app.pipelines import align_runner, aligner_registry, assembler_registry, to
 from app.pipelines.assemblers import Assembler
 from app.services import pipeline_service
 from app.services.suggestion_service import (
+    CARD_BUILDERS,
     CardStatus,
     SuggestionCard,
     build_align_card,
     build_annotate_card,
     build_assemble_card,
     build_classify_reads_card,
+    build_coverage_card,
     build_feature_coverage_card,
     build_merge_structural_variants_card,
     build_preprocess_card,
@@ -1970,6 +1972,77 @@ class TestFeatureCoverageCard:
     def test_a_vcf_gets_no_card_at_all(self):
         with installed_bedtools(True):
             assert build_feature_coverage_card(_vcf(), [_annotation()]) is None
+
+
+@contextmanager
+def installed_mosdepth(available=True):
+    """Pin the mosdepth probe the coverage card reads.
+
+    Same seam as `installed_bedtools` above: a plain `@lru_cache`d function
+    read fresh at call time by `build_coverage_card`.
+    """
+    with patch(
+        "app.services.suggestion_service.tools.mosdepth",
+        return_value=_FakeTool(available, name="mosdepth"),
+    ) as probe:
+        yield probe
+
+
+class TestCoverageCard:
+    def test_the_probe_patch_actually_takes_effect(self):
+        """Guards every test below it, for the reason CLAUDE.md spells out:
+        the image ships mosdepth *installed*, so an available-card assertion
+        passes whether or not the patch worked. Only the unavailable
+        direction can tell a working seam from an escaped one.
+        """
+        with installed_mosdepth(False):
+            card = build_coverage_card(_bam())
+        assert card.status is CardStatus.UNAVAILABLE
+        assert "not installed" in card.reason
+
+    def test_any_bam_is_runnable(self):
+        """No annotation needed, unlike feature coverage -- this is the
+        difference that makes the card available for any completed
+        alignment."""
+        with installed_mosdepth(True):
+            card = build_coverage_card(_bam(obj_id="xyz"))
+        assert card.status is CardStatus.AVAILABLE
+        assert card.kind == "coverage"
+        assert card.launch == {
+            "endpoint": "/pipelines/coverage",
+            "body": {"bam_id": "xyz"},
+        }
+
+    def test_is_available_with_no_annotation_in_the_project(self):
+        """The distinguishing case against feature_coverage, asserted rather
+        than left implicit: an annotation-less project still gets this card.
+        """
+        with installed_mosdepth(True):
+            card = build_coverage_card(_bam())
+        assert card.status is CardStatus.AVAILABLE
+
+    def test_a_fastq_gets_no_card_at_all(self):
+        with installed_mosdepth(True):
+            assert build_coverage_card(_fake_obj()) is None
+
+    def test_a_vcf_gets_no_card_at_all(self):
+        with installed_mosdepth(True):
+            assert build_coverage_card(_vcf()) is None
+
+    def test_is_distinct_from_the_feature_coverage_card(self):
+        """Success criterion 3 of #626: the two coverage cards must be
+        separable by kind and by endpoint, not two spellings of one thing."""
+        with installed_mosdepth(True), installed_bedtools(True):
+            coverage = build_coverage_card(_bam(obj_id="xyz"))
+            feature = build_feature_coverage_card(_bam(obj_id="xyz"), [_annotation()])
+        assert coverage.kind != feature.kind
+        assert coverage.launch["endpoint"] != feature.launch["endpoint"]
+        assert coverage.title != feature.title
+
+    def test_is_registered_in_card_builders(self):
+        """A builder absent from CARD_BUILDERS is never called, so the card
+        exists in tests and nowhere in the app."""
+        assert "coverage" in [kind for kind, _ in CARD_BUILDERS]
 
 
 def _transcriptome_object(obj_id="cds1", blob_sha256="digest-cds1"):

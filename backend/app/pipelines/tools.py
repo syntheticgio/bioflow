@@ -2650,12 +2650,11 @@ TOOL_META: dict[str, ToolMeta] = {
             "a BAM object, complementing the samtools-based alignment "
             "statistics on the same alignment."
         ),
-        # False until launch_coverage and its card ship (stage 1 of #626).
-        # The binary is installed and probed, so /help/software can report its
-        # version, but nothing dispatches to it yet -- and bedtools above is
-        # the precedent for flipping this in the commit that wires the card,
-        # not before.
-        runnable=False,
+        # Flipped to True in the commit that shipped the Coverage depth card
+        # and its launch_coverage handler (#626, stage 1) -- mosdepth is now
+        # dispatched to directly, not merely installed. Same staging bedtools
+        # above went through.
+        runnable=True,
     ),
     "seqkit": ToolMeta(
         pipelines=(PipelineType.UTILITY,),

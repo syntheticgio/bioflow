@@ -2318,6 +2318,58 @@ def build_feature_coverage_card(obj, annotations) -> SuggestionCard | None:
     )
 
 
+def build_coverage_card(obj) -> SuggestionCard | None:
+    """Per-window read depth: how deeply and how evenly the reference is
+    covered.
+
+    Deliberately a second coverage card rather than a mode of
+    `build_feature_coverage_card`, and the two answer different questions.
+    That one is positional -- per annotated feature, so it needs an
+    annotation and is silent about everything between genes. This one is
+    windowed across the whole reference, so it needs no annotation and is
+    offered for any completed alignment, which is exactly the case a project
+    with no GFF cannot reach today.
+
+    Takes no `annotations` parameter for that reason: unlike every other card
+    near it, there is nothing project-scoped to resolve.
+    """
+    if obj.format.kind is not FormatKind.BAM:
+        return None
+
+    title = "Coverage depth"
+    description = (
+        "Report read depth in windows across the reference, showing how "
+        "evenly this alignment covers it and which regions are shallow."
+    )
+
+    tool = tools.mosdepth()
+    if not tool.available:
+        return SuggestionCard(
+            kind="coverage",
+            category="ASSEMBLY_QC",
+            title=title,
+            description=description,
+            status=CardStatus.UNAVAILABLE,
+            reason=f"{tool.name} is not installed.",
+        )
+
+    return SuggestionCard(
+        kind="coverage",
+        category="ASSEMBLY_QC",
+        title=title,
+        description=description,
+        why=(
+            "Alignment statistics give one average for the whole run; this "
+            "shows where the depth actually falls off."
+        ),
+        status=CardStatus.AVAILABLE,
+        launch={
+            "endpoint": "/pipelines/coverage",
+            "body": {"bam_id": str(obj.id)},
+        },
+    )
+
+
 def build_salmon_quantify_card(obj, transcriptomes) -> SuggestionCard | None:
     """Alignment-free transcript quantification for RNA-seq reads.
 
@@ -2485,6 +2537,7 @@ CARD_BUILDERS: tuple[tuple[str, object], ...] = (
         "feature_coverage",
         lambda obj, ctx: build_feature_coverage_card(obj, ctx.annotations),
     ),
+    ("coverage", lambda obj, ctx: build_coverage_card(obj)),
     ("annotate", lambda obj, ctx: build_annotate_card(obj, ctx.annotation_inputs)),
     ("annotate_genome", lambda obj, ctx: build_annotate_genome_card(obj)),
     ("classify_reads", lambda obj, ctx: build_classify_reads_card(obj)),
