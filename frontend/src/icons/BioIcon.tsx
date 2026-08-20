@@ -2042,6 +2042,12 @@ const ROLE_CONCEPTS: Record<string, BioIconName> = {
   transcript: "protein_cds",
   counts: "expression",
   de_results: "expression",
+  // Deliberately not "annotation" -- that's precisely the conflation this
+  // role exists to avoid (StringTie's proposed transcript models vs. a
+  // downloaded, authoritative GFF3). "assemble" matches the concept already
+  // used for the GFA assembly graph, the other role-carrying computed
+  // result.
+  assembled_transcripts: "assemble",
 };
 
 export function conceptFor(
