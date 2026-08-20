@@ -31,6 +31,7 @@ import type {
   ExportArchive,
   DeResultsPage,
   ExtractedSequence,
+  FilterLongReadsRequest,
   FacetValue,
   Facets,
   CoverageReport,
@@ -714,6 +715,19 @@ export const api = {
   ) =>
     request<JobSummary>(
       `/pipelines/trim${targetNode ? `?target_node=${encodeURIComponent(targetNode)}` : ""}`,
+      {
+        method: "POST",
+        body: JSON.stringify(body),
+      },
+    ),
+
+  /** Queue a Filtlong long-read length/quality filtering run. */
+  launchFilterLongReads: (
+    body: FilterLongReadsRequest,
+    targetNode?: string,
+  ) =>
+    request<JobSummary>(
+      `/pipelines/filter-long-reads${targetNode ? `?target_node=${encodeURIComponent(targetNode)}` : ""}`,
       {
         method: "POST",
         body: JSON.stringify(body),

@@ -895,6 +895,12 @@ def seqkit() -> Tool:
 
 
 @lru_cache(maxsize=1)
+def filtlong() -> Tool:
+    # Filtlong is a single C++ binary; --version prints "filtlong v0.2.1".
+    return _probe("filtlong", settings.filtlong_path, ["--version"])
+
+
+@lru_cache(maxsize=1)
 def featurecounts() -> Tool:
     # Writes its banner to stderr and exits non-zero on `-v` with no input
     # files. `_probe` already reads whichever stream produced something, and
@@ -1015,6 +1021,7 @@ def all_tools() -> list[Tool]:
         modkit(),
         seqkit(),
         snpeff(),
+        filtlong(),
     ]
 
 
@@ -1285,6 +1292,42 @@ TOOL_META: dict[str, ToolMeta] = {
             "shipped set before use, since it reaches an unescaped argument."
         ),
         recommendations={"short": RecommendationLevel.COMPATIBLE.value},
+    ),
+    "filtlong": ToolMeta(
+        pipelines=(PipelineType.TRIM,),
+        one_liner="Length and quality filter for Nanopore and PacBio long reads",
+        summary=(
+            "Filters long reads by length and average quality. Removes short or "
+            "low-quality reads before assembly, and can cap total yield to the "
+            "best-quality subset. Optionally uses a short-read set to weight "
+            "quality scoring. A single C++ binary with no dependencies."
+        ),
+        strengths=(
+            "Filters by minimum length and minimum mean quality",
+            "Keeps only the best N% of reads by quality",
+            "Can cap yield to a target base count (--target_bases)",
+            "Optional short-read reference for quality weighting",
+            "Lightweight: single binary, no Python/JVM dependencies",
+        ),
+        homepage="https://github.com/rrwick/Filtlong",
+        repository="https://github.com/rrwick/Filtlong",
+        citation="Li, Bioinformatics 2018",
+        citation_url="https://doi.org/10.1093/bioinformatics/bty1059",
+        license="MIT",
+        usage=(
+            "The default filter for long-read chemistry. Filters a FASTQ file "
+            "by minimum length and mean quality, keeping the best-quality "
+            "reads up to the configured percentage or target base count. The "
+            "summary line supplies the before/after read counts and the "
+            "filtering reason breakdown."
+        ),
+        # Listed as COMPATIBLE for long reads in the trim picker (cutadapt
+        # holds the RECOMMENDED slot there), but gets its own filter_long_reads
+        # card via suggestion_service.build_filter_long_reads_card, where it
+        # is the sole recommended choice for long-read length/quality filtering.
+        recommendations={
+            "long": RecommendationLevel.COMPATIBLE.value,
+        },
     ),
     "fastqc": ToolMeta(
         pipelines=(PipelineType.QC,),

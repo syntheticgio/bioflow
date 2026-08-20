@@ -83,6 +83,10 @@ class TestGoldenMatrix:
             "hisat2": {"short": "compatible", "long": "incompatible"},
             "star": {"short": "compatible", "long": "incompatible"},
             "minimap2": {"short": "compatible", "long": "recommended"},
+            # Filtlong is COMPATIBLE for long reads in the trim picker (cutadapt
+            # holds the RECOMMENDED slot there); it gets its own filter_long_reads
+            # card as the sole recommended choice for long-read filtering.
+            "filtlong": {"long": "compatible"},
         }
         actual = {
             name: dict(meta.recommendations)

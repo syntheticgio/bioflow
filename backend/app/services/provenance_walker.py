@@ -129,6 +129,7 @@ class ProvenanceChain:
 # wrong-but-present verb is the worst case, never a silently absent step.
 _STEP_VERBS: dict[str, str] = {
     "trim_reads": "trimmed with",
+    "filter_long_reads": "filtered with",
     "align_reads": "aligned with",
     "call_variants": "variant-called with",
     "call_structural_variants": "structural-variant-called with",
@@ -289,9 +290,10 @@ GENERIC_VERB = "processed with"
 # is the only `_outputs`-shaped key in the module). Extend this set, with a
 # comment naming the applier, if another writeback-onto-parent pattern shows
 # up the same way trim's did.
-_WRITEBACK_TOOL_KEYS: frozenset[str] = frozenset({"trimmed_by"})
-_WRITEBACK_VERSION_KEYS: frozenset[str] = frozenset({"trim_tool_version"})
-_WRITEBACK_PARAMS_KEYS: frozenset[str] = frozenset({"trim_params"})
+_WRITEBACK_TOOL_KEYS: frozenset[str] = frozenset({"trimmed_by", "filtered_by"})
+_WRITEBACK_VERSION_KEYS: frozenset[str] = frozenset({"trim_tool_version", "filter_tool_version"})
+_WRITEBACK_PARAMS_KEYS: frozenset[str] = frozenset({"trim_params", "filter_params"})
+
 
 # Presence of this key on an object's facts is what confirms the writeback
 # keys above describe a downstream job rather than this object's own origin:
@@ -299,7 +301,7 @@ _WRITEBACK_PARAMS_KEYS: frozenset[str] = frozenset({"trim_params"})
 # the input side does (confirmed against a real trimmed-reads object in the
 # same walk -- `trim_outputs` was absent there, `produced_by_job` pointed at
 # the trim job itself).
-_WRITEBACK_MARKER_KEY = "trim_outputs"
+_WRITEBACK_MARKER_KEYS: frozenset[str] = frozenset({"trim_outputs", "filter_outputs"})
 
 # `qc_tool`/`qc_tool_version` are a second, unconditional case of the same
 # root problem, also found in the same Task 10 walk: `_apply_run_qc` merges
@@ -335,13 +337,13 @@ def extract_tool_facts(facts: dict) -> tuple[str | None, str | None]:
     list means a builder added later still surfaces its tool here.
 
     Keys in `_WRITEBACK_TOOL_KEYS`/`_WRITEBACK_VERSION_KEYS` are skipped when
-    `_WRITEBACK_MARKER_KEY` is also present, because that combination means
+    `_WRITEBACK_MARKER_KEYS` is also present, because that combination means
     the triple was written onto this object by a downstream job describing
     itself, not by whatever job produced this object. Keys in
     `_UNCONDITIONAL_WRITEBACK_TOOL_KEYS`/`_UNCONDITIONAL_WRITEBACK_VERSION_KEYS`
     are skipped always, for the QC reason above.
     """
-    is_writeback = isinstance(facts.get(_WRITEBACK_MARKER_KEY), list)
+    is_writeback = any(isinstance(facts.get(k), list) for k in _WRITEBACK_MARKER_KEYS)
 
     tool = None
     for key, value in sorted(facts.items()):
@@ -374,10 +376,10 @@ def extract_params(facts: dict) -> dict:
     """Parameters recorded for the step that produced an object.
 
     Same convention: `align_params`, `trim_params`, `count_params`. Skips a
-    key in `_WRITEBACK_PARAMS_KEYS` when `_WRITEBACK_MARKER_KEY` is present --
+    key in `_WRITEBACK_PARAMS_KEYS` when `_WRITEBACK_MARKER_KEYS` is present --
     see `extract_tool_facts`.
     """
-    is_writeback = isinstance(facts.get(_WRITEBACK_MARKER_KEY), list)
+    is_writeback = any(isinstance(facts.get(k), list) for k in _WRITEBACK_MARKER_KEYS)
 
     for key, value in sorted(facts.items()):
         if not key.endswith("_params"):

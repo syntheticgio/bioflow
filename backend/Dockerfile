@@ -139,6 +139,35 @@ RUN apt-get update \
         libcurl4t64 \
         libgomp1 \
     && rm -rf /var/lib/apt/lists/*
+
+# --- Filtlong ---------------------------------------------------------------
+# Not packaged in Debian trixie, and the GitHub releases carry no pre-built
+# assets, so it is built from source: the Makefile is architecture-neutral
+# and the only build dependencies are a C++ compiler (g++ via build-essential)
+# and zlib (zlib1g-dev), plus git to fetch the source.
+# Pinned to an exact release tag rather than "master": the filter parameters
+# recorded as provenance depend on the binary that ran them, and an image
+# that silently changed Filtlong between builds would make two runs of the
+# same pipeline incomparable.
+ARG FILTLONG_VERSION=v0.3.1
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        git build-essential zlib1g-dev \
+    # Clone and compile: the Makefile links statically against zlib on Linux,
+    # so the runtime image does not need zlib1g-dev either -- only the shared
+    # libz, which is present as a transitive dep of samtools/sra-toolkit.
+    && git clone --depth 1 --branch ${FILTLONG_VERSION} \
+        https://github.com/rrwick/Filtlong.git /tmp/filtlong \
+    && cd /tmp/filtlong \
+    && make -j"$(nproc)" \
+    && cp bin/filtlong /usr/local/bin/filtlong \
+    && strip /usr/local/bin/filtlong \
+    && rm -rf /tmp/filtlong \
+    && apt-get purge -y git build-essential zlib1g-dev \
+    && apt-get autoremove -y \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/* \
+    && filtlong --version
 # libcurl4t64 and libgomp1 are meryl's release binary's remaining runtime
 # deps beyond OpenSSL -- both present normally in trixie's own archive, no
 # vendoring needed. See the legacy-ssl build stage above and

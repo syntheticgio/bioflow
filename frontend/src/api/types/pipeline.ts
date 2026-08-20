@@ -220,6 +220,15 @@ export interface TrimmomaticParams {
   threads: number;
 }
 
+/** Mirrors filtlong_runner.FiltlongParams. Conservative defaults tuned for long reads. */
+export interface FiltlongParams {
+  min_length: number;
+  min_mean_q: number;
+  keep_percent: number;
+  target_bases: number | null;
+  threads: number;
+}
+
 export type TrimToolParams = TrimParams | CutadaptParams | TrimmomaticParams;
 
 export interface TrimDefaults {
@@ -239,6 +248,13 @@ export interface TrimRequest {
   paired?: boolean;
   params?: Partial<TrimToolParams>;
   tool?: string;
+}
+
+/** Request body for launching Filtlong long-read filtering. */
+export interface FilterLongReadsRequest {
+  object_id: string;
+  mate_object_id?: string | null;
+  params?: Partial<FiltlongParams>;
 }
 
 /** One output file of a prior run. `exists` is false once the file has been
