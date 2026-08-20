@@ -79,6 +79,17 @@ function BlobScatter({
   const plotH = H - pad.top - pad.bottom;
 
   const scored = contigs.filter((c) => c.gc != null);
+  if (!scored.length) {
+    // Every kept contig was unscoreable (all-N) -- an empty scatter with
+    // the usual "showing N contigs" caption would read as a clean assembly
+    // with zero visible points, which is not what happened here.
+    return (
+      <div style={{ color: "var(--text-faint)", fontSize: 12 }}>
+        None of the {contigs.length.toLocaleString()} reported contigs had a
+        scoreable GC content (all-N sequence).
+      </div>
+    );
+  }
   const depths = scored.map((c) => Math.max(c.mean_depth, 0.1));
   const minDepth = Math.min(...depths, 0.1);
   const maxDepth = Math.max(...depths, 1);
