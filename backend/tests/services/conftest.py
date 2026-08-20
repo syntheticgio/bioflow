@@ -8,12 +8,37 @@ boilerplate.
 """
 
 from datetime import UTC, datetime
+from types import SimpleNamespace
 
 import pytest_asyncio
 from beanie import PydanticObjectId
 
-from app.models import Blob, BlobStorage, DataObject, ObjectRole, ObjectStatus
+from app.models import Blob, BlobStorage, DataObject, FormatKind, ObjectRole, ObjectStatus
 from tests.services import helpers
+
+
+def _obj(*, name, kind, role=None, status=ObjectStatus.READY, project_id=None):
+    return SimpleNamespace(
+        id=PydanticObjectId(),
+        name=name,
+        format=SimpleNamespace(kind=kind),
+        role=role,
+        status=status,
+        facts={},
+        project_id=project_id or PydanticObjectId(),
+        owner="local",
+        blob_sha256="a" * 64,
+    )
+
+
+def _draft(*, project_id=None):
+    return _obj(name="draft.fasta", kind=FormatKind.FASTA, project_id=project_id)
+
+
+def _reference(name, *, project_id):
+    return _obj(
+        name=name, kind=FormatKind.FASTA, role=ObjectRole.REFERENCE, project_id=project_id
+    )
 
 
 @pytest_asyncio.fixture
