@@ -1,6 +1,12 @@
 import pytest
 
-from app.pipelines.gc_coverage import JoinedWindow, bias_curve, join_windows
+from app.pipelines.gc_coverage import (
+    JoinedWindow,
+    bias_curve,
+    cap_by_cumulative_length,
+    join_windows,
+    per_contig,
+)
 
 
 def _window(contig, index, start, end, gc, depth):
@@ -111,3 +117,80 @@ def test_bias_curve_skips_none_gc_and_omits_empty_bins():
     curve = bias_curve(joined, bins=20)
     assert len(curve) == 1
     assert curve[0]["mean_depth"] == 3.0
+
+
+def test_per_contig_gc_is_base_weighted_not_unweighted_mean():
+    """Two windows, one 10bp at GC=100% (10 G/C bases of 10) and one 90bp at
+    GC=0% (0 of 90). The unweighted mean of percentages is 50%. The correct
+    per-contig GC, weighted by each window's base count, is
+    (10 + 0) / (10 + 90) = 10%.
+    """
+    joined = [
+        _window("c1", 0, 0, 10, gc=100.0, depth=5.0),
+        _window("c1", 1, 10, 100, gc=0.0, depth=5.0),
+    ]
+    rows = per_contig(joined)
+    assert len(rows) == 1
+    assert rows[0]["contig"] == "c1"
+    assert rows[0]["gc"] == pytest.approx(10.0)
+    assert rows[0]["length"] == 100
+    assert rows[0]["window_count"] == 2
+
+
+def test_per_contig_mean_depth_is_width_weighted():
+    joined = [
+        _window("c1", 0, 0, 10, gc=50.0, depth=100.0),
+        _window("c1", 1, 10, 110, gc=50.0, depth=1.0),
+    ]
+    rows = per_contig(joined)
+    # (100*10 + 1*100) / 110 = 1100/110 = 10.0
+    assert rows[0]["mean_depth"] == pytest.approx(10.0)
+
+
+def test_per_contig_skips_none_gc_windows_in_the_gc_average_but_not_depth():
+    """An all-N window contributes no G/C or total bases to the GC ratio
+    (it truly has none), but its depth still counts toward mean_depth --
+    depth was measured regardless of base composition."""
+    joined = [
+        _window("c1", 0, 0, 10, gc=None, depth=8.0),
+        _window("c1", 1, 10, 20, gc=60.0, depth=2.0),
+    ]
+    rows = per_contig(joined)
+    assert rows[0]["gc"] == 60.0
+    assert rows[0]["mean_depth"] == pytest.approx((8.0 * 10 + 2.0 * 10) / 20)
+
+
+def test_cap_by_cumulative_length_keeps_contigs_covering_target_fraction():
+    contigs = [
+        {"contig": "big", "length": 900, "gc": 50.0, "mean_depth": 10.0, "window_count": 9},
+        {"contig": "small", "length": 90, "gc": 50.0, "mean_depth": 10.0, "window_count": 1},
+        {"contig": "tiny", "length": 10, "gc": 50.0, "mean_depth": 10.0, "window_count": 1},
+    ]
+    kept, dropped = cap_by_cumulative_length(contigs, target_fraction=0.99, hard_ceiling=5000)
+    # Sorted descending by length: big(900)=90%, +small(90)=99% exactly hits
+    # target; tiny should be dropped.
+    assert {c["contig"] for c in kept} == {"big", "small"}
+    assert dropped == 1
+
+
+def test_cap_by_cumulative_length_reports_true_dropped_count_not_a_log_line():
+    """V4's whole point: a contaminant is often many small contigs, so this
+    count must be exact and always available to the caller -- it becomes
+    the chart's 'M shorter contigs omitted' line."""
+    contigs = [{"contig": f"c{i}", "length": 1, "gc": 50.0, "mean_depth": 1.0, "window_count": 1}
+               for i in range(100)]
+    contigs[0]["length"] = 10_000  # one huge contig covers >99% alone
+    kept, dropped = cap_by_cumulative_length(contigs, target_fraction=0.99, hard_ceiling=5000)
+    assert dropped == 99
+    assert len(kept) == 1
+
+
+def test_cap_by_cumulative_length_hard_ceiling_binds_even_under_target_fraction():
+    """A pathologically fragmented assembly where reaching 99% would need
+    more than hard_ceiling contigs -- the ceiling must still bind, and the
+    dropped count must still be exact."""
+    contigs = [{"contig": f"c{i}", "length": 1, "gc": 50.0, "mean_depth": 1.0, "window_count": 1}
+               for i in range(20)]
+    kept, dropped = cap_by_cumulative_length(contigs, target_fraction=0.99, hard_ceiling=5)
+    assert len(kept) == 5
+    assert dropped == 15
