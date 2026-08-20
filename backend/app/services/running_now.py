@@ -68,6 +68,7 @@ ENDPOINT_JOB_TYPES: dict[str, frozenset[str]] = {
     "/pipelines/feature-coverage": frozenset({"feature_coverage"}),
     "/pipelines/coverage": frozenset({"coverage"}),
     "/pipelines/methylation": frozenset({"methylation"}),
+    "/pipelines/gc-bias": frozenset({"gc_bias"}),
     "/pipelines/salmon-quantify": frozenset({"salmon_quantify"}),
 
     "/pipelines/transcript-assembly": frozenset({"transcript_assembly"}),
