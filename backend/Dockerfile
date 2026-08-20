@@ -198,15 +198,6 @@ RUN apt-get update \
 # Python's stdlib gzip rather than failing an ingest, so this package is a
 # performance and seekability dependency, not a hard one.
 
-# --- Filtlong ---------------------------------------------------------------
-#
-# Filtlong is a single C++ binary with no Debian package (verified 2026-08-17).
-# Installed from the upstream GitHub release tarball -- a self-contained binary
-# with no runtime dependencies beyond the C++ standard library already present.
-RUN curl -fsSL \
-    "https://github.com/rrwick/Filtlong/releases/download/v0.2.1/Filtlong_linux_x86_64.tar.gz" \
-    | tar -xz -C /usr/local/bin --strip-components=1 Filtlong
-
 # --- flye-samtools shim -----------------------------------------------------
 #
 # Flye 2.9.5 upstream vendors its own samtools build and invokes it as
