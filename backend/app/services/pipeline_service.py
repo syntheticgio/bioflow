@@ -4355,6 +4355,12 @@ async def launch_phase_variants(
     whatshap_params = WhatshapParams.from_dict(params)
     tools.require(tools.whatshap())
 
+    refuse_if_over_budget(
+        declared_mb=PHASE_VARIANTS_MEM_MB,
+        budget_mb=await current_admission_budget_mb(),
+        resource_override=resource_override,
+    )
+
     # Each alignment must be an indexed BAM. polyphase needs the sample name,
     # which must match the VCF -- sample_name_for resolves it from the BAM's
     # metadata, matching the stem Clair3 writes into the VCF.

@@ -134,6 +134,7 @@ _STEP_VERBS: dict[str, str] = {
     "call_structural_variants": "structural-variant-called with",
     "merge_structural_variants": "joint-called with",
     "annotate_variants": "annotated with",
+    "phase_variants": "phased with",
     "assemble_reads": "assembled with",
     "assemble_upload": "assembled with",
     "polish_assembly": "polished with",
