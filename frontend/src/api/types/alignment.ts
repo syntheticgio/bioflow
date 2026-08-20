@@ -276,6 +276,30 @@ export interface BamStatsFacts {
    * job has run. Not a path to fetch from directly; see
    * api.featureCoverageReport, which hits the report endpoint by object id. */
   feature_coverage_report?: string;
+
+  /** Facts produced by the mosdepth coverage job. See CoverageDepth.tsx.
+   * Distinct from the feature_coverage_* block above: that is per annotated
+   * feature via bedtools, this is per window (or per target region) via
+   * mosdepth. */
+  coverage_status?: "ok";
+  coverage_tool_version?: string;
+  coverage_computed_at?: string;
+  coverage_mode?: "windows" | "regions";
+  coverage_mean_depth?: number;
+  coverage_max_depth?: number;
+  coverage_reference_length?: number;
+  coverage_bases_covered?: number;
+  coverage_contig_count?: number;
+  /** Set only in region mode; the window count is set only in windowed mode. */
+  coverage_region_count?: number;
+  coverage_regions_id?: string;
+  coverage_window_count?: number;
+  coverage_pct_at_1x?: number;
+  coverage_pct_at_10x?: number;
+  coverage_pct_at_30x?: number;
+  /** Filename of the report on disk -- truthy iff the job has run. Fetched
+   * through api.coverageReport by object id, not by this path. */
+  coverage_report?: string;
 }
 
 export interface ContigsPage {
@@ -315,4 +339,49 @@ export interface FeatureCoverageReport {
   truncated: boolean;
   /** Pre-sorted ascending by breadth (worst coverage first), then name. */
   features: FeatureCoverageRow[];
+}
+
+/** One window (or one target region) from a mosdepth run. */
+export interface CoverageWindow {
+  start: number;
+  end: number;
+  /** Mean read depth across the interval. */
+  depth: number;
+  /**
+   * Carried through from a 4-column target BED, so it is set on a region-mode
+   * report and null on a windowed one -- mosdepth has no name to propagate
+   * for a window the app generated itself.
+   */
+  name: string | null;
+}
+
+/** One contig's row in a mosdepth summary. */
+export interface CoverageContig {
+  name: string;
+  length: number;
+  bases: number;
+  mean: number;
+  min: number;
+  max: number;
+}
+
+/**
+ * `GET /pipelines/coverage/{object_id}/report`'s full body --
+ * mosdepth_runner.build_report's return shape verbatim.
+ *
+ * `mode` distinguishes the two runs that produce identical row shapes:
+ * "windows" is the uniform tiling the app generates from the reference's
+ * contig lengths, "regions" is a user-supplied target BED. `window_count` is
+ * null in region mode, where the row count is the BED's and not a tiling
+ * parameter at all.
+ */
+export interface CoverageReport {
+  mode: "windows" | "regions";
+  contigs: CoverageContig[];
+  total: CoverageContig | null;
+  /** Keyed by contig name, in the reference's own order. */
+  regions: Record<string, CoverageWindow[]>;
+  /** Cumulative fraction of bases at >= each depth, across the reference. */
+  dist: Record<string, number>;
+  window_count: number | null;
 }

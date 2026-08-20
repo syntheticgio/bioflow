@@ -33,6 +33,7 @@ import type {
   ExtractedSequence,
   FacetValue,
   Facets,
+  CoverageReport,
   FeatureCoverageReport,
   FeatureQuery,
   Feedback,
@@ -1200,6 +1201,10 @@ export const api = {
    * every other suggestion card. */
   featureCoverageReport: (objectId: string) =>
     request<FeatureCoverageReport>(`/pipelines/feature-coverage/${objectId}/report`),
+
+  /** The per-window (or per-region) depth report mosdepth produced for a BAM. */
+  coverageReport: (objectId: string) =>
+    request<CoverageReport>(`/pipelines/coverage/${objectId}/report`),
 
   /** Queue the Results computation for a VCF/BCF. Read-only: produces facts
    * and a variants TSV, no derived objects. */
