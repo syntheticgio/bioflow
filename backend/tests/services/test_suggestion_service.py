@@ -885,14 +885,41 @@ class TestStructuralVariantsCard:
         assert "not installed" in card.reason
         assert card.launch is None
 
-    def test_short_read_reason_names_the_missing_capability(self):
-        """The wording is the seam #620's Delly card replaces -- it must say
-        a different *tool* is needed, not that SV calling is impossible."""
+    def test_short_reads_are_offered_delly(self):
+        """#619 left this card's SHORT branch saying a different tool was
+        needed. #620 is that tool: the reason is replaced by an offer on the
+        same card, not supplemented by a second SV card. Requirement
+        SV-620-9."""
         card = build_structural_variants_card(
             _bam(), align_runner.ReadChemistry.SHORT
         )
+        assert card.status is CardStatus.AVAILABLE
+        assert card.launch is not None
+
+    def test_short_read_card_is_unavailable_when_delly_is_missing(self):
+        """The load-bearing direction. The image ships Delly installed, so
+        asserting the card is *available* passes whether or not a patch
+        worked -- only the flip to unavailable fails when the seam breaks.
+        Requirement SV-620-10."""
+        with patch(
+            "app.services.suggestion_service.tools.delly",
+            return_value=_FakeTool(False, name="delly"),
+        ):
+            card = build_structural_variants_card(
+                _bam(), align_runner.ReadChemistry.SHORT
+            )
         assert card.status is CardStatus.UNAVAILABLE
-        assert "long reads" in card.reason
+        assert "not installed" in card.reason
+        assert card.launch is None
+
+    def test_short_read_why_does_not_claim_parity_with_long_reads(self):
+        """Paired-end and split-read signal detects SVs but resolves fewer
+        of them than long reads do. A card that reads as equivalent
+        misrepresents what the user gets."""
+        card = build_structural_variants_card(
+            _bam(), align_runner.ReadChemistry.SHORT
+        )
+        assert "long reads span breakpoints" not in (card.why or "").lower()
 
     def test_unknown_chemistry_is_refused(self):
         """UNKNOWN means QC has not run. Running Sniffles on a BAM that turns
