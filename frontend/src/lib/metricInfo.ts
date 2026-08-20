@@ -551,6 +551,60 @@ export const METRIC_INFO: Record<string, MetricInfo> = {
     computed:
       "Measured over the 1,000 bins the coverage strip is drawn from, not per base — each bin holds the mean depth of its slice of the reference, so this is the fraction of bins whose average clears the threshold. A short, deeply covered region inside a mostly empty bin does not lift it over.",
   },
+  "ui.coverage_depth": {
+    term: "Coverage depth (mosdepth)",
+    description:
+      "Read depth measured in windows across the reference, rather than as one number for the whole run. This is what shows a dropout inside a chromosome: the mean depth and the per-contig strip above both average such a gap away, because a region at 0\u00d7 and a region at 60\u00d7 report the same mean as an even 30\u00d7.",
+    computed:
+      "mosdepth over a BED of windows tiled from the reference's contig lengths \u2014 the same tiling the GC track uses, so the two line up \u2014 or over an uploaded target BED when the job was launched against one.",
+  },
+  "ui.coverage_mean_depth": {
+    term: "Mean depth",
+    description:
+      "How many reads cover the average reference base, across every window measured. Read it beside the \u22651\u00d7/\u226510\u00d7/\u226530\u00d7 figures rather than alone: evenness is the thing a mean cannot report.",
+    computed:
+      "mosdepth's own genome-wide total, weighted by length across every contig it measured.",
+  },
+  "ui.coverage_max_depth": {
+    term: "Max depth",
+    description:
+      "The deepest single position measured. Far above the mean usually means a pile-up rather than real signal \u2014 a repeat, an unmasked rDNA array, or PCR duplicates that were never marked.",
+    computed: "The largest per-base depth mosdepth saw across the reference.",
+  },
+  "ui.coverage_reference_length": {
+    term: "Reference length",
+    description:
+      "The total length of the sequences depth was measured over. It is the denominator for the breadth percentages beside it.",
+    computed: "Summed from the contig lengths in mosdepth's summary.",
+  },
+  "ui.coverage_contig_count": {
+    term: "Contigs measured",
+    description:
+      "How many sequences carried at least one window. Fewer than the reference declares means the rest were shorter than a single window and were skipped \u2014 the same floor the GC track applies.",
+    computed:
+      "Counted from mosdepth's summary, excluding its per-region and total rows.",
+  },
+  "ui.coverage_pct_at_1x": {
+    term: "Bases \u2265 1\u00d7",
+    description:
+      "The fraction of the reference sequenced at all. A high mean depth next to a low figure here means the reads piled up somewhere instead of spreading out.",
+    computed:
+      "Read from mosdepth's cumulative distribution, which reports the fraction of bases at or above each depth.",
+  },
+  "ui.coverage_pct_at_10x": {
+    term: "Bases \u2265 10\u00d7",
+    description:
+      "The conventional floor for calling a heterozygous variant with confidence. Regions below it are where a call set quietly loses sensitivity.",
+    computed:
+      "Read from mosdepth's cumulative distribution, which reports the fraction of bases at or above each depth.",
+  },
+  "ui.coverage_pct_at_30x": {
+    term: "Bases \u2265 30\u00d7",
+    description:
+      "The conventional floor for somatic calling, where a variant may be present in a minority of reads and shallow coverage cannot distinguish it from noise.",
+    computed:
+      "Read from mosdepth's cumulative distribution, which reports the fraction of bases at or above each depth.",
+  },
   "ui.bam_total_contigs": {
     term: "Contigs",
     description:

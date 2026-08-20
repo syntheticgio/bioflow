@@ -15,6 +15,7 @@ import { BirdsEyeCoverageChart, CumulativeCoverageChart } from "./CoverageChart"
 import { ContigTable } from "./ContigTable";
 import { ContigDepthChart } from "./ContigDepthChart";
 import { ContigDepthStrip } from "./ContigDepthStrip";
+import { CoverageDepth } from "./CoverageDepth";
 import { DepthHistogramChart } from "./DepthHistogramChart";
 import { FeatureCoverage } from "./FeatureCoverage";
 import { OnDemandCompute } from "./OnDemandCompute";
@@ -246,6 +247,12 @@ export function BamResults({ obj }: { obj: ObjectDetailData }) {
           "Compute results" above -- so it lives outside OnDemandCompute
           and is gated on its own fact rather than `hasResults`. */}
       {f.feature_coverage_report && <FeatureCoverage objectId={obj.id} />}
+
+      {/* Same independent-job reasoning as the feature coverage panel above,
+          and gated on its own fact for the same reason. Placed after it so
+          the two coverage panels read together: per annotated feature, then
+          per window across the whole reference. */}
+      {f.coverage_report && <CoverageDepth objectId={obj.id} />}
     </>
   );
 }
