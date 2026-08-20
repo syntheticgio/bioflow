@@ -4720,6 +4720,19 @@ async def launch_transcript_assembly(
 
     bam = await object_service.get_object(bam_id, owner=owner)
     _check_quantifiable(bam)
+    # _check_quantifiable accepts BAM, SAM, and CRAM -- it's shared with
+    # featureCounts (launch_quantify), which can read all three. StringTie
+    # 2.2.1 only reads BAM. The Actions-tab card only ever offers BAM
+    # objects, but this endpoint is directly reachable with any bam_id, so
+    # narrow the format here rather than letting a SAM/CRAM input burn a
+    # job slot and fail late inside the StringTie subprocess.
+    if bam.format.kind is not FormatKind.BAM:
+        raise ValidationError(
+            f"{bam.name!r} is "
+            f"{bam.format.kind.value if bam.format.kind else 'an unknown format'}, "
+            "not BAM. StringTie requires a BAM alignment, not SAM or CRAM.",
+            details={"object_id": str(bam.id), "kind": str(bam.format.kind)},
+        )
 
     annotation = await resolve_annotation(bam.project_id, annotation_id, owner=owner)
 
