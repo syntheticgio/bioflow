@@ -16,7 +16,15 @@ from app.config import settings
 from app.errors import PermanentError, RetryableError
 from app.logging import get_logger
 from app.models import IoClass, JobClass, JobResources
-from app.pipelines import aligners, sniffles_runner, sv_db, tools, variant_runner
+from app.pipelines import (
+    aligners,
+    delly_runner,
+    sniffles_runner,
+    sv_caller,
+    sv_db,
+    tools,
+    variant_runner,
+)
 from app.pipelines.align_runner import ReadChemistry
 from app.queue.align_handlers import _resolve_blob
 from app.queue.executor import run_subprocess
@@ -61,10 +69,10 @@ def _check_chemistry(chemistry: ReadChemistry | None) -> None:
     """
     if chemistry is None:
         return
-    if not sniffles_runner.sv_calling_allowed_for(chemistry):
+    if sv_caller.caller_for_chemistry(chemistry) is None:
         raise PermanentError(
-            f"Chemistry {chemistry.value!r} is not long-read; structural "
-            f"variant calling requires long reads."
+            f"Chemistry {chemistry.value!r} has no structural variant "
+            f"caller. Run QC first if the platform is unknown."
         )
 
 
@@ -94,8 +102,20 @@ def call_structural_variants(ctx: JobContext) -> dict:
     chemistry = _chemistry_from_payload(ctx.payload)
     _check_chemistry(chemistry)
 
-    tool = tools.require(tools.sniffles())
-    params = sniffles_runner.SnifflesParams.from_dict(ctx.payload.get("params"))
+    caller = sv_caller.caller_for_chemistry(chemistry or ReadChemistry.UNKNOWN)
+    if caller is None:
+        raise PermanentError(
+            "No structural variant caller covers this BAM's chemistry."
+        )
+
+    if caller is sv_caller.SvCaller.DELLY:
+        tool = tools.require(tools.delly())
+        params = delly_runner.DellyParams.from_dict(ctx.payload.get("params"))
+    else:
+        tool = tools.require(tools.sniffles())
+        params = sniffles_runner.SnifflesParams.from_dict(
+            ctx.payload.get("params")
+        )
 
     work = _prepare_workdir(ctx, "sv")
 
@@ -133,32 +153,74 @@ def call_structural_variants(ctx: JobContext) -> dict:
     log_path = settings.logs_dir / f"{ctx.job_id}.log"
     log_path.parent.mkdir(parents=True, exist_ok=True)
 
-    output_name = ctx.payload.get("output_name") or f"{Path(bam_name).stem}.sniffles.vcf.gz"
-    vcf = out_dir / output_name
-    snf = out_dir / f"{Path(bam_name).stem}.snf"
+    if caller is sv_caller.SvCaller.DELLY:
+        output_name = (
+            ctx.payload.get("output_name")
+            or f"{Path(bam_name).stem}.delly.vcf.gz"
+        )
+        vcf = out_dir / output_name
+        bcf = out_dir / f"{Path(bam_name).stem}.delly.bcf"
 
-    ctx.progress(phase="starting", pct=None, message="starting Sniffles2")
-    cmd = sniffles_runner.build_sniffles_command(
-        sniffles_path=tool.path,
-        bam=bam,
-        reference=materialized.reference,
-        output=vcf,
-        params=params,
-        snf_output=snf,
-    )
-    log.info("sniffles_started", job_id=ctx.job_id)
+        ctx.progress(phase="starting", pct=None, message="starting Delly")
+        cmd = delly_runner.build_delly_command(
+            delly_path=tool.path,
+            bam=bam,
+            reference=materialized.reference,
+            output=bcf,
+            params=params,
+        )
+        log.info("delly_started", job_id=ctx.job_id)
 
-    code = run_subprocess(ctx, cmd, log_path=str(log_path))
-    if code != 0:
-        raise _failure(code, log_path, "sniffles2")
+        code = run_subprocess(ctx, cmd, log_path=str(log_path))
+        if code != 0:
+            raise _failure(code, log_path, "delly")
 
-    if not vcf.exists() or vcf.stat().st_size == 0:
-        raise RetryableError("Sniffles2 exited 0 but produced no VCF")
+        if not bcf.exists() or bcf.stat().st_size == 0:
+            raise RetryableError("Delly exited 0 but produced no BCF")
+
+        ctx.progress(phase="convert", pct=0.8, message="converting BCF to VCF")
+        convert = delly_runner.build_bcf_to_vcf_command(
+            bcftools_path=tools.require(tools.bcftools()).path,
+            bcf=bcf,
+            output=vcf,
+        )
+        code = run_subprocess(ctx, convert, log_path=str(log_path))
+        if code != 0:
+            raise _failure(code, log_path, "bcftools view")
+
+        if not vcf.exists() or vcf.stat().st_size == 0:
+            raise RetryableError("bcftools exited 0 but produced no VCF")
+        snf = None
+    else:
+        output_name = (
+            ctx.payload.get("output_name")
+            or f"{Path(bam_name).stem}.sniffles.vcf.gz"
+        )
+        vcf = out_dir / output_name
+        snf = out_dir / f"{Path(bam_name).stem}.snf"
+
+        ctx.progress(phase="starting", pct=None, message="starting Sniffles2")
+        cmd = sniffles_runner.build_sniffles_command(
+            sniffles_path=tool.path,
+            bam=bam,
+            reference=materialized.reference,
+            output=vcf,
+            params=params,
+            snf_output=snf,
+        )
+        log.info("sniffles_started", job_id=ctx.job_id)
+
+        code = run_subprocess(ctx, cmd, log_path=str(log_path))
+        if code != 0:
+            raise _failure(code, log_path, "sniffles2")
+
+        if not vcf.exists() or vcf.stat().st_size == 0:
+            raise RetryableError("Sniffles2 exited 0 but produced no VCF")
 
     tbi = _index_vcf(ctx, vcf, log_path)
 
     ctx.progress(phase="db", pct=0.9, message="building the SV index")
-    db_path = _build_sv_index(ctx, vcf, out_dir)
+    db_path = _build_sv_index(ctx, vcf, out_dir, caller=caller)
 
     ctx.progress(phase="done", pct=1.0, message="structural variant calling complete")
     log.info(
@@ -174,12 +236,13 @@ def call_structural_variants(ctx: JobContext) -> dict:
         "job_id": ctx.job_id,
         "output": {"tmp_path": str(vcf), "name": vcf.name},
         "index": {"tmp_path": str(tbi), "name": tbi.name, "role": "tbi"},
+        "caller": caller.value,
         "tool_version": tool.version,
         "params": ctx.payload.get("params") or {},
         "sv_db_path": str(db_path),
         "workdir": str(work),
     }
-    if snf.exists() and snf.stat().st_size > 0:
+    if snf is not None and snf.exists() and snf.stat().st_size > 0:
         res["snf"] = {"tmp_path": str(snf), "name": snf.name, "role": "snf"}
     return res
 
@@ -262,6 +325,7 @@ def merge_structural_variants(ctx: JobContext) -> dict:
         "job_id": ctx.job_id,
         "output": {"tmp_path": str(vcf), "name": vcf.name},
         "index": {"tmp_path": str(tbi), "name": tbi.name, "role": "tbi"},
+        "caller": sv_caller.SvCaller.SNIFFLES2.value,
         "tool_version": tool.version,
         "params": ctx.payload.get("params") or {},
         "sv_db_path": str(db_path),
@@ -293,7 +357,13 @@ def _index_vcf(ctx: JobContext, vcf: Path, log_path: Path) -> Path:
     return tbi
 
 
-def _build_sv_index(ctx: JobContext, vcf: Path, out_dir: Path) -> Path:
+def _build_sv_index(
+    ctx: JobContext,
+    vcf: Path,
+    out_dir: Path,
+    *,
+    caller: sv_caller.SvCaller = sv_caller.SvCaller.SNIFFLES2,
+) -> Path:
     """Build the SQLite table the SV Results view queries, from the VCF data and header lines.
 
     `bcftools view` writes the header and data lines to `log_path` via
@@ -314,7 +384,7 @@ def _build_sv_index(ctx: JobContext, vcf: Path, out_dir: Path) -> Path:
 
     db_path = out_dir / "sv.db"
     with open(rows_path, errors="replace") as fh:
-        sv_db.build_sv_db(rows=fh, db_path=db_path)
+        sv_db.build_sv_db(rows=fh, db_path=db_path, caller=caller)
 
     return db_path
 
