@@ -18,6 +18,7 @@ import { ContigDepthStrip } from "./ContigDepthStrip";
 import { CoverageDepth } from "./CoverageDepth";
 import { DepthHistogramChart } from "./DepthHistogramChart";
 import { FeatureCoverage } from "./FeatureCoverage";
+import { GcBiasChart } from "./GcBiasChart";
 import { OnDemandCompute } from "./OnDemandCompute";
 import { TranscriptQc } from "./TranscriptQc";
 
@@ -137,6 +138,12 @@ export function BamResults({ obj }: { obj: ObjectDetailData }) {
                       bucketWidth={f.bam_stats_depth_bucket_width}
                       meanDepth={f.bam_stats_summary?.mean_depth}
                     />
+                  </div>
+                )}
+              {f.gc_bias?.gc_bias_bins &&
+                f.gc_bias.gc_bias_bins.length > 0 && (
+                  <div style={{ flex: "1 1 300px" }}>
+                    <GcBiasChart bins={f.gc_bias.gc_bias_bins} />
                   </div>
                 )}
             </div>

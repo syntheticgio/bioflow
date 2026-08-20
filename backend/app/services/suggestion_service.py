@@ -2573,6 +2573,91 @@ def build_coverage_card(obj) -> SuggestionCard | None:
         },
     )
 
+def build_gc_bias_card(obj, ctx) -> SuggestionCard | None:
+    """Coverage-vs-GC bias curve: normalized mean coverage per GC bin.
+
+    Joins per-window depth (from mosdepth) with per-window GC (from
+    ``gc_tracks``) on the same window grid, then bins by GC percentage to
+    show whether coverage varies with base composition.  A dome peaking at
+    mid-GC is PCR amplification bias; a flat line with drops at the extremes
+    is normal.
+
+    The card refuses with a reason naming the missing step (no resolvable
+    reference / no GC tracks / no depth) rather than auto-chaining those
+    jobs, per the issue-640 spec.
+    """
+    if obj.format.kind is not FormatKind.BAM:
+        return None
+
+    title = "Coverage vs GC bias"
+    description = (
+        "How read depth varies with GC content across the reference, "
+        "revealing PCR amplification bias and other library artifacts."
+    )
+
+    # The BAM's alignment target is resolved by the prefetcher.
+    reference = ctx.alignment_target
+    if reference is None:
+        return SuggestionCard(
+            kind="gc_bias",
+            category="ASSEMBLY_QC",
+            title=title,
+            description=description,
+            status=CardStatus.UNAVAILABLE,
+            reason=(
+                "This alignment has no recorded reference to read GC "
+                "content from."
+            ),
+        )
+
+    # Check that the reference has GC tracks.
+    gc_tracks = (reference.facts or {}).get("gc_tracks")
+    if not gc_tracks:
+        return SuggestionCard(
+            kind="gc_bias",
+            category="ASSEMBLY_QC",
+            title=title,
+            description=description,
+            status=CardStatus.UNAVAILABLE,
+            reason=(
+                f"Reference {reference.name!r} has no GC tracks. "
+                f"Compute GC tracks for the reference first."
+            ),
+        )
+
+    # Check that the BAM has coverage depth.
+    coverage_report = (obj.facts or {}).get("coverage_report")
+    if not coverage_report:
+        return SuggestionCard(
+            kind="gc_bias",
+            category="ASSEMBLY_QC",
+            title=title,
+            description=description,
+            status=CardStatus.UNAVAILABLE,
+            reason=(
+                "This alignment has no coverage depth computed. "
+                "Compute coverage depth first."
+            ),
+        )
+
+    return SuggestionCard(
+        kind="gc_bias",
+        category="ASSEMBLY_QC",
+        title=title,
+        description=description,
+        why=(
+            "The alignment has both GC tracks on the reference and "
+            "depth on the BAM, so the bias curve is one run away."
+        ),
+        status=CardStatus.AVAILABLE,
+        launch={
+            "endpoint": "/pipelines/gc-bias",
+            "body": {"bam_id": str(obj.id)},
+        },
+    )
+
+
+def build_salmon_quantify_card(
 def build_salmon_quantify_card(obj, transcriptomes) -> SuggestionCard | None:
     """Alignment-free transcript quantification for RNA-seq reads.
 
@@ -2844,6 +2929,7 @@ CARD_BUILDERS: tuple[tuple[str, object], ...] = (
         lambda obj, ctx: build_feature_coverage_card(obj, ctx.annotations),
     ),
     ("coverage", lambda obj, ctx: build_coverage_card(obj)),
+    ("gc_bias", lambda obj, ctx: build_gc_bias_card(obj, ctx)),
     ("annotate", lambda obj, ctx: build_annotate_card(obj, ctx.annotation_inputs)),
     ("phase", lambda obj, ctx: build_phase_card(obj, ctx.phase_inputs)),
     ("annotate_genome", lambda obj, ctx: build_annotate_genome_card(obj)),

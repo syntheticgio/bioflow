@@ -136,6 +136,9 @@ const SUPPRESSED = new Set([
   "bam_stats_report",
   "insert_size_histogram",
   "mapq_histogram",
+  // Rendered by GcBiasChart, not by FactsTable.
+  "gc_bias",
+  "gc_bias_status",
 ]);
 
 /**

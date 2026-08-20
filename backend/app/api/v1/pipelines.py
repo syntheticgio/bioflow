@@ -825,6 +825,29 @@ async def launch_coverage(body: CoverageRequest, owner: OwnerDep) -> JobOut:
     return JobOut.of(job)
 
 
+    job = await pipeline_service.launch_coverage(
+        bam_id=body.bam_id, owner=owner, regions_id=body.regions_id
+    )
+    return JobOut.of(job)
+
+
+class GcBiasRequest(BaseModel):
+    bam_id: PydanticObjectId
+
+
+@router.post("/gc-bias", response_model=JobOut, status_code=status.HTTP_201_CREATED)
+async def launch_gc_bias(body: GcBiasRequest, owner: OwnerDep) -> JobOut:
+    """Queue coverage-vs-GC bias computation for a BAM.
+
+    Read-only: merges facts onto the BAM, no new object.  Requires the BAM
+    to have coverage depth (mosdepth) and the reference to have GC tracks
+    (``gc_tracks``), both of which use the same window grid so the join is a
+    direct (contig, window_index) lookup.
+    """
+    job = await pipeline_service.launch_gc_bias(
+        bam_id=body.bam_id, owner=owner
+    )
+    return JobOut.of(job)
 
 
 @router.get("/coverage/{object_id}/report")

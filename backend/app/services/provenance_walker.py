@@ -223,6 +223,9 @@ _NO_NARRATIVE_STEP: frozenset[str] = frozenset(
         # onto an existing reads object, same class as gc_tracks, meryl, and
         # annotate_genome.
         "classify_reads",
+        # GC bias analysis is read-only facts merged onto an existing BAM,
+        # same class as gc_tracks and coverage.
+        "gc_bias",
         # AI features that write a field rather than producing an object.
         "summarize_object",
         "summarize_de_results",

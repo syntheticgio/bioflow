@@ -241,6 +241,23 @@ export interface FeatureDistribution {
   intergenic: number;
 }
 
+/** One bin in the coverage-vs-GC bias curve. */
+export interface GcBiasBin {
+  gc_pct: number;
+  normalized_coverage: number;
+  window_count: number;
+}
+
+/** Facts produced by the gc_bias job. */
+export interface GcBiasFacts {
+  gc_bias_status?: "ok";
+  gc_bias?: {
+    gc_bias_bins: GcBiasBin[];
+    genome_avg_depth: number;
+    gc_bias_computed: boolean;
+  };
+}
+
 /** Facts produced by the run_bam_stats job. Read from ObjectDetail.facts
  * under the bam_stats_ prefix -- see BamResults.tsx. */
 export interface BamStatsFacts {

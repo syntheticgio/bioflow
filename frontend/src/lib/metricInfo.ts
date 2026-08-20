@@ -650,6 +650,13 @@ export const METRIC_INFO: Record<string, MetricInfo> = {
     computed:
       "60 buckets spanning zero to three times the mean depth, so an amplicon panel and a 30× genome both get a readable curve. Everything beyond that span lands in one overflow bucket at the right rather than being dropped.",
   },
+  "ui.chart_gc_bias": {
+    term: "GC bias curve",
+    description:
+      "How read depth varies with GC content across the reference. A dome peaking at mid-GC with both tails dropping is PCR amplification bias, fixable at the bench. A flat line with drops only at the extremes is normal. Coverage tracking GC upward without limit suggests a library or capture artifact rather than biology.",
+    computed:
+      "Per-window depth from mosdepth is joined with per-window GC content on the same window grid, then binned by GC percentage. Each bin's mean depth is normalized to the genome-wide average, so a flat curve at 1× means uniform coverage across GC content.",
+  },
   "ui.chart_insert_size": {
     term: "Insert size",
     description:

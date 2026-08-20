@@ -2307,6 +2307,34 @@ async def _apply_assess_misassemblies(result: dict, *, owner: str) -> None:
         reference_id=facts.get("assembly_reference_id"),
     )
 
+async def _apply_gc_bias(result: dict, *, owner: str) -> None:
+    """Record coverage-vs-GC bias curve facts on the BAM."""
+    object_id = result.get("object_id")
+    facts = result.get("facts") or {}
+    if not object_id or not facts:
+        return
+
+    obj = await DataObject.get(PydanticObjectId(object_id))
+    if obj is None:
+        log.warning("gc_bias_object_missing", object_id=object_id)
+        return
+
+    await obj.set(
+        {
+            DataObject.facts: {**obj.facts, **facts},
+            DataObject.updated_at: datetime.now(UTC),
+        }
+    )
+
+    log.info(
+        "gc_bias_applied",
+        object_id=object_id,
+        status=facts.get("gc_bias_status"),
+    )
+
+
+async def _apply_analyze_gc_tracks(result: dict, *, owner: str) -> None:
+    """Record per-contig GC content and skew tracks on the assembly."""
 async def _apply_analyze_gc_tracks(result: dict, *, owner: str) -> None:
     """Record per-contig GC content and skew tracks on the assembly."""
     object_id = result.get("object_id")
@@ -3719,6 +3747,7 @@ _APPLIERS = {
     "call_structural_variants": _apply_call_structural_variants,
     "merge_structural_variants": _apply_merge_structural_variants,
     "run_bam_stats": _apply_run_bam_stats,
+    "gc_bias": _apply_gc_bias,
     "feature_coverage": _apply_feature_coverage,
     "coverage": _apply_coverage,
     "run_transcript_qc": _apply_run_transcript_qc,

@@ -5267,6 +5267,90 @@ async def launch_coverage(
 
 GC_BIAS_MEM_MB = 512
 
+GC_BIAS_MEM_MB = 512
+
+
+async def launch_gc_bias(
+    *,
+    bam_id: PydanticObjectId,
+    owner: str,
+    resource_override: bool = False,
+) -> Job:
+    """Queue coverage-vs-GC bias computation for one BAM.
+
+    Read-only: merges facts onto the BAM, no new object.  Requires the BAM to
+    have coverage depth (mosdepth) and the reference to have GC tracks
+    (``gc_tracks``), both of which use the same window grid so the join is a
+    direct (contig, window_index) lookup.
+
+    The card refuses with a reason naming the missing step rather than auto-
+    chaining those jobs, per the issue-640 spec.
+    """
+    from app.queue import queue
+    from app.services import object_service
+
+    bam = await object_service.get_object(bam_id, owner=owner)
+    _check_bam_stats_callable(bam)
+
+    # Resolve the reference this BAM was aligned against.
+    reference = await reference_for_bam(bam)
+    if reference is None:
+        raise ValidationError(
+            f"Cannot determine which reference {bam.name!r} was aligned "
+            f"against. Choose one.",
+            details={"bam_id": str(bam.id), "needs": "reference_id"},
+        )
+
+    # Read GC tracks from the reference's facts.
+    gc_tracks = (reference.facts or {}).get("gc_tracks")
+    if not gc_tracks:
+        raise ValidationError(
+            f"Reference {reference.name!r} has no GC tracks. "
+            f"Compute GC tracks first.",
+            details={"reference_id": str(reference.id)},
+        )
+
+    # Read coverage report path from the BAM's facts.
+    coverage_report = (bam.facts or {}).get("coverage_report")
+    if not coverage_report:
+        raise ValidationError(
+            f"BAM {bam.name!r} has no coverage depth. "
+            f"Compute coverage depth first.",
+            details={"bam_id": str(bam.id)},
+        )
+
+    coverage_report_path = str(settings.coverage_dir / str(bam.id) / coverage_report)
+
+    payload: dict = {
+        "bam_id": str(bam.id),
+        "project_id": str(bam.project_id),
+        "gc_tracks": gc_tracks,
+        "coverage_report_path": coverage_report_path,
+    }
+
+    job = await queue.enqueue(
+        "gc_bias",
+        owner=owner,
+        payload=payload,
+        job_class=JobClass.COMPUTE,
+        resources=JobResources(cpu=1, mem_mb=GC_BIAS_MEM_MB, io=IoClass.LIGHT),
+        max_attempts=1,
+        dedup_key=f"gc_bias:{bam.id}",
+        project_id=bam.project_id,
+        object_id=bam.id,
+        resource_override=resource_override,
+    )
+    if job is None:
+        raise ConflictError(
+            "GC bias computation is already queued or running for this BAM",
+            details={"bam_id": str(bam.id)},
+        )
+
+    log.info("gc_bias_launched", job_id=str(job.id), bam_id=str(bam.id))
+    return job
+
+
+async def launch_salmon_quantify(
 async def launch_salmon_quantify(
     *,
     reads_id: PydanticObjectId,
