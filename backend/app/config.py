@@ -214,6 +214,11 @@ class Settings(BaseSettings):
     # not the tool's own quast.py, so the entry point on PATH is stable
     # regardless of where the tarball unpacks.
     quast_path: str = "quast.py"
+    # Aggregate QC reporting over other tools' output. /usr/local/bin/multiqc
+    # is a wrapper execing an isolated venv at /opt/multiqc/env -- MultiQC
+    # pins kaleido==0.2.1 against NanoPlot's 1.3.0, so it cannot share the
+    # image's Python environment. See backend/scripts/install-multiqc.sh.
+    multiqc_path: str = "multiqc"
     # /usr/local/bin/craq, a wrapper installed by
     # backend/scripts/install-craq.sh that execs the real Perl entrypoint
     # at its install location -- bin/craq resolves its src/ siblings
@@ -405,6 +410,21 @@ class Settings(BaseSettings):
         something that is never shared and cost a blob record per run.
         """
         return self.bioinfo_home / "qc_reports"
+
+    @property
+    def multiqc_reports_dir(self) -> Path:
+        """Generated MultiQC aggregate reports, keyed by **project** id.
+
+        Keyed by project rather than object -- the one artifact directory
+        here that is, because a MultiQC report summarises many objects and
+        belongs to none of them. Filing it under whichever object happened
+        to launch it would orphan the report when that object is deleted.
+
+        Outside objects/ for the same reason as qc_reports_dir: the report
+        is derivative and regenerable, and regenerating overwrites in place
+        rather than accumulating versions.
+        """
+        return self.bioinfo_home / "multiqc_reports"
 
     @property
     def bam_stats_dir(self) -> Path:

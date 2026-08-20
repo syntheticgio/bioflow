@@ -514,6 +514,18 @@ RUN chmod +x /srv/scripts/install-quast.sh \
     && QUAST_VERSION="${QUAST_VERSION}" \
        /srv/scripts/install-quast.sh
 
+# MultiQC, aggregate QC reporting over other tools' output. Installed into
+# its own venv, which is a requirement rather than a preference: MultiQC
+# pins kaleido==0.2.1 and this image carries kaleido 1.3.0 for NanoPlot, so
+# installing it into the shared environment downgrades kaleido and breaks
+# long-read QC with nothing failing until a long-read job runs. The script
+# asserts that invariant at build time -- see its header.
+ARG MULTIQC_VERSION=1.35
+COPY scripts/install-multiqc.sh /srv/scripts/install-multiqc.sh
+RUN chmod +x /srv/scripts/install-multiqc.sh \
+    && MULTIQC_VERSION="${MULTIQC_VERSION}" \
+       /srv/scripts/install-multiqc.sh
+
 # --- CRAQ --------------------------------------------------------------
 #
 # Reference-free assembly error detection. Not packaged for Debian trixie;
