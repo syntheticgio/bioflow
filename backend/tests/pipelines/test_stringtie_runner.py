@@ -13,22 +13,37 @@ from pathlib import Path
 from app.pipelines import stringtie_runner
 
 # A transcript StringTie matched to the reference: carries reference_id.
-MATCHED_GTF = """\
-# stringtie in.bam -G ref.gtf -o out.gtf -p 2
-# StringTie version 2.2.1
-chr1\tStringTie\ttranscript\t101\t500\t1000\t+\t.\tgene_id "STRG.1"; transcript_id "STRG.1.1"; reference_id "T1"; ref_gene_id "G1"; cov "30.000000"; FPKM "3333333.500000"; TPM "1000000.000000";
-chr1\tStringTie\texon\t101\t200\t1000\t+\t.\tgene_id "STRG.1"; transcript_id "STRG.1.1"; exon_number "1"; reference_id "T1"; ref_gene_id "G1"; cov "30.000000";
-chr1\tStringTie\texon\t401\t500\t1000\t+\t.\tgene_id "STRG.1"; transcript_id "STRG.1.1"; exon_number "2"; reference_id "T1"; ref_gene_id "G1"; cov "30.000000";
-"""
+MATCHED_GTF = (
+    "# stringtie in.bam -G ref.gtf -o out.gtf -p 2\n"
+    "# StringTie version 2.2.1\n"
+    'chr1\tStringTie\ttranscript\t101\t500\t1000\t+\t.'
+    '\tgene_id "STRG.1"; transcript_id "STRG.1.1";'
+    ' reference_id "T1"; ref_gene_id "G1";'
+    ' cov "30.000000"; FPKM "3333333.500000"; TPM "1000000.000000";\n'
+    'chr1\tStringTie\texon\t101\t200\t1000\t+\t.'
+    '\tgene_id "STRG.1"; transcript_id "STRG.1.1";'
+    ' exon_number "1"; reference_id "T1";'
+    ' ref_gene_id "G1"; cov "30.000000";\n'
+    'chr1\tStringTie\texon\t401\t500\t1000\t+\t.'
+    '\tgene_id "STRG.1"; transcript_id "STRG.1.1";'
+    ' exon_number "2"; reference_id "T1";'
+    ' ref_gene_id "G1"; cov "30.000000";\n'
+)
 
 # A transcript StringTie proposed: no reference_id, no ref_gene_id.
-NOVEL_GTF = """\
-# stringtie in.bam -G ref.gtf -o out.gtf -p 2
-# StringTie version 2.2.1
-chr1\tStringTie\ttranscript\t1201\t1700\t1000\t+\t.\tgene_id "STRG.1"; transcript_id "STRG.1.1"; cov "60.000000"; FPKM "5000000.000000"; TPM "1000000.000000";
-chr1\tStringTie\texon\t1201\t1300\t1000\t+\t.\tgene_id "STRG.1"; transcript_id "STRG.1.1"; exon_number "1"; cov "60.000000";
-chr1\tStringTie\texon\t1601\t1700\t1000\t+\t.\tgene_id "STRG.1"; transcript_id "STRG.1.1"; exon_number "2"; cov "60.000000";
-"""
+NOVEL_GTF = (
+    "# stringtie in.bam -G ref.gtf -o out.gtf -p 2\n"
+    "# StringTie version 2.2.1\n"
+    'chr1\tStringTie\ttranscript\t1201\t1700\t1000\t+\t.'
+    '\tgene_id "STRG.1"; transcript_id "STRG.1.1";'
+    ' cov "60.000000"; FPKM "5000000.000000"; TPM "1000000.000000";\n'
+    'chr1\tStringTie\texon\t1201\t1300\t1000\t+\t.'
+    '\tgene_id "STRG.1"; transcript_id "STRG.1.1";'
+    ' exon_number "1"; cov "60.000000";\n'
+    'chr1\tStringTie\texon\t1601\t1700\t1000\t+\t.'
+    '\tgene_id "STRG.1"; transcript_id "STRG.1.1";'
+    ' exon_number "2"; cov "60.000000";\n'
+)
 
 
 def test_assemble_command_builds_reference_guided_argv():
