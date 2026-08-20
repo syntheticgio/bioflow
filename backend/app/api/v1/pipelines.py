@@ -901,6 +901,7 @@ async def launch_phase_variants(body: PhaseVariantsRequest, owner: OwnerDep) -> 
         object_id=body.object_id,
         owner=owner,
         alignment_ids=body.alignment_ids,
+        resource_override=body.resource_override,
         # mode/sample arrive at the top level of the request body; fold them
         # into params so the launcher (and the graph-node path, which carries
         # them inside params) share one shape.
@@ -909,7 +910,6 @@ async def launch_phase_variants(body: PhaseVariantsRequest, owner: OwnerDep) -> 
             "mode": body.mode,
             "sample": body.sample,
         },
-        resource_override=body.resource_override,
     )
     return JobOut.of(job)
 
