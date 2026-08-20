@@ -273,6 +273,38 @@ project with one usable reference refuse to align. The tests were green
 because they fed the rules hand-built objects that already looked the way
 the rules expected.
 
+**Why the worktree script leaked two volumes per run ([#719](https://github.com/syntheticgio/bioflow/issues/719)).**
+`run-worktree-tests.sh`'s private Mongo (and, with `--with-sshd`, the sshd
+sidecar) both declare anonymous `VOLUME`s in their images -- `mongo:7`
+declares `/data/db` and `/data/configdb`; `lscr.io/linuxserver/openssh-server`
+declares `/config` (confirmed via `docker history --no-trunc`). Neither
+`docker run -d --rm` nor the cleanup trap's `docker rm -f` removes an
+anonymous volume -- only `-v` does. The trap fired every time and really did
+remove the container, so `cleanup()` *read* as correct; it just silently left
+one or two ~340 MB volumes behind per run. 237 runs was 75 GB of dangling
+volumes before anyone noticed, because nothing in the repo runs
+`docker system df` or reports volume count. Fixed by changing `cleanup()` to
+`docker rm -fv`, guarded against regressing by
+`ops/tests/test_worktree_test_volume_leak.py`, which starts a real
+`mongo:7`/sshd container, cleans it up the same way, and asserts the dangling
+volume count is unchanged -- plus a static check that `cleanup()` still
+passes `-v`.
+
+That 75 GB (plus reclaimable build cache and images) does not remove itself,
+and nothing here should: `docker volume prune` is machine-wide and does not
+know which volumes belong to this project versus another one running
+alongside it. Reclaim manually, dry-run first:
+
+```bash
+docker volume ls -qf dangling=true | wc -l   # how many, before touching anything
+docker volume prune                          # asks for confirmation; removes all dangling volumes
+docker builder prune --dry-run               # reclaimable build cache, without deleting
+docker builder prune                         # actually reclaim it
+docker image prune -a --dry-run              # unused images, without deleting -- this repo
+                                              # rebuilds the backend image often, so check what
+                                              # would go before running for real
+```
+
 ## Closing out a TODO entry
 
 **The rule:** when work lands, mark the entry ` — FIXED`, note what shipped,
