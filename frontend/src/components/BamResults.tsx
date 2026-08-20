@@ -266,7 +266,9 @@ export function BamResults({ obj }: { obj: ObjectDetailData }) {
       {/* Same independent-job reasoning as GcBiasChart above -- gated on
           its own fact since it is a second, separately-launched aggregation
           of the same underlying join. */}
-      {f.gc_blob_status === "ok" && <ContigBlobChart objectId={obj.id} />}
+      {f.gc_blob_status === "ok" && (
+        <ContigBlobChart objectId={obj.id} partial={f.gc_bias_partial} />
+      )}
     </>
   );
 }

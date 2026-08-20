@@ -36,7 +36,13 @@ const MAX_RADIUS = 14;
  * identified rather than merely separated is the mistake the InfoMarker
  * below exists to head off.
  */
-export function ContigBlobChart({ objectId }: { objectId: string }) {
+export function ContigBlobChart({
+  objectId,
+  partial,
+}: {
+  objectId: string;
+  partial?: boolean;
+}) {
   const { data, isLoading, isError } = useQuery({
     queryKey: ["gc-blob", objectId],
     queryFn: () => api.gcBlobReport(objectId),
@@ -56,12 +62,20 @@ export function ContigBlobChart({ objectId }: { objectId: string }) {
         <div style={{ color: "var(--text-faint)", fontSize: 12 }}>
           Loading the per-contig report…
         </div>
-      ) : isError || !data || !data.contigs.length ? (
+      ) : isError || !data ? (
         <div style={{ color: "var(--text-faint)", fontSize: 12 }}>
           Couldn't load the GC-vs-coverage report.
         </div>
+      ) : !data.contigs.length ? (
+        <div style={{ color: "var(--text-faint)", fontSize: 12 }}>
+          No contigs were reported.
+        </div>
       ) : (
-        <BlobScatter contigs={data.contigs} droppedCount={data.dropped_count} />
+        <BlobScatter
+          contigs={data.contigs}
+          droppedCount={data.dropped_count}
+          partial={partial}
+        />
       )}
     </div>
   );
@@ -70,9 +84,11 @@ export function ContigBlobChart({ objectId }: { objectId: string }) {
 function BlobScatter({
   contigs,
   droppedCount,
+  partial,
 }: {
   contigs: GcBlobContig[];
   droppedCount: number;
+  partial?: boolean;
 }) {
   const pad = { top: 10, right: 16, bottom: 28, left: 44 };
   const plotW = W - pad.left - pad.right;
@@ -91,10 +107,15 @@ function BlobScatter({
     );
   }
   const depths = scored.map((c) => Math.max(c.mean_depth, 0.1));
-  const minDepth = Math.min(...depths, 0.1);
+  const minDepth = Math.min(...depths);
   const maxDepth = Math.max(...depths, 1);
   const lengths = scored.map((c) => c.length);
-  const minLen = Math.min(...lengths, 0);
+  // Baseline is the smallest *observed* contig, not zero: a contig at
+  // minLen renders at MIN_RADIUS as "the smallest thing on this plot",
+  // not "arbitrarily close to zero area". Keeps this guard meaningful --
+  // maxLen === minLen fires whenever every kept contig is the same length,
+  // not only in the degenerate case of a zero-length contig.
+  const minLen = Math.min(...lengths);
   const maxLen = Math.max(...lengths, 1);
 
   const x = (gc: number) => pad.left + (gc / 100) * plotW;
@@ -162,12 +183,22 @@ function BlobScatter({
         ))}
       </svg>
 
+      {/* Same upstream-truncation warning as GcBiasChart: gc_tracks caps at
+          MAX_STORED_CONTIGS (50) *before* this plot's own cumulative-length
+          cap ever runs, so on a fragmented assembly the real omission can be
+          far larger than droppedCount below reflects. */}
+      {partial && (
+        <div style={{ fontSize: 10, color: "#999", marginTop: 4, fontStyle: "italic" }}>
+          Showing largest contigs only
+        </div>
+      )}
+
       {/* Load-bearing, not decorative: without this line a clean-looking
           plot is indistinguishable from one whose contamination cluster was
           entirely made of short contigs the cap dropped. Rendered whenever
           droppedCount > 0, with no additional gate. */}
       <div style={{ color: "var(--text-faint)", fontSize: 12, marginTop: 4 }}>
-        showing {contigs.length.toLocaleString()} contigs covering 99% of bases
+        showing {contigs.length.toLocaleString()} contigs
         {droppedCount > 0
           ? `; ${droppedCount.toLocaleString()} shorter contig${droppedCount === 1 ? "" : "s"} omitted`
           : ""}
