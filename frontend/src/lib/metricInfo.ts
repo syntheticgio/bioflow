@@ -752,6 +752,13 @@ export const METRIC_INFO: Record<string, MetricInfo> = {
     computed:
       "Spearman's rho over the same log-normalised top-variance genes the projection uses, so the two plots always describe the same gene set. Spearman rather than Pearson because even after log\u2082 a handful of very highly expressed genes carry most of the remaining spread, and ranking bounds each gene's contribution. The colour scale spans the observed off-diagonal range rather than a fixed \u22121 to 1 \u2014 real samples in one experiment correlate somewhere in the 0.9s, and a fixed scale flattens exactly the differences worth seeing. Not drawn below three samples, where there is no structure to show.",
   },
+  "ui.chart_pvalue_histogram": {
+    term: "P-value histogram",
+    description:
+      "The raw p-values of every tested gene, binned across the full 0 to 1 range. The check that can invalidate the plots below it: on a sound model most p-values sit near 0 (the signal) and the rest lie flat (the nulls). A hill peaking in the middle means the test is conservative or the variance is overestimated — the volcano reads empty even when there is signal. A spike near 1 or a U-shape means the model is misspecified, usually a batch effect or a design that does not match the samples, and the volcano and MA are actively misleading.",
+    computed:
+      "Raw p-values, deliberately not adjusted: an adjusted histogram has a different expected shape and none of this diagnostic value. Binned in the run's facts over the full gene set, because a plot-sized fetch is truncated and sorted and would drop exactly the null genes the flat baseline is made of. Genes with no p-value were not tested and are excluded, not binned at zero. The dashed line is the height a bin would have if the null p-values were perfectly uniform: the binned count over the 20 bins.",
+  },
   "ui.chart_volcano": {
     term: "Volcano plot",
     description:

@@ -5,6 +5,7 @@ import type { DeRow, ObjectDetail as ObjectDetailData } from "../api/types";
 import { AiSummary } from "./AiSummary";
 import {
   MAPlot,
+  PValueHistogram,
   SampleCorrelationHeatmap,
   SamplePcaPlot,
   VolcanoPlot,
@@ -34,6 +35,11 @@ type DeFacts = {
   significant_genes?: number;
   significant_up?: number;
   significant_down?: number;
+  p_value_histogram?: {
+    bins: number[];
+    bin_width: number;
+    n: number;
+  };
   sample_pca?: PcaPoint[];
   sample_correlation?: SampleCorrelation;
   pydeseq2_version?: string;
@@ -237,6 +243,27 @@ export function ExpressionResults({ obj }: { obj: ObjectDetailData }) {
             projection above uses. Replicates should form a bright block on the
             diagonal. A block that does not line up with the conditions is
             structure the first two components missed — often a batch effect.
+          </div>
+        </div>
+      )}
+
+      {f.p_value_histogram && f.p_value_histogram.n > 0 && (
+        <div className="section">
+          <div className="section-title">
+            P-value histogram
+            <InfoMarker metric="ui.chart_pvalue_histogram" />
+          </div>
+          <PValueHistogram
+            bins={f.p_value_histogram.bins}
+            n={f.p_value_histogram.n}
+            binWidth={f.p_value_histogram.bin_width}
+          />
+          <div className="section-note">
+            Raw p-values for every tested gene, in bins of 0.05. A flat
+            baseline with a spike near 0 is healthy; a spike near 1 or a
+            U-shape means the model is misspecified and the plots below are
+            actively misleading. The dashed line is where the bins sit if the
+            null p-values were perfectly uniform.
           </div>
         </div>
       )}

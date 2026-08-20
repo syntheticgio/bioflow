@@ -298,6 +298,63 @@ class TestResultsRoundTrip:
         assert de_runner.read_results(path)[0]["padj"] == 1.2e-124
 
 
+class TestPValueHistogram:
+    """The one summary where the whole distribution, not the top of it, is
+    the point.
+
+    A wrong bin edge or a null read as zero both change what the chart says
+    about a broken run, so the binning itself is checked here rather than in
+    the SVG that draws it.
+    """
+
+    def test_uniform_p_values_land_one_per_bin(self):
+        rows = [{"p_value": (i + 0.5) / 20} for i in range(20)]
+        hist = de_runner._pvalue_histogram(rows)
+        assert hist["bins"] == [1] * 20
+        assert hist["n"] == 20
+        assert hist["bin_width"] == 0.05
+
+    def test_null_p_values_are_excluded_not_binned_at_zero(self):
+        """A gene DESeq2 declined to test is not a gene with p = 0, and
+        binning it there would add a fake spike of perfect signal."""
+        rows = [
+            {"p_value": 0.02},
+            {"p_value": None, "padj": None},
+        ]
+        hist = de_runner._pvalue_histogram(rows)
+        assert sum(hist["bins"]) == 1
+        assert hist["n"] == 1
+        assert hist["bins"][0] == 1
+
+    def test_a_p_value_of_one_lands_in_the_last_bin(self):
+        """The spike near 1 is the misspecified-model signature the chart
+        exists to show, and a bin edge that drops p = 1.0 would hide it."""
+        rows = [{"p_value": 1.0}, {"p_value": 0.999999}]
+        hist = de_runner._pvalue_histogram(rows)
+        assert hist["bins"][-1] == 2
+        assert hist["bins"][:-1] == [0] * 19
+
+    def test_a_p_value_of_zero_lands_in_the_first_bin(self):
+        hist = de_runner._pvalue_histogram([{"p_value": 0.0}])
+        assert hist["bins"][0] == 1
+        assert hist["bins"][1] == 0
+
+    def test_the_facts_carry_the_histogram(self):
+        matrix = de_runner.CountMatrix(
+            genes=["a", "b"],
+            samples=["s1", "s2"],
+            conditions=["c", "d"],
+            values=[[1, 1], [2, 2]],
+        )
+        rows = [
+            {"gene": "a", "p_value": 0.01, "padj": 0.05},
+            {"gene": "b", "p_value": 0.9, "padj": 0.95},
+        ]
+        facts = de_runner._facts(rows, matrix, "d", "c", 0.05)
+        assert facts["p_value_histogram"]["n"] == 2
+        assert facts["genes_tested"] == 2
+
+
 class TestSampleNaming:
     @pytest.mark.parametrize(
         ("filename", "expected"),
