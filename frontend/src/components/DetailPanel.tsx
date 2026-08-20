@@ -73,6 +73,7 @@ import { ClassifyReadsDialog } from "./ClassifyReadsDialog";
 import { ScaffoldDialog } from "./ScaffoldDialog";
 import { QuantifyDialog } from "./QuantifyDialog";
 import { DifferentialExpressionDialog } from "./DifferentialExpressionDialog";
+import { MergeTranscriptsDialog } from "./MergeTranscriptsDialog";
 import { VariantDialog } from "./VariantDialog";
 import { PhaseDialog } from "./PhaseDialog";
 import { FilterLongReadsDialog } from "./FilterLongReadsDialog";
@@ -481,6 +482,7 @@ function ObjectDetail({ id }: { id: string }) {
   const [filterLongReadsOpen, setFilterLongReadsOpen] = useState(false);
   const [scaffoldOpen, setScaffoldOpen] = useState(false);
   const [deOpen, setDeOpen] = useState(false);
+  const [mergeOpen, setMergeOpen] = useState(false);
   const [phaseOpen, setPhaseOpen] = useState(false);
   // The suggestion card's launch body, when a dialog was opened by "Adjust…"
   // rather than from the Computations row. One piece of state for every
@@ -806,6 +808,7 @@ function ObjectDetail({ id }: { id: string }) {
   // project's counts files, so this is a shortcut into the same
   // project-scoped dialog rather than a per-file operation in disguise.
   const canDifferentialExpression = obj.role === "counts";
+  const canMergeTranscripts = obj.role === "assembled_transcripts";
 
   // FASTA, excluding protein/transcript roles -- not gated on provenance, so
   // an uploaded assembly is as eligible as one this application produced.
@@ -1039,6 +1042,8 @@ function ObjectDetail({ id }: { id: string }) {
                   onScaffold={() => setScaffoldOpen(true)}
                   canDifferentialExpression={canDifferentialExpression}
                   onDifferentialExpression={() => setDeOpen(true)}
+                  canMergeTranscripts={canMergeTranscripts}
+                  onMergeTranscripts={() => setMergeOpen(true)}
                   canQC={canQC}
                   hasQc={hasQc}
                   hasTrim={hasTrim}
@@ -1219,6 +1224,12 @@ function ObjectDetail({ id }: { id: string }) {
         <DifferentialExpressionDialog
           projectId={obj.project_id}
           onClose={() => setDeOpen(false)}
+        />
+      )}
+      {mergeOpen && (
+        <MergeTranscriptsDialog
+          projectId={obj.project_id}
+          onClose={() => setMergeOpen(false)}
         />
       )}
     </div>

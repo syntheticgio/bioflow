@@ -71,6 +71,30 @@ export interface DeRequest {
   resource_override?: boolean;
 }
 
+/** One assembled-transcript GTF, as the merge dialog lists it. */
+export interface MergeTranscript {
+  object_id: string;
+  name: string;
+  transcript_count: number | null;
+  novel_transcript_count: number | null;
+  gene_count: number | null;
+}
+
+export interface MergeTranscriptsDefaults {
+  assemblies: MergeTranscript[];
+  available: boolean;
+}
+
+export interface MergeTranscriptsRequest {
+  project_id: string;
+  /** The N assembled-transcript GTFs to merge. */
+  gtf_object_ids: string[];
+  reference_id?: string | null;
+  output_name?: string | null;
+  resource_override?: boolean;
+}
+
+
 /** One gene's result. Nulls are real: DESeq2 leaves padj unset for genes it
  * filtered out of multiple-testing correction. */
 export interface DeRow {

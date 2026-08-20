@@ -76,6 +76,83 @@ def test_assemble_command_defaults_to_one_thread():
     assert argv[-2:] == ["-p", "1"]
 
 
+def test_merge_command_builds_positional_argv():
+    argv = stringtie_runner.merge_command(
+        stringtie_path="/usr/bin/stringtie",
+        gtfs=[Path("/w/a.gtf"), Path("/w/b.gtf"), Path("/w/c.gtf")],
+        out_gtf=Path("/w/merged.gtf"),
+    )
+    assert argv == [
+        "/usr/bin/stringtie",
+        "--merge",
+        "-o",
+        "/w/merged.gtf",
+        "/w/a.gtf",
+        "/w/b.gtf",
+        "/w/c.gtf",
+    ]
+
+
+def test_merge_command_preserves_input_order():
+    # The order is meaningful to StringTie's resolution of identical loci, so
+    # it must survive the builder unchanged.
+    paths = [Path(f"/w/{i}.gtf") for i in range(5)]
+    argv = stringtie_runner.merge_command(
+        stringtie_path="stringtie", gtfs=paths, out_gtf=Path("/w/out.gtf")
+    )
+    assert argv[-5:] == [str(p) for p in paths]
+
+
+def test_merge_command_adds_reference_only_when_passed():
+    without = stringtie_runner.merge_command(
+        stringtie_path="stringtie",
+        gtfs=[Path("/w/a.gtf")],
+        out_gtf=Path("/w/out.gtf"),
+    )
+    assert "-G" not in without
+
+    with_ref = stringtie_runner.merge_command(
+        stringtie_path="stringtie",
+        gtfs=[Path("/w/a.gtf")],
+        out_gtf=Path("/w/out.gtf"),
+        reference_gtf=Path("/w/ref.gff3"),
+    )
+    assert with_ref.index("-G") < with_ref.index("/w/a.gtf")
+    assert "/w/ref.gff3" in with_ref
+
+
+def test_merge_command_omits_min_filters_by_default():
+    argv = stringtie_runner.merge_command(
+        stringtie_path="stringtie",
+        gtfs=[Path("/w/a.gtf")],
+        out_gtf=Path("/w/out.gtf"),
+    )
+    assert "-m" not in argv
+    assert "-c" not in argv
+
+
+def test_merge_command_accepts_min_len_and_min_cov():
+    argv = stringtie_runner.merge_command(
+        stringtie_path="stringtie",
+        gtfs=[Path("/w/a.gtf")],
+        out_gtf=Path("/w/out.gtf"),
+        min_len=100,
+        min_cov=5,
+    )
+    assert argv[argv.index("-m") + 1] == "100"
+    assert argv[argv.index("-c") + 1] == "5"
+
+
+def test_merge_command_rejects_an_empty_input_list():
+    try:
+        stringtie_runner.merge_command(
+            stringtie_path="stringtie", gtfs=[], out_gtf=Path("/w/out.gtf")
+        )
+    except ValueError:
+        return
+    raise AssertionError("merge_command should reject an empty GTF list")
+
+
 def test_parse_gtf_counts_a_matched_transcript_as_not_novel():
     facts = stringtie_runner.parse_gtf(MATCHED_GTF)
     assert facts["transcript_count"] == 1

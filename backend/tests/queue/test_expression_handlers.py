@@ -590,3 +590,45 @@ def test_transcript_assembly_result_dict_carries_counts_and_output(tmp_path):
     assert result["gene_count"] == 2
     assert result["output"]["name"] == "sample.transcripts.gtf"
     assert result["output"]["tmp_path"] == str(out_gtf)
+
+
+def test_merge_transcripts_result_dict_carries_all_input_ids_and_counts(tmp_path):
+    """The dict `results._apply_merge_transcripts` consumes.
+
+    Asserted as a unit rather than through a real subprocess because the
+    handler's contract with results.py is the part that breaks silently: a
+    renamed key here fails nothing until a real job produces an object with
+    no facts on it.
+    """
+    from app.queue import expression_handlers
+
+    out_gtf = tmp_path / "merged.transcripts.gtf"
+    out_gtf.write_text(
+        '# StringTie version 2.2.1\n'
+        'chr1\tStringTie\ttranscript\t101\t500\t1000\t+\t.\t'
+        'gene_id "STRG.1"; transcript_id "STRG.1.1"; reference_id "T1";\n'
+        'chr1\tStringTie\ttranscript\t1201\t1700\t1000\t+\t.\t'
+        'gene_id "STRG.2"; transcript_id "STRG.2.1";\n'
+    )
+
+    result = expression_handlers._merge_transcripts_result_dict(
+        object_ids=["64b7f0000000000000000001", "64b7f0000000000000000002"],
+        project_id="64b7f0000000000000000003",
+        job_id="64b7f0000000000000000004",
+        out_gtf=out_gtf,
+        name="merged.transcripts.gtf",
+        reference_object_id=None,
+    )
+
+    assert result["object_ids"] == [
+        "64b7f0000000000000000001",
+        "64b7f0000000000000000002",
+    ]
+    assert result["project_id"] == "64b7f0000000000000000003"
+    assert result["reference_object_id"] is None
+    assert result["merged_by"] == "stringtie"
+    assert result["transcript_count"] == 2
+    assert result["novel_transcript_count"] == 1
+    assert result["gene_count"] == 2
+    assert result["output"]["name"] == "merged.transcripts.gtf"
+    assert result["output"]["tmp_path"] == str(out_gtf)

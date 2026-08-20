@@ -94,6 +94,11 @@ _ROLE_PORT_ALIASES: dict[str, str] = {
     # An additional set's mate feeds the run's R2 stream exactly as the
     # primary's mate does, so re-derivation wires it to the same port.
     "extra_mate": "mate",
+    # A per-sample StringTie assembly feeds the merge node's representative
+    # `transcripts` port (the run role is ASSEMBLED_TRANSCRIPTS; the port is
+    # named for what it carries, matching transcript_assembly's output port so
+    # the wire is drawn).
+    "assembled_transcripts": "transcripts",
 }
 
 

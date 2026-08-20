@@ -1567,6 +1567,9 @@ DIFFERENTIAL_EXPRESSION_MEM_MB = 4096
 # current locus's read bundle plus its splice graph in memory, not the whole
 # BAM, so this tracks locus depth rather than genome size.
 TRANSCRIPT_ASSEMBLY_MEM_MB = 4096
+# Merging N GTF text files. Memory tracks the combined annotation, not a
+# genome; 2 GB is generous for even a vertebrate annotation.
+MERGE_TRANSCRIPTS_MEM_MB = 2048
 
 # Matches the handler's own @handler(...) registration (see
 # feature_coverage_handlers.run_feature_coverage): a job cannot need less
@@ -5978,6 +5981,185 @@ async def launch_differential_expression(
         reference=reference,
     )
     return job
+
+
+async def assembled_transcripts_for_project(
+    project_id: PydanticObjectId, *, owner: str
+) -> list[DataObject]:
+    """Every assembled-transcripts object in a project, newest last."""
+    from app.services import object_service
+
+    objects = await object_service.list_objects(project_id, owner=owner)
+    assemblies = [
+        o
+        for o in objects
+        if o.role is ObjectRole.ASSEMBLED_TRANSCRIPTS
+        and o.status is ObjectStatus.READY
+    ]
+    assemblies.sort(key=lambda o: (o.created_at, o.name))
+    return assemblies
+
+
+async def merge_transcripts_defaults(
+    project_id: PydanticObjectId, *, owner: str
+) -> dict:
+    """What the merge dialog opens with.
+
+    A project-scoped list of its assembled-transcript GTFs, the same shape of
+    question differential_expression asks about counts: "which of these do I
+    combine?" defaults to all of them. No single anchoring object, so the
+    dialog lists the whole project and the user picks -- see S2 in the design
+    doc.
+    """
+    assemblies = await assembled_transcripts_for_project(project_id, owner=owner)
+    return {
+        "assemblies": [
+            {
+                "object_id": str(o.id),
+                "name": o.name,
+                "transcript_count": (o.facts or {}).get("transcript_count"),
+                "novel_transcript_count": (o.facts or {}).get(
+                    "novel_transcript_count"
+                ),
+                "gene_count": (o.facts or {}).get("gene_count"),
+            }
+            for o in assemblies
+        ],
+        "available": tools.stringtie().available,
+    }
+
+
+async def launch_merge_transcripts(
+    *,
+    project_id: PydanticObjectId,
+    owner: str,
+    gtf_object_ids: list[PydanticObjectId],
+    reference_id: PydanticObjectId | None = None,
+    output_name: str | None = None,
+    resource_override: bool = False,
+) -> Job:
+    """Queue a merge of N per-sample StringTie assemblies.
+
+    Validated fully here rather than in the handler, following
+    `launch_differential_expression`: a one-input merge is a copy, and inputs
+    from another project are a scoping bug -- both knowable before anything is
+    enqueued. The N set travels in `params` / the payload as `gtf_object_ids`,
+    mirroring DE's design dict, not through a scalar PortSpec (S1).
+    """
+    from app.queue import queue
+    from app.services import object_service
+
+    if not gtf_object_ids or len(gtf_object_ids) < 2:
+        raise ValidationError(
+            "At least two assembled-transcript GTFs are required to merge"
+        )
+
+    # Hoisted above the enqueue for the same reason as launch_assembly: a
+    # declaration the budget can never satisfy is unclaimable, and claim.lua
+    # has no starvation escape (#478, #527).
+    refuse_if_over_budget(
+        declared_mb=MERGE_TRANSCRIPTS_MEM_MB,
+        budget_mb=await current_admission_budget_mb(),
+        resource_override=resource_override,
+    )
+
+    objects: list[DataObject] = []
+    for gid in gtf_object_ids:
+        obj = await object_service.get_object(gid, owner=owner)
+        if obj.role is not ObjectRole.ASSEMBLED_TRANSCRIPTS:
+            raise ValidationError(
+                f"{obj.name!r} is not an assembled-transcripts GTF.",
+                details={"object_id": str(obj.id)},
+            )
+        if obj.project_id != project_id:
+            raise ValidationError(
+                f"{obj.name!r} is in a different project.",
+                details={"object_id": str(obj.id)},
+            )
+        objects.append(obj)
+
+    tools.require(tools.stringtie())
+
+    gtf_blobs: list[str] = []
+    gtf_names: list[str] = []
+    for obj in objects:
+        _, path = await _resolve_readable(obj)
+        if path:
+            gtf_blobs.append(path)
+            gtf_names.append(obj.name)
+
+    annotation: DataObject | None = None
+    annotation_blob: str | None = None
+    if reference_id is not None:
+        annotation = await object_service.get_object(reference_id, owner=owner)
+        _, annotation_blob = await _resolve_readable(annotation)
+
+    payload = {
+        "project_id": str(project_id),
+        "gtf_object_ids": [str(i) for i in gtf_object_ids],
+        "gtf_blobs": gtf_blobs,
+        "gtf_names": gtf_names,
+        "annotation_object_id": str(annotation.id) if annotation else None,
+        "annotation_blob": annotation_blob,
+        "annotation_name": annotation.name if annotation else None,
+        "output_name": output_name or "merged.transcripts.gtf",
+    }
+
+    run = await run_service.create_run(
+        kind=RunKind.MERGE_TRANSCRIPTS,
+        project_id=project_id,
+        # Not a "a → b": this is the one run kind with N inputs other than DE,
+        # and naming them all would produce a 400-character label. What a
+        # person needs to tell two merges apart is the size.
+        label=f"Merge {len(objects)} transcript assemblies",
+        inputs=[
+            RunInput(
+                object_id=o.id,
+                name=o.name,
+                role=RunInputRole.ASSEMBLED_TRANSCRIPTS,
+            )
+            for o in objects
+        ],
+        params={},
+        owner=owner,
+        tool="stringtie",
+    )
+
+    job = await queue.enqueue(
+        "merge_transcripts",
+        owner=owner,
+        payload=payload,
+        job_class=JobClass.COMPUTE,
+        resources=JobResources(
+            cpu=2, mem_mb=MERGE_TRANSCRIPTS_MEM_MB, io=IoClass.LIGHT
+        ),
+        max_attempts=2,
+        dedup_key=_merge_transcripts_dedup_key(gtf_ids=gtf_object_ids),
+        project_id=project_id,
+        object_id=objects[0].id,
+        resource_override=resource_override,
+    )
+    if job is None:
+        await run_service.discard_run(run.id, owner=run.owner)
+        raise ConflictError(
+            "An identical transcript merge is already queued or running",
+            details={"gtf_ids": [str(i) for i in gtf_object_ids]},
+        )
+
+    await run_service.link_job(run.id, job.id, RunJobRole.MERGE_TRANSCRIPTS)
+    log.info(
+        "merge_transcripts_launched",
+        job_id=str(job.id),
+        run_id=str(run.id),
+        inputs=len(objects),
+    )
+    return job
+
+
+def _merge_transcripts_dedup_key(*, gtf_ids: list[PydanticObjectId]) -> str:
+    """A merge of the same set of GTFs is the same run, in any order."""
+    ordered = ",".join(sorted(str(i) for i in gtf_ids))
+    return f"merge_transcripts:{ordered}"
 
 
 # --- De novo assembly --------------------------------------------------------

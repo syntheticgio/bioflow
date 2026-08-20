@@ -70,6 +70,13 @@ class RunKind(StrEnum):
     # node_types.py's salmon_quantify, which must claim run_tool="salmon"
     # precisely because it shares QUANTIFY with featureCounts.
     TRANSCRIPT_ASSEMBLY = "transcript_assembly"
+    # Merging N per-sample assemblies into one non-redundant annotation.
+    # Separate from TRANSCRIPT_ASSEMBLY for the same display-and-grouping
+    # reason DIFFERENTIAL_EXPRESSION is separate from QUANTIFY: "assembled
+    # one sample" and "merged N of them into a reference" are not the same
+    # line in an activity view, and, like DIFFERENTIAL_EXPRESSION, this is
+    # one of the N-input run kinds.
+    MERGE_TRANSCRIPTS = "merge_transcripts"
     # The test across samples. Separate from QUANTIFY for the same reason
     # ASSEMBLY_DOWNLOAD is separate from SRA_DOWNLOAD -- this is a display and
     # grouping vocabulary, and "counted one sample" and "compared twelve of
@@ -142,6 +149,10 @@ class RunInputRole(StrEnum):
     EXTRA_MATE = "extra_mate"
     # A single-sample variant callset (.vcf or .snf) going into a joint callset merge.
     VARIANTS = "variants"
+    # A per-sample StringTie assembly going into a merge. The first role that,
+    # like COUNTS, appears many times in one run's `inputs` -- the merge run
+    # takes N of these.
+    ASSEMBLED_TRANSCRIPTS = "assembled_transcripts"
 
 
 class RunInput(BaseModel):
@@ -263,6 +274,11 @@ class RunJobRole(StrEnum):
     # same reasoning as ASSEMBLE/CONSENSUS/POLISH: a run whose assembly
     # failed produced nothing.
     ASSEMBLE_TRANSCRIPTS = "assemble_transcripts"
+    # Merging N per-sample assemblies. Not QUANTIFY and not ASSEMBLE_TRANSCRIPTS:
+    # this is the merge_transcripts job under RunKind.MERGE_TRANSCRIPTS -- a
+    # different job kind under a different run kind. The whole point of its
+    # run, same reasoning as ASSEMBLE_TRANSCRIPTS above.
+    MERGE_TRANSCRIPTS = "merge_transcripts"
     # Read-based variant phasing. The whole point of its run — a phasing run
     # whose phasing failed produced nothing — so it is not in OPTIONAL_ROLES.
     PHASE_VARIANTS = "phase_variants"

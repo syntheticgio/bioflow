@@ -50,6 +50,8 @@ import type {
   LocalDatabaseEntry,
   LocalDatabaseSubmission,
   MateSuggestion,
+  MergeTranscriptsDefaults,
+  MergeTranscriptsRequest,
   MetadataSchema,
   NcbiResolveResponse,
   CurrentVersion,
@@ -1177,6 +1179,20 @@ export const api = {
   launchDifferentialExpression: (body: DeRequest, targetNode?: string) =>
     request<JobSummary>(
       `/pipelines/differential-expression${targetNode ? `?target_node=${encodeURIComponent(targetNode)}` : ""}`,
+      {
+        method: "POST",
+        body: JSON.stringify(body),
+      }),
+
+  /** The project's assembled-transcript GTFs, for the merge dialog. */
+  mergeTranscriptsDefaults: (projectId: string) =>
+    request<MergeTranscriptsDefaults>(
+      `/pipelines/merge-transcripts/defaults/${projectId}`
+    ),
+
+  launchMergeTranscripts: (body: MergeTranscriptsRequest, targetNode?: string) =>
+    request<JobSummary>(
+      `/pipelines/merge-transcripts${targetNode ? `?target_node=${encodeURIComponent(targetNode)}` : ""}`,
       {
         method: "POST",
         body: JSON.stringify(body),
