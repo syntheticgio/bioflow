@@ -3,12 +3,12 @@
 # Four jobs:
 #   frontend-check   — lint + unit tests + prod image build (ubuntu-latest)
 #   launcher-check   — unit tests + the tsc/vite build tauri runs (ubuntu-latest)
-#   backend-smoke    — import smoke test + ops script tests
+#   backend-smoke    — bug-only ruff lint + import smoke test + ops script tests
 #   backend-full-test — full pytest suite with Mongo replica-set service
 #
 # Backend Docker images are NOT built on PRs: they compile bwa-mem2, Clair3,
 # and compleasm from source and are expensive. The backend is instead
-# smoke-tested here (import + ops tests). The full pytest suite runs
+# smoke-tested here (bug lint + import + ops tests). The full pytest suite runs
 # as a separate job with a Mongo replica-set container.
 
 name: Build check
@@ -160,6 +160,34 @@ jobs:
         # for real and fails on that, three tests' worth. Only an issue since
         # these jobs moved into a container -- on a bare runner the uids match.
         run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+
+      # Bug-only lint. Ruff was removed from CI on 2026-08-19 because E501
+      # and import-order failed PRs on trivia (#32ea08f2); this deliberately
+      # does NOT restore that. --select is narrowed to the two rules that are
+      # always real bugs, so a long line or a mis-ordered import cannot go
+      # red here -- only the pre-commit hook reports those.
+      #
+      #   F821  undefined name -- a live NameError. Shipped for real in
+      #         suggestion_service (SidecarRole), raising on every Actions-tab
+      #         evaluation of the SV-merge card.
+      #   F401  unused import -- the residue of a half-finished edit, and the
+      #         error that sat on main for 13 commits after a rebase replayed
+      #         them without running the hook.
+      #
+      # Syntax errors fail this step regardless of --select and need no rule
+      # of their own (E999 was removed from ruff and cannot be selected).
+      #
+      # --config is explicit: backend/pyproject.toml only auto-applies under
+      # backend/, so ops/ and e2e/ would silently fall back to ruff's own
+      # defaults (#466). --output-format=concise keeps a failure to one line
+      # per finding.
+      - name: Lint for bugs with ruff (F821, F401)
+        run: |
+          pip install ruff
+          ruff check --config backend/pyproject.toml \
+                     --select F821,F401 \
+                     --output-format=concise \
+                     backend/app backend/tests ops e2e
 
       - name: Install backend dev dependencies
         run: pip install -e 'backend/.[dev]'
