@@ -154,7 +154,7 @@ def caller_for_chemistry(chemistry: ReadChemistry) -> SvCaller | None:
 - [ ] **Step 4: Run test to verify it passes**
 
 Run: `./backend/run-worktree-tests.sh tests/pipelines/test_sv_caller.py -v`
-Expected: PASS (9 tests)
+Expected: PASS (11 tests)
 
 - [ ] **Step 5: Commit**
 
@@ -1056,7 +1056,7 @@ def build_bcf_to_vcf_command(
 - [ ] **Step 4: Run tests to verify they pass**
 
 Run: `./backend/run-worktree-tests.sh tests/pipelines/test_delly_runner.py -v`
-Expected: PASS (13 tests)
+Expected: PASS (11 tests)
 
 - [ ] **Step 5: Commit**
 
