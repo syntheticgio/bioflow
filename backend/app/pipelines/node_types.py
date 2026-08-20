@@ -1238,6 +1238,11 @@ EXCLUDED_LAUNCHES: frozenset[str] = frozenset(
         # AI annotations over an existing object, not pipeline steps. They
         # produce a summary field rather than an object a downstream node
         # could consume, so they have no output port to wire.
+        # A project-scoped aggregate report over QC other jobs already
+        # produced. Produces no object a downstream node could consume --
+        # the same reason launch_summary is excluded -- and takes a
+        # project rather than an input port, so there is nothing to wire.
+        "pipeline_service.launch_multiqc_report",
         "pipeline_service.launch_summary",
         "pipeline_service.launch_de_summary",
         "pipeline_service.launch_variant_summary",

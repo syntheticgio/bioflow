@@ -169,3 +169,33 @@ export interface TileMatrix {
   sample_rate: number;
   truncated: boolean;
 }
+
+/**
+ * What the Project QC panel renders, from
+ * `GET /pipelines/qc/multiqc/{project_id}/status`.
+ *
+ * The flags are independent rather than one status string because the
+ * interesting cases are combinations: `failed` with a `generated_at` means
+ * a regeneration failed over a report that is still there to open, which
+ * reads differently from either flag alone.
+ *
+ * Timestamps are Unix seconds (the report's own mtime, and job timings),
+ * not ISO strings -- convert with `new Date(t * 1000)`. Same convention as
+ * `ExportArchive.created_at`, and for the same reason: they come from
+ * `stat()` rather than from a document field.
+ */
+export interface MultiqcStatus {
+  /** How many files carry QC output MultiQC could parse. */
+  summarizable: number;
+  /** When the report on disk was written, or null when there is none. */
+  generated_at: number | null;
+  /** How many files the current report covers; null when there is none. */
+  covered: number | null;
+  /** QC output is newer than the report. */
+  stale: boolean;
+  running: boolean;
+  running_since: number | null;
+  /** The most recent run failed. Independent of `generated_at`. */
+  failed: boolean;
+  failed_at: number | null;
+}

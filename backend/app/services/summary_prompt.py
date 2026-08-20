@@ -51,6 +51,8 @@ _PLUMBING_KEYS = frozenset(
         "has_index",
         "qc_fastqc_report",
         "qc_fastp_report",
+        # Retained for MultiQC to parse later, not a number anyone reads.
+        "qc_fastp_data",
         "qc_nanoplot_report",
         "trim_report_path",
     }
