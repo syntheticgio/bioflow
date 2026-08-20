@@ -674,6 +674,13 @@ export const METRIC_INFO: Record<string, MetricInfo> = {
     computed:
       "Counted per site rather than per genotype, so a file the caller never genotyped still draws a real distribution instead of an empty one.",
   },
+  "ui.chart_indel_lengths": {
+    term: "Indel length distribution",
+    description:
+      "How long the insertions and deletions are, and how many of each length occur. The shape is diagnostic: a spike at ±1 bp with a steep falloff is homopolymer indel noise typical of long-read callers; periodicity at multiples of 3 over coding-dense regions is real biological signal; a smooth symmetric taper is a healthy short-read callset.",
+    computed:
+      "From bcftools stats' IDD section. Lengths beyond ±50 bp are truncated on the chart to keep the informative near-zero region readable.",
+  },
   "ui.vcf_substitutions": {
     term: "Substitution types",
     description:
