@@ -827,6 +827,100 @@ async def get_feature_coverage_report(object_id: PydanticObjectId, owner: OwnerD
     return json.loads(target.read_text())
 
 
+class VariantsInRegionsRequest(BaseModel):
+    vcf_id: PydanticObjectId
+    annotation_id: PydanticObjectId | None = None
+
+
+@router.post(
+    "/variants-in-regions", response_model=JobOut, status_code=status.HTTP_201_CREATED
+)
+async def launch_variants_in_regions(
+    body: VariantsInRegionsRequest, owner: OwnerDep
+) -> JobOut:
+    """Queue variant distribution analysis across annotated features for a VCF."""
+    job = await pipeline_service.launch_variants_in_regions(
+        vcf_id=body.vcf_id, owner=owner, annotation_id=body.annotation_id
+    )
+    return JobOut.of(job)
+
+
+@router.get("/variants-in-regions/{object_id}/report")
+async def get_variants_in_regions_report(
+    object_id: PydanticObjectId, owner: OwnerDep
+) -> dict:
+    """Serve the variants in regions report for a VCF."""
+    await object_service.get_object(object_id, owner=owner)
+
+    root = (settings.variants_in_regions_dir / str(object_id)).resolve()
+    target = (root / "variants_in_regions.json").resolve()
+
+    if not target.is_relative_to(root) or not target.is_file():
+        raise NotFoundError(f"No variants in regions report for object {object_id}")
+
+    return json.loads(target.read_text())
+
+
+class AnnotationComparisonRequest(BaseModel):
+    annotation_id: PydanticObjectId
+    other_annotation_id: PydanticObjectId
+
+
+@router.post(
+    "/annotation-comparison", response_model=JobOut, status_code=status.HTTP_201_CREATED
+)
+async def launch_annotation_comparison(
+    body: AnnotationComparisonRequest, owner: OwnerDep
+) -> JobOut:
+    """Queue annotation comparison (jaccard & intersect -v) between two annotations."""
+    job = await pipeline_service.launch_annotation_comparison(
+        annotation_id=body.annotation_id,
+        other_annotation_id=body.other_annotation_id,
+        owner=owner,
+    )
+    return JobOut.of(job)
+
+
+@router.get("/annotation-comparison/{object_id}/report")
+async def get_annotation_comparison_report(
+    object_id: PydanticObjectId, owner: OwnerDep
+) -> dict:
+    """Serve the annotation comparison report for an annotation."""
+    await object_service.get_object(object_id, owner=owner)
+
+    root = (settings.annotation_comparison_dir / str(object_id)).resolve()
+    target = (root / "annotation_comparison.json").resolve()
+
+    if not target.is_relative_to(root) or not target.is_file():
+        raise NotFoundError(f"No annotation comparison report for object {object_id}")
+
+    return json.loads(target.read_text())
+
+
+class ExtractSequencesRequest(BaseModel):
+    assembly_id: PydanticObjectId
+    query_text: str | None = None
+    annotation_id: PydanticObjectId | None = None
+    output_name: str | None = None
+
+
+@router.post(
+    "/extract-sequences", response_model=JobOut, status_code=status.HTTP_201_CREATED
+)
+async def launch_extract_sequences(
+    body: ExtractSequencesRequest, owner: OwnerDep
+) -> JobOut:
+    """Queue sequence/region extraction from an assembly FASTA via seqkit subseq."""
+    job = await pipeline_service.launch_sequence_extraction(
+        assembly_id=body.assembly_id,
+        owner=owner,
+        query_text=body.query_text,
+        annotation_id=body.annotation_id,
+        output_name=body.output_name,
+    )
+    return JobOut.of(job)
+
+
 class CoverageRequest(BaseModel):
     bam_id: PydanticObjectId
     regions_id: PydanticObjectId | None = None

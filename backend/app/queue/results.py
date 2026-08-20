@@ -1864,6 +1864,117 @@ async def _apply_feature_coverage(result: dict, *, owner: str) -> None:
     )
 
 
+async def _apply_variants_in_regions(result: dict, *, owner: str) -> None:
+    """Record variants in regions computation numbers on the VCF object.
+    """
+    object_id = result.get("object_id")
+    facts = result.get("facts") or {}
+    if not object_id or not facts:
+        return
+
+    obj = await DataObject.get(PydanticObjectId(object_id))
+    if obj is None:
+        log.warning("variants_in_regions_object_missing", object_id=object_id)
+        return
+
+    await obj.set(
+        {
+            DataObject.facts: {**obj.facts, **facts},
+            DataObject.updated_at: datetime.now(UTC),
+        }
+    )
+
+    log.info(
+        "variants_in_regions_applied",
+        object_id=object_id,
+        total_variants=facts.get("variants_in_regions_total_variants"),
+        in_features=facts.get("variants_in_regions_in_features"),
+    )
+
+
+async def _apply_annotation_comparison(result: dict, *, owner: str) -> None:
+    """Record annotation comparison results on the primary annotation object."""
+    object_id = result.get("object_id")
+    facts = result.get("facts") or {}
+    if not object_id or not facts:
+        return
+
+    obj = await DataObject.get(PydanticObjectId(object_id))
+    if obj is None:
+        log.warning("annotation_comparison_object_missing", object_id=object_id)
+        return
+
+    await obj.set(
+        {
+            DataObject.facts: {**obj.facts, **facts},
+            DataObject.updated_at: datetime.now(UTC),
+        }
+    )
+
+    log.info(
+        "annotation_comparison_applied",
+        object_id=object_id,
+        jaccard=facts.get("annotation_comparison_jaccard"),
+    )
+
+
+async def _apply_sequence_extraction(result: dict, *, owner: str) -> None:
+    """Ingest extracted sequences FASTA as a new DataObject with provenance."""
+    from app.services import object_service, run_service
+
+    object_id = result.get("object_id")
+    if not object_id:
+        return
+
+    source = await DataObject.get(PydanticObjectId(object_id))
+    if source is None:
+        log.warning("sequence_extraction_source_missing", object_id=object_id)
+        return
+
+    workdir = result.get("workdir")
+    output_name = result.get("output_name", "extracted.fasta")
+    if not workdir:
+        return
+
+    out_file = Path(workdir) / "extracted.fasta"
+    if not out_file.is_file():
+        return
+
+    job_id = result.get("job_id")
+    derived_from = [source.id]
+
+    anno_id = result.get("source_annotation_id")
+    if anno_id:
+        try:
+            derived_from.append(PydanticObjectId(anno_id))
+        except Exception:
+            pass
+
+    facts = result.get("facts") or {}
+
+    try:
+        derived = await object_service.ingest_local_file(
+            owner=source.owner,
+            project_id=source.project_id,
+            path=out_file,
+            name=output_name,
+            role=ObjectRole.REFERENCE,
+            derived_from=derived_from,
+            produced_by_job=PydanticObjectId(job_id) if job_id else None,
+            facts=facts,
+            metadata=dict(source.metadata),
+        )
+        if job_id:
+            await run_service.record_job_produced_object(
+                PydanticObjectId(job_id), derived.id
+            )
+    except Exception as e:  # noqa: BLE001
+        log.error("sequence_extraction_ingest_failed", object_id=object_id, error=str(e))
+        return
+
+    log.info("sequence_extraction_applied", object_id=object_id, derived_id=str(derived.id))
+
+
 async def _apply_coverage(result: dict, *, owner: str) -> None:
     """Record a per-window depth computation's numbers on the BAM it
     described.
@@ -3977,6 +4088,9 @@ _APPLIERS = {
     "merge_structural_variants": _apply_merge_structural_variants,
     "run_bam_stats": _apply_run_bam_stats,
     "feature_coverage": _apply_feature_coverage,
+    "variants_in_regions": _apply_variants_in_regions,
+    "annotation_comparison": _apply_annotation_comparison,
+    "sequence_extraction": _apply_sequence_extraction,
     "coverage": _apply_coverage,
     "methylation": _apply_methylation,
     "gc_bias": _apply_gc_bias,

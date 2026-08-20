@@ -2649,6 +2649,151 @@ def build_feature_coverage_card(obj, annotations) -> SuggestionCard | None:
     )
 
 
+def build_variants_in_regions_card(obj, annotations) -> SuggestionCard | None:
+    """Variants in regions: intersect VCF with annotated features via bedtools."""
+    if obj.format.kind is not FormatKind.VCF:
+        return None
+
+    title = "Variants in regions"
+    description = (
+        "Intersect variants with annotated features to report variant distribution "
+        "across genes, exons, and other regions."
+    )
+    why = (
+        "Complements consequence prediction (bcftools-csq) by reporting overall "
+        "variant distribution across all annotated features."
+    )
+
+    tool = tools.bedtools()
+    if not tool.available:
+        return SuggestionCard(
+            kind="variants_in_regions",
+            category="VARIANT",
+            title=title,
+            description=description,
+            why=why,
+            status=CardStatus.UNAVAILABLE,
+            reason=f"{tool.name} is not installed.",
+        )
+
+    if not annotations:
+        return SuggestionCard(
+            kind="variants_in_regions",
+            category="VARIANT",
+            title=title,
+            description=description,
+            why=why,
+            status=CardStatus.UNAVAILABLE,
+            reason=(
+                "This project has no annotation to intersect variants against. "
+                "Download one with the assembly, or upload a GFF/GTF."
+            ),
+        )
+
+    return SuggestionCard(
+        kind="variants_in_regions",
+        category="VARIANT",
+        title=title,
+        description=description,
+        why=why,
+        status=CardStatus.AVAILABLE,
+        launch={
+            "endpoint": "/pipelines/variants-in-regions",
+            "body": {"vcf_id": str(obj.id)},
+        },
+    )
+
+
+def build_annotation_comparison_card(obj, annotations) -> SuggestionCard | None:
+    """Annotation comparison: bedtools jaccard and subtract between annotations."""
+    if not pipeline_service._is_annotation(obj):
+        return None
+
+    title = "Annotation comparison"
+    description = (
+        "Compare feature overlap and unique features between two annotations of the same assembly."
+    )
+
+    tool = tools.bedtools()
+    if not tool.available:
+        return SuggestionCard(
+            kind="annotation_comparison",
+            category="ANNOTATION",
+            title=title,
+            description=description,
+            status=CardStatus.UNAVAILABLE,
+            reason=f"{tool.name} is not installed.",
+        )
+
+    distinct_other_annotations = [
+        a for a in annotations
+        if a.id != obj.id and getattr(a, "blob_sha256", None) != getattr(obj, "blob_sha256", None)
+    ]
+
+    if not distinct_other_annotations:
+        return SuggestionCard(
+            kind="annotation_comparison",
+            category="ANNOTATION",
+            title=title,
+            description=description,
+            status=CardStatus.UNAVAILABLE,
+            reason="Requires a second distinct annotation of the assembly to compare against.",
+        )
+
+    other = distinct_other_annotations[0]
+    return SuggestionCard(
+        kind="annotation_comparison",
+        category="ANNOTATION",
+        title=title,
+        description=description,
+        why=f"Compare feature agreement against {other.name}.",
+        status=CardStatus.AVAILABLE,
+        launch={
+            "endpoint": "/pipelines/annotation-comparison",
+            "body": {
+                "annotation_id": str(obj.id),
+                "other_annotation_id": str(other.id),
+            },
+        },
+    )
+
+
+def build_extract_sequences_card(obj) -> SuggestionCard | None:
+    """Extract sequences or regions from assembly FASTA via seqkit subseq."""
+    if obj.format.kind is not FormatKind.FASTA:
+        return None
+
+    title = "Extract sequences"
+    description = (
+        "Extract specific sequences or region coordinates from this assembly FASTA "
+        "using seqkit."
+    )
+
+    tool = tools.seqkit()
+    if not tool.available:
+        return SuggestionCard(
+            kind="extract_sequences",
+            category="UTILITY",
+            title=title,
+            description=description,
+            status=CardStatus.UNAVAILABLE,
+            reason=f"{tool.name} is not installed.",
+        )
+
+    return SuggestionCard(
+        kind="extract_sequences",
+        category="UTILITY",
+        title=title,
+        description=description,
+        why="Extract regions or named sequences into a standalone FASTA file.",
+        status=CardStatus.AVAILABLE,
+        launch={
+            "endpoint": "/pipelines/extract-sequences",
+            "body": {"assembly_id": str(obj.id)},
+        },
+    )
+
+
 def build_coverage_card(obj) -> SuggestionCard | None:
     """Per-window read depth: how deeply and how evenly the reference is
     covered.
@@ -3185,6 +3330,18 @@ CARD_BUILDERS: tuple[tuple[str, object], ...] = (
         lambda obj, ctx: build_salmon_quantify_card(obj, ctx.transcriptomes),
     ),
     (
+        "variants_in_regions",
+        lambda obj, ctx: build_variants_in_regions_card(obj, ctx.annotations),
+    ),
+    (
+        "annotation_comparison",
+        lambda obj, ctx: build_annotation_comparison_card(obj, ctx.annotations),
+    ),
+    (
+        "extract_sequences",
+        lambda obj, ctx: build_extract_sequences_card(obj),
+    ),
+    (
         "transcript_assembly",
         lambda obj, ctx: build_transcript_assembly_card(obj, ctx.annotations),
     ),
@@ -3245,9 +3402,9 @@ async def suggestions_for(obj) -> list[dict]:
         ]
 
     annotations: list[DataObject] = []
-    if obj.format.kind is FormatKind.BAM:
-        # BAM only: the quantify card is the sole consumer, so listing a
-        # project's annotations on a FASTQ click would discard the result.
+    if obj.format.kind in (FormatKind.BAM, FormatKind.VCF, FormatKind.GFF, FormatKind.GTF):
+        # Prefetched for quantify, feature_coverage, variants_in_regions, and
+        # annotation_comparison cards.
         annotations = await pipeline_service.annotations_for_project(
             obj.project_id, owner=obj.owner
         )

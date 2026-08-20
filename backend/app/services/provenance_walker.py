@@ -168,6 +168,7 @@ _STEP_VERBS: dict[str, str] = {
     # spreadsheet), not just statistics written back onto the BAM. See
     # docs/superpowers/specs/2026-08-20-modkit-methylation-design.md.
     "methylation": "summarized base modifications with",
+    "sequence_extraction": "extracted regions from",
 }
 
 # Registered handlers that legitimately produce no narrative step.
@@ -180,6 +181,8 @@ _NO_NARRATIVE_STEP: frozenset[str] = frozenset(
         # producing one; the numbers already show in the file panel.
         "run_bam_stats",
         "feature_coverage",
+        "variants_in_regions",
+        "annotation_comparison",
         "coverage",
         "gc_bias",
         "run_transcript_qc",
