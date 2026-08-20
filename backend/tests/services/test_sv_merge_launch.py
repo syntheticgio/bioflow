@@ -188,3 +188,39 @@ async def test_sibling_snf_callsets_returns_empty_when_not_an_snf():
     # walk fails and the function returns an empty list.
     siblings = await pipeline_service.sibling_snf_callsets(plain_vcf)
     assert siblings == []
+
+
+def test_sv_dedup_key_distinguishes_callers():
+    """Without the caller in the key, a Delly run and a Sniffles run on one
+    BAM with equal params collapse into one result and the second silently
+    returns the first caller's VCF. Nothing raises. Requirement SV-620-5.
+    """
+    from bson import ObjectId
+
+    from app.pipelines.sv_caller import SvCaller
+    from app.services.pipeline_service import _sv_dedup_key
+
+    bam_id = ObjectId()
+    params = {"threads": 4}
+
+    sniffles = _sv_dedup_key(
+        bam_id=bam_id, caller=SvCaller.SNIFFLES2, params=params
+    )
+    delly = _sv_dedup_key(bam_id=bam_id, caller=SvCaller.DELLY, params=params)
+
+    assert sniffles != delly
+
+
+def test_sv_dedup_key_is_stable_for_one_caller():
+    """The same request twice is still a double-submit to collapse."""
+    from bson import ObjectId
+
+    from app.pipelines.sv_caller import SvCaller
+    from app.services.pipeline_service import _sv_dedup_key
+
+    bam_id = ObjectId()
+    params = {"threads": 4}
+
+    assert _sv_dedup_key(
+        bam_id=bam_id, caller=SvCaller.DELLY, params=params
+    ) == _sv_dedup_key(bam_id=bam_id, caller=SvCaller.DELLY, params=params)
