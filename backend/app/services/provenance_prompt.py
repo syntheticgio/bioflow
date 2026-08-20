@@ -134,7 +134,7 @@ _COMMON_TOOLS = frozenset(
         "fastp", "cutadapt", "trimmomatic", "fastqc", "nanoplot",
         "clair3", "deepvariant", "bcftools", "freebayes", "gatk",
         "flye", "spades", "hifiasm", "canu", "raven",
-        "featurecounts", "salmon", "kallisto", "htseq",
+        "featurecounts", "salmon", "kallisto", "htseq", "stringtie",
         "samtools", "polypolish", "racon", "medaka", "ragtag", "quast",
     }
 )

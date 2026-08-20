@@ -385,6 +385,12 @@ _SUPPORTING_PARENT_KEYS = ("reference_object_id", "annotation_object_id")
 
 # Roles that are materials when the facts do not say. Used only as a
 # fallback, for objects predating their step's provenance builder.
+#
+# ObjectRole.ASSEMBLED_TRANSCRIPTS deliberately stays out of this set: a
+# StringTie GTF is transcript_assembly's *output*, never a parent recorded
+# via `_SUPPORTING_PARENT_KEYS` on some later step (it is not accepted as a
+# quantify annotation), so it never reaches `classify_parent` as a role to
+# classify -- it always walks as a spine node, which is correct for a result.
 _SUPPORTING_ROLES = frozenset({ObjectRole.REFERENCE, ObjectRole.ANNOTATION})
 
 

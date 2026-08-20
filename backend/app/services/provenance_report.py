@@ -69,6 +69,14 @@ _GAP_LABELS: dict[tuple[str, GapKind], str] = {
         "salmon_quantify",
         GapKind.PARAMS_UNRECORDED,
     ): "Quantification parameters",
+    (
+        "transcript_assembly",
+        GapKind.VERSION_UNRECORDED,
+    ): "Assembler version",
+    (
+        "transcript_assembly",
+        GapKind.PARAMS_UNRECORDED,
+    ): "Assembly parameters",
 }
 
 _GAP_LABELS_BY_KIND: dict[GapKind, str] = {
