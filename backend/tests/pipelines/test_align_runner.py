@@ -724,6 +724,18 @@ class TestHisat2Command:
     def test_dta_is_a_flag(self):
         assert "--dta" in " ".join(self.cmd(dta=True))
 
+    def test_dta_is_suppressed_when_spliced_alignment_is_disabled(self):
+        """--dta tunes anchor length around exon junctions and is meaningless
+        without splice-aware alignment. Emitting it alongside the manual
+        dialog's explicit "DNA input" choice (no_spliced_alignment) would be
+        a self-contradictory provenance record -- see design spec D6."""
+        assert "--dta" not in " ".join(
+            self.cmd(dta=True, no_spliced_alignment=True)
+        )
+
+    def test_dta_still_emitted_when_spliced_alignment_stays_on(self):
+        assert "--dta" in " ".join(self.cmd(dta=True, no_spliced_alignment=False))
+
 
 class TestNewAlignersKeepPipefail:
     """The truncated-BAM failure applies to every aligner, not just the two
