@@ -247,6 +247,9 @@ class Settings(BaseSettings):
     # `-fsigned-char` flag, and the bundled ext/meryl that must not be built).
     winnowmap_path: str = "winnowmap"
     bedtools_path: str = "bedtools"
+    # A wrapper in /usr/local/bin, not the conda binary itself: mosdepth
+    # dlopens libhts from its own env's lib/. See scripts/install-mosdepth.sh.
+    mosdepth_path: str = "mosdepth"
     seqkit_path: str = "seqkit"
     # Model directories, one per Clair3 --platform. The install script
     # normalizes each to hold the checkpoint files directly.
@@ -449,6 +452,22 @@ class Settings(BaseSettings):
         cost a blob record per run.
         """
         return self.bioinfo_home / "feature_coverage"
+
+    @property
+    def coverage_dir(self) -> Path:
+        """Generated per-window/per-region depth reports (the mosdepth JSON),
+        keyed by BAM object id.
+
+        Distinct from feature_coverage_dir despite the similar name: that one
+        holds bedtools per-annotation-feature coverage, this one holds
+        mosdepth depth over fixed windows or a target region set.
+
+        Outside objects/ deliberately, same rationale as bam_stats_dir: this
+        is derivative and regenerable from the BAM, so content-addressing it
+        would buy deduplication of something never shared and cost a blob
+        record per run.
+        """
+        return self.bioinfo_home / "coverage"
 
     @property
     def vcf_stats_dir(self) -> Path:

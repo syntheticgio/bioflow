@@ -526,6 +526,23 @@ RUN chmod +x /srv/scripts/install-multiqc.sh \
     && MULTIQC_VERSION="${MULTIQC_VERSION}" \
        /srv/scripts/install-multiqc.sh
 
+# --- mosdepth ---------------------------------------------------------------
+#
+# Per-window and per-region read depth, complementing samtools' alignment-wide
+# statistics. Not in Debian at all -- verified against trixie with a control
+# package in the same container, see the install script's header.
+#
+# From bioconda rather than the GitHub release binary, and that is what makes
+# it available on Apple Silicon: upstream's v0.3.14 release ships one
+# unsuffixed asset that is ELF x86-64, while bioconda publishes 0.3.14 for
+# linux-aarch64 too. So unlike Polypolish there is no arm64 skip and
+# tools.mosdepth() needs no architecture special case.
+ARG MOSDEPTH_VERSION=0.3.14
+COPY scripts/install-mosdepth.sh /srv/scripts/install-mosdepth.sh
+RUN chmod +x /srv/scripts/install-mosdepth.sh \
+    && MOSDEPTH_VERSION="${MOSDEPTH_VERSION}" \
+       /srv/scripts/install-mosdepth.sh
+
 # --- CRAQ --------------------------------------------------------------
 #
 # Reference-free assembly error detection. Not packaged for Debian trixie;

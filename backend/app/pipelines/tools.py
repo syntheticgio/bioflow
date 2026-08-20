@@ -837,6 +837,24 @@ def bedtools() -> Tool:
 
 
 @lru_cache(maxsize=1)
+def mosdepth() -> Tool:
+    # `mosdepth --version` prints "mosdepth 0.3.14" and exits zero -- verified
+    # against a real bioconda install on 2026-08-20.
+    #
+    # No arm64 special-casing, unlike polypolish(): bioconda ships
+    # linux-aarch64 builds of mosdepth, so the install script covers both
+    # architectures and a missing binary here means a genuinely broken
+    # install rather than an unsupported platform.
+    #
+    # Note this probe is weaker than it looks: mosdepth dlopens libhts at
+    # runtime, so `--version` succeeds even when a real depth run would die
+    # with "could not load: libhts.so". The install script therefore also
+    # runs a depth pass over a generated BAM at build time -- that, not this
+    # probe, is what establishes the tool actually works.
+    return _probe("mosdepth", settings.mosdepth_path, ["--version"])
+
+
+@lru_cache(maxsize=1)
 def seqkit() -> Tool:
     # seqkit has no `--version`; `seqkit version` prints "seqkit v2.x.y".
     return _probe("seqkit", settings.seqkit_path, ["version"])
@@ -949,6 +967,7 @@ def all_tools() -> list[Tool]:
         gci(),
         winnowmap(),
         bedtools(),
+        mosdepth(),
         seqkit(),
         snpeff(),
     ]
@@ -2604,6 +2623,39 @@ TOOL_META: dict[str, ToolMeta] = {
         # launch_feature_coverage handler shipped (#632, stage 1) -- bedtools
         # is now dispatched to directly, not just installed alongside Merqury.
         runnable=True,
+    ),
+    "mosdepth": ToolMeta(
+        pipelines=(PipelineType.UTILITY,),
+        one_liner="Fast per-base and per-window read-depth calculator",
+        summary=(
+            "mosdepth computes read depth from an indexed BAM or CRAM in a "
+            "single pass, over fixed-size windows, a target region set, or "
+            "every base. It answers the per-region and depth-uniformity "
+            "questions that alignment-wide statistics cannot: whether a gene, "
+            "a panel target, or a contig actually got enough sequencing."
+        ),
+        strengths=(
+            "Per-base, per-window, and per-region depth in one pass",
+            "Substantially faster than samtools depth at genome scale",
+            "Windowed output suits track-style coverage visualization",
+            "Names carried through from a 4-column target BED",
+        ),
+        homepage="https://github.com/brentp/mosdepth",
+        repository="https://github.com/brentp/mosdepth",
+        citation="Pedersen & Quinlan, Bioinformatics 2018",
+        citation_url="https://doi.org/10.1093/bioinformatics/btx699",
+        license="MIT",
+        usage=(
+            "Computes per-window read depth for the coverage report served on "
+            "a BAM object, complementing the samtools-based alignment "
+            "statistics on the same alignment."
+        ),
+        # False until launch_coverage and its card ship (stage 1 of #626).
+        # The binary is installed and probed, so /help/software can report its
+        # version, but nothing dispatches to it yet -- and bedtools above is
+        # the precedent for flipping this in the commit that wires the card,
+        # not before.
+        runnable=False,
     ),
     "seqkit": ToolMeta(
         pipelines=(PipelineType.UTILITY,),
