@@ -57,6 +57,7 @@ from app.pipelines import (
     ragtag_runner,
     resource_estimator,
     sniffles_runner,
+    sv_caller,
     tools,
     trimmomatic_runner,
     variant_runner,
@@ -65,6 +66,7 @@ from app.pipelines import (
     assembly_params as assembly_params_module,
 )
 from app.pipelines.aligners import Aligner
+from app.pipelines.sv_caller import SvCaller
 from app.services import (
     blob_service,
     memory_estimate,
@@ -3626,14 +3628,22 @@ async def _variant_payload(
 STRUCTURAL_VARIANT_CALLING_MEM_MB = 8192
 
 
-def _sv_dedup_key(*, bam_id, params: dict) -> str:
+def _sv_dedup_key(*, bam_id, caller: SvCaller, params: dict) -> str:
     """Identity of a structural variant calling request.
 
-    No caller in the key, unlike `_variant_dedup_key`: Sniffles2 is the only
-    SV caller this pipeline runs, so the params fingerprint alone identifies
-    the request.
+    The caller is part of the key. Calling one BAM with Sniffles2 and with
+    Delly is two results worth comparing, not a double-submit to collapse --
+    and without the caller here the second request silently returns the
+    first's VCF, with the job reporting success.
+
+    Note that `_variant_dedup_key` is not the example to copy: its docstring
+    claims to include the caller and its returned string does not. See
+    https://github.com/syntheticgio/bioflow/issues/699.
     """
-    return f"call_structural_variants:{bam_id}:{_params_fingerprint(params)}"
+    return (
+        f"call_structural_variants:{bam_id}:{caller.value}:"
+        f"{_params_fingerprint(params)}"
+    )
 
 
 async def _sv_payload(
@@ -3740,6 +3750,10 @@ async def launch_structural_variant_calling(
             details={"reference_id": str(reference.id), "needs": "build_index"},
         )
 
+    caller = sv_caller.caller_for_chemistry(
+        chemistry or align_runner.ReadChemistry.UNKNOWN
+    )
+
     tools.require(tools.sniffles())
 
     merged = sniffles_runner.SnifflesParams.from_dict(params)
@@ -3781,7 +3795,9 @@ async def launch_structural_variant_calling(
             io=IoClass.HEAVY,
         ),
         max_attempts=2,
-        dedup_key=_sv_dedup_key(bam_id=bam.id, params=merged.as_dict()),
+        dedup_key=_sv_dedup_key(
+            bam_id=bam.id, caller=caller, params=merged.as_dict()
+        ),
         project_id=bam.project_id,
         object_id=bam.id,
     )
