@@ -216,6 +216,34 @@ class TestSvDbMove:
         assert snf.name == "calls.sniffles.snf"
 
 
+def test_sv_provenance_records_delly():
+    """The VCF's own record of what made it. A literal caller here means
+    every Delly callset claims to be Sniffles output. Requirement SV-620-6."""
+    from app.queue.results import sv_provenance
+
+    prov = sv_provenance({"caller": "delly", "tool_version": "2.6.0"})
+
+    assert prov["variants_called_by"] == "delly"
+    assert prov["variant_caller_version"] == "2.6.0"
+
+
+def test_sv_provenance_records_sniffles():
+    from app.queue.results import sv_provenance
+
+    prov = sv_provenance({"caller": "sniffles2", "tool_version": "2.8.0"})
+
+    assert prov["variants_called_by"] == "sniffles2"
+
+
+def test_sv_provenance_falls_back_for_a_pre_620_result():
+    """Jobs queued before #620 carry no caller field. They were all
+    Sniffles, so that is the honest default -- but only for results with no
+    caller at all, never as an override."""
+    from app.queue.results import sv_provenance
+
+    assert sv_provenance({})["variants_called_by"] == "sniffles2"
+
+
 class TestMergeSvApplier:
     async def test_apply_merge_structural_variants(self, tmp_path):
         bam = await _bam(OWNER)
