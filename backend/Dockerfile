@@ -56,6 +56,21 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 RUN pip wheel --no-deps --wheel-dir /wheels whatshap==2.8
 
+# parasail is Liftoff's alignment dependency and publishes no linux-aarch64
+# wheel for any version -- only x86-64 wheels and an sdist that runs its own
+# autotools build (verified 2026-08-20 against PyPI, parasail 1.3.4). The
+# final image carries no compiler, so a bare `pip install liftoff` would fall
+# back to that sdist on arm64 and die the same way edlib and whatshap do
+# above. autoconf/automake/libtool are needed in addition to build-essential
+# because parasail's setup.py shells out to its own `autogen.sh` rather than
+# using a pre-generated configure script.
+FROM python:3.12-slim AS parasail-build
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        build-essential autoconf automake libtool \
+    && rm -rf /var/lib/apt/lists/*
+RUN pip wheel --no-deps --wheel-dir /wheels parasail==1.3.4
+
 FROM python:3.12-slim
 
 ENV PYTHONUNBUFFERED=1 \
@@ -517,12 +532,23 @@ RUN pip install --no-cache-dir pydeseq2==0.5.4
 RUN pip install --no-cache-dir ragtag==2.1.0
 
 # Liftoff, eukaryotic annotation transfer (lifts an existing GFF3/GTF onto a
-# related assembly). Pure Python on PyPI and its only external binary is
-# minimap2, already installed above for both architectures, so pip is correct
-# here and there is no arm64 build problem. Pinned because a transferred
-# annotation is only comparable to another when the same Liftoff version made
-# both. Networkx and numpy arrive via the PyDESeq2/NanoPlot stack above.
-RUN pip install --no-cache-dir liftoff==1.6.3.2
+# related assembly). Pinned because a transferred annotation is only
+# comparable to another when the same Liftoff version made both.
+#
+# Installed with --no-deps: every PyPI release, including this one, pins its
+# dependencies with exact `==` versions from 2020 (numpy 1.21.0, pysam
+# 0.16.0.1, networkx 2.4) that predate and conflict with the newer versions
+# already required by PyDESeq2/NanoPlot/ragtag elsewhere in this image.
+# Liftoff's actual code has no hard dependency on those exact versions -- the
+# pins are stale packaging, not a real compatibility constraint. numpy,
+# biopython, pysam and networkx are already present above; gffutils, pyfaidx
+# and ujson all publish arm64 wheels and resolve normally. parasail does not
+# (see the parasail-build stage above) and comes from its pre-built wheel.
+COPY --from=parasail-build /wheels /tmp/wheels-parasail
+RUN pip install --no-cache-dir --find-links /tmp/wheels-parasail \
+        gffutils pyfaidx interlap ujson parasail \
+    && pip install --no-cache-dir --no-deps liftoff==1.6.3.2 \
+    && rm -rf /tmp/wheels-parasail
 
 # Sniffles2, the long-read structural variant caller. Its edlib dependency
 # comes from the wheel built in the edlib-build stage above -- see there for
