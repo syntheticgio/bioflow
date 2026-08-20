@@ -1,6 +1,10 @@
-import { useCallback, useState } from "react";
+import { Fragment, useCallback, useState } from "react";
 import { api } from "../api/client";
-import type { ObjectDetail as ObjectDetailData, VcfStatsFacts } from "../api/types";
+import type {
+  ObjectDetail as ObjectDetailData,
+  VariantSummary,
+  VcfStatsFacts,
+} from "../api/types";
 import { AiSummary } from "./AiSummary";
 import { FactsColumns } from "./FactsColumns";
 import { InfoMarker } from "./InfoMarker";
@@ -166,7 +170,10 @@ export function VariantResults({ obj }: { obj: ObjectDetailData }) {
                         Substitution types
                         <InfoMarker metric="ui.vcf_substitutions" />
                       </div>
-                      <SubstitutionsTable rows={f.vcf_stats_substitutions} />
+                      <SubstitutionsTable
+                        rows={f.vcf_stats_substitutions}
+                        summary={f.vcf_stats_summary}
+                      />
                     </div>
                   )}
 
@@ -263,8 +270,81 @@ function SummaryRow({ summary }: { summary: NonNullable<VcfStatsFacts["vcf_stats
   );
 }
 
-function SubstitutionsTable({ rows }: { rows: { type: string; count: number }[] }) {
+// The four ST classes bcftools counts as transitions; the other eight base
+// changes are transversions.
+const TRANSITION_CLASSES = new Set(["A>G", "G>A", "C>T", "T>C"]);
+
+/**
+ * Which of the two Ti/Tv categories an ST row belongs to.
+ *
+ * bcftools emits a single-base change as `A>C`; it is a transition when it
+ * stays within one base pair (A<->G, C<->T), a transversion otherwise. A type
+ * that is not a single-base change at all -- an unusual ST section -- parses
+ * to null, and the row renders ungrouped rather than guessed into a bucket.
+ */
+export function substitutionKind(
+  type: string,
+): "transition" | "transversion" | null {
+  const m = /^([ACGT])[>:]([ACGT])$/i.exec(type);
+  if (!m) return null;
+  const pair = `${m[1].toUpperCase()}>${m[2].toUpperCase()}`;
+  return TRANSITION_CLASSES.has(pair) ? "transition" : "transversion";
+}
+
+/**
+ * The substitution spectrum, banded the way a call set is judged.
+ *
+ * bcftools' ST section lists the classes in the order it emits them,
+ * transitions and transversions interleaved, so the two categories a scientist
+ * actually checks -- and the summary row's Ti/Tv ratio is the number people
+ * read -- are impossible to see without doing the arithmetic across six
+ * rows. The rows are therefore banded into the two groups, each with its own
+ * colour and a subtotal. The subtotals are the summary's TSTV counts (ts, tv)
+ * -- the same numbers the Ti/Tv statistic divides -- rather than a second sum
+ * over these rows, which a partial ST section could make disagree with it.
+ */
+export function SubstitutionsTable({
+  rows,
+  summary,
+}: {
+  rows: { type: string; count: number }[];
+  summary?: VariantSummary;
+}) {
   const max = Math.max(...rows.map((r) => r.count), 1);
+  const groups = [
+    {
+      label: "Transitions" as const,
+      color: "var(--accent)",
+      rows: rows.filter((r) => substitutionKind(r.type) === "transition"),
+    },
+    {
+      label: "Transversions" as const,
+      color: "var(--warn)",
+      rows: rows.filter((r) => substitutionKind(r.type) === "transversion"),
+    },
+  ];
+  const unclassified = rows.filter((r) => substitutionKind(r.type) === null);
+
+  // The row sums stand in only when the summary is absent, which a file that
+  // reached this table never is -- the ST and TSTV sections are written by
+  // the same bcftools pass.
+  const totals = {
+    Transitions:
+      summary?.ts ?? groups[0].rows.reduce((s, r) => s + r.count, 0),
+    Transversions:
+      summary?.tv ?? groups[1].rows.reduce((s, r) => s + r.count, 0),
+  };
+
+  const bar = (count: number, color: string) => (
+    <div
+      style={{
+        height: 8,
+        width: `${Math.min(100, (count / max) * 100)}%`,
+        background: color,
+      }}
+    />
+  );
+
   return (
     <table className="trim-table">
       <thead>
@@ -275,19 +355,54 @@ function SubstitutionsTable({ rows }: { rows: { type: string; count: number }[] 
         </tr>
       </thead>
       <tbody>
-        {rows.map((r) => (
+        {groups.map((g) => (
+          <Fragment key={g.label}>
+            <tr>
+              <td
+                style={{
+                  borderTop: "2px solid var(--border)",
+                  color: "var(--text-dim)",
+                  fontWeight: 600,
+                }}
+              >
+                {g.label}
+              </td>
+              <td
+                style={{
+                  textAlign: "right",
+                  borderTop: "2px solid var(--border)",
+                  fontWeight: 600,
+                }}
+              >
+                {totals[g.label].toLocaleString()}
+              </td>
+              <td
+                style={{
+                  width: "40%",
+                  borderTop: "2px solid var(--border)",
+                }}
+              >
+                {bar(totals[g.label], g.color)}
+              </td>
+            </tr>
+            {g.rows.map((r) => (
+              <tr key={r.type}>
+                <td className="mono" style={{ paddingLeft: 14 }}>
+                  {r.type}
+                </td>
+                <td style={{ textAlign: "right" }}>
+                  {r.count.toLocaleString()}
+                </td>
+                <td style={{ width: "40%" }}>{bar(r.count, g.color)}</td>
+              </tr>
+            ))}
+          </Fragment>
+        ))}
+        {unclassified.map((r) => (
           <tr key={r.type}>
             <td className="mono">{r.type}</td>
             <td style={{ textAlign: "right" }}>{r.count.toLocaleString()}</td>
-            <td style={{ width: "40%" }}>
-              <div
-                style={{
-                  height: 8,
-                  width: `${(r.count / max) * 100}%`,
-                  background: "var(--accent)",
-                }}
-              />
-            </td>
+            <td style={{ width: "40%" }}>{bar(r.count, "var(--text-faint)")}</td>
           </tr>
         ))}
       </tbody>
