@@ -11,19 +11,10 @@ from pathlib import Path
 
 from app.errors import ValidationError
 from app.logging import get_logger
+from app.pipelines import sv_caller
 from app.pipelines.align_runner import ReadChemistry
 
 log = get_logger(__name__)
-
-# Chemistries whose reads are long enough for breakpoint resolution.
-_LONG_READ = frozenset(
-    {
-        ReadChemistry.HIFI,
-        ReadChemistry.CLR,
-        ReadChemistry.ONT_SIMPLEX,
-        ReadChemistry.ONT_DUPLEX,
-    }
-)
 
 
 @dataclass
@@ -81,19 +72,17 @@ class SnifflesParams:
 def sv_calling_allowed_for(chemistry: ReadChemistry) -> bool:
     """Whether this chemistry's reads can support SV calling.
 
-    CLR is allowed here and *refused* by
-    `variant_runner.caller_for_chemistry`. That asymmetry is deliberate and
-    should not be harmonised away: small-variant calling reads per-base
-    accuracy, which CLR does not have, while Sniffles resolves breakpoints
-    from alignment structure -- split reads and within-read gaps -- which
-    tolerates a high per-base error rate. CLR reads are long, and length is
-    the property SV detection needs.
+    Delegates to `sv_caller.caller_for_chemistry` so there is one chemistry
+    table rather than two that can disagree. That function's docstring
+    carries the CLR asymmetry note this function used to own: CLR is allowed
+    for SV calling and refused by `variant_runner.caller_for_chemistry`, and
+    harmonising the two would silently delete a real capability.
 
-    SHORT is refused because Sniffles is a long-read caller; UNKNOWN because
-    it means QC has not run, and an unrecognised BAM that turns out to be
-    Illumina would produce junk quietly.
+    Now true for SHORT as well as long reads, since #620 added Delly. The
+    *which* caller question belongs to `caller_for_chemistry`; this function
+    answers only whether any caller applies.
     """
-    return chemistry in _LONG_READ
+    return sv_caller.caller_for_chemistry(chemistry) is not None
 
 
 def build_sniffles_command(
