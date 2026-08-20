@@ -81,6 +81,7 @@ ENDPOINT_JOB_TYPES: dict[str, frozenset[str]] = {
     "/pipelines/merge_structural_variants": frozenset({"merge_structural_variants"}),
     "/pipelines/phase-variants": frozenset({"phase_variants"}),
     "/pipelines/haplotag": frozenset({"haplotag"}),
+    "/pipelines/binning": frozenset({"binning"}),
     # Offered by the kmer_spectra and repeat_density cards. One route serves
     # both, since the handler runs both analyses in a single job.
     "/pipelines/meryl-analysis": frozenset({"analyze_meryl_tracks"}),

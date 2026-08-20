@@ -42,6 +42,7 @@ _CARD_RUN_KINDS: dict[str, RunKind] = {
     "preprocess": RunKind.TRIM,
     "phase": RunKind.PHASE_VARIANTS,
     "haplotag": RunKind.HAPLOTAG,
+    "binning": RunKind.BINNING,
 }
 
 

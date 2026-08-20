@@ -1742,6 +1742,194 @@ async def _apply_assemble_reads(result: dict, *, owner: str) -> None:
         await run_service.record_outputs(run_id, produced, owner=contigs.owner)
 
 
+async def _apply_binning(result: dict, *, owner: str) -> None:
+    """Turn a finished binning run into one DataObject per bin.
+
+    The only applier that ingests an unbounded N objects from one job.
+    `_apply_assemble_reads` is the precedent -- it already ingests two,
+    contigs first and independently, so a secondary output cannot cost the
+    expensive one -- and this generalizes that posture from 2 to N.
+
+    Three decisions worth stating, all from
+    docs/superpowers/specs/2026-08-20-metabat2-binning-design.md:
+
+    * **Each bin is `ObjectRole.REFERENCE`**, not a new `ObjectRole.MAG`
+      (B2/M3). A MAG *is* a draft genome: everything a user does with one next
+      -- align to it, annotate it, score its completeness, draw its GC track --
+      already keys off REFERENCE. A dedicated role would make each of those a
+      special case across registries that fail silently when a member is
+      missing, to express something `derived_from` already expresses.
+
+    * **Bins are ingested independently** (R3). A failure on bin 12 must not
+      lose bins 1-11 and 13-40, so each ingest is its own try/except and the
+      count reported is the count that actually landed -- not the count
+      MetaBAT2 produced.
+
+    * **The unbinned contigs become an object** (B3), not a discarded file.
+      They are frequently the most interesting part of a metagenome -- novel
+      organisms with no close relative, or a community too diverse to resolve
+      at this depth -- and as an object they can be re-assembled, re-binned, or
+      classified like anything else. The *fraction* also lands as a fact on the
+      source assembly: the number tells the user whether to care, the object
+      lets them act.
+    """
+    from app.services import object_service, run_service
+
+    contigs_id = result.get("contigs_id") or result.get("object_id")
+    bins_out = result.get("bins") or []
+    if not contigs_id or not bins_out:
+        return
+
+    contigs = await DataObject.get(PydanticObjectId(contigs_id))
+    if contigs is None:
+        log.warning("binning_parent_missing", object_id=contigs_id)
+        return
+
+    # Re-checked here, not only in the handler. The handler's check is what
+    # keeps an unappliable run off a worker; this one is what makes the
+    # guarantee true -- an applier is reachable from a result that did not come
+    # straight from this run of the handler (a retry, a replayed job), and
+    # ingesting a truncated set of MAGs is precisely the silent loss B4 refuses.
+    cap = settings.metagenome_bin_cap
+    if len(bins_out) > cap:
+        log.error(
+            "binning_over_cap",
+            object_id=contigs_id,
+            bin_count=len(bins_out),
+            cap=cap,
+        )
+        raise PermanentError(
+            f"MetaBAT2 produced {len(bins_out)} bins, more than the {cap} this "
+            f"instance will ingest from one run. Nothing was ingested."
+        )
+
+    job_id = result.get("job_id")
+    produced_by = PydanticObjectId(job_id) if job_id else None
+
+    bam_id = result.get("bam_object_id")
+    # Both parents: a MAG is a claim about this assembly *at this coverage*,
+    # and the alignment is half of what produced it. Losing the BAM from the
+    # lineage would make the binning unreproducible from the object graph.
+    parents = [contigs.id]
+    if bam_id:
+        parents.append(PydanticObjectId(bam_id))
+
+    shared = {
+        "binned_by": "metabat2",
+        "binner_version": result.get("tool_version"),
+        "bin_min_contig": (result.get("params") or {}).get("min_contig"),
+    }
+    shared = {k: v for k, v in shared.items() if v is not None}
+
+    produced: list[PydanticObjectId] = []
+    for entry in bins_out:
+        index = entry.get("index")
+        try:
+            bin_obj = await object_service.ingest_local_file(
+                owner=contigs.owner,
+                project_id=contigs.project_id,
+                path=Path(entry["tmp_path"]),
+                name=entry["name"],
+                role=ObjectRole.REFERENCE,
+                derived_from=parents,
+                produced_by_job=produced_by,
+                facts={
+                    **shared,
+                    "bin_index": index,
+                    "bin_source_assembly": str(contigs.id),
+                    "bin_contig_count": entry.get("contig_count"),
+                    "bin_total_bases": entry.get("total_bases"),
+                    "bin_total_bins": len(bins_out),
+                    **(
+                        {"bin_mean_depth": round(entry["mean_depth"], 4)}
+                        if entry.get("mean_depth") is not None
+                        else {}
+                    ),
+                },
+                # The community's sample-level metadata, carried forward: a MAG
+                # came out of this sample and stays findable by it.
+                metadata=dict(contigs.metadata),
+            )
+        except Exception as e:  # noqa: BLE001
+            # Logged and swallowed, per bin. This is the whole point of the
+            # per-bin loop: forty MAGs from an expensive run must not be lost
+            # to whichever one of them tripped.
+            log.error(
+                "bin_ingest_failed",
+                object_id=contigs_id,
+                bin_index=index,
+                error=str(e),
+            )
+            continue
+        produced.append(bin_obj.id)
+
+    unbinned_out = result.get("unbinned")
+    unbinned_id = None
+    if unbinned_out:
+        try:
+            unbinned = await object_service.ingest_local_file(
+                owner=contigs.owner,
+                project_id=contigs.project_id,
+                path=Path(unbinned_out["tmp_path"]),
+                name=unbinned_out["name"],
+                # REFERENCE like its binned siblings: the contigs nothing could
+                # place are still contigs, and the point of making them an
+                # object is that every downstream card works on them.
+                role=ObjectRole.REFERENCE,
+                derived_from=parents,
+                produced_by_job=produced_by,
+                facts={
+                    **shared,
+                    # No bin_index: this is not a bin. `bin_unbinned` is what a
+                    # reader keys off, rather than inferring it from a null.
+                    "bin_unbinned": True,
+                    "bin_source_assembly": str(contigs.id),
+                    "bin_contig_count": unbinned_out.get("contig_count"),
+                    "bin_total_bases": unbinned_out.get("total_bases"),
+                },
+                metadata=dict(contigs.metadata),
+            )
+            produced.append(unbinned.id)
+            unbinned_id = unbinned.id
+        except Exception as e:  # noqa: BLE001
+            log.error(
+                "unbinned_ingest_failed", object_id=contigs_id, error=str(e)
+            )
+
+    # On the source assembly, so "how much of this community resolved" is
+    # answerable without opening N objects and adding up their sizes.
+    facts = dict(result.get("binning_facts") or {})
+    # The count that actually landed, not the count MetaBAT2 produced (R3).
+    # Reporting the latter would tell the user they have forty MAGs when the
+    # project holds thirty-nine.
+    ingested_bins = len(produced) - (1 if unbinned_id is not None else 0)
+    facts["binning_bin_count"] = ingested_bins
+    if unbinned_id is not None:
+        facts["binning_unbinned_object"] = str(unbinned_id)
+    if facts:
+        # Per-key `facts.<key>` paths rather than a whole-dict merge, for the
+        # reason #606 documents on the BAM: a merge computed from a stale
+        # snapshot erases whatever else wrote facts on this object meanwhile.
+        await contigs.set(
+            {
+                **{f"facts.{key}": value for key, value in facts.items()},
+                DataObject.updated_at: datetime.now(UTC),
+            }
+        )
+
+    log.info(
+        "binning_applied",
+        object_id=contigs_id,
+        bins_produced=len(bins_out),
+        bins_ingested=ingested_bins,
+        unbinned=unbinned_id is not None,
+    )
+
+    run_id = await run_service.run_for_job(PydanticObjectId(job_id)) if job_id else None
+    if run_id is not None and produced:
+        await run_service.record_outputs(run_id, produced, owner=contigs.owner)
+
+
 async def _apply_index_bam(result: dict, *, owner: str) -> None:
     """Attach a `.bai` to its BAM and record the flagstat numbers."""
     from app.services import object_service
@@ -4120,6 +4308,7 @@ _APPLIERS = {
     "merge_transcripts": _apply_merge_transcripts,
     "differential_expression": _apply_differential_expression,
     "assemble_reads": _apply_assemble_reads,
+    "binning": _apply_binning,
     "assess_completeness": _apply_assess_completeness,
     "assess_misassemblies": _apply_assess_misassemblies,
     "analyze_gc_tracks": _apply_analyze_gc_tracks,

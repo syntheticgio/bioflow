@@ -889,6 +889,39 @@ def modkit() -> Tool:
 
 
 @lru_cache(maxsize=1)
+def metabat2() -> Tool:
+    # `--help`, not `--version`: MetaBAT2 has no --version flag at all. It
+    # prints "MetaBAT: ... (version 2:2.18; 20260506_185023)" as the first line
+    # of --help and exits zero -- verified against a real bioconda 2.18 install
+    # on 2026-08-20, where _clean_version extracts "2.18" from that banner.
+    #
+    # No arm64 special-casing, unlike polypolish(): bioconda ships
+    # linux-aarch64 builds of metabat2, so a missing binary here means a
+    # genuinely broken install rather than an unsupported platform.
+    #
+    # This probe is weaker than it looks, for mosdepth's reason with more
+    # force: metabat2 links boost and htslib out of its own env, and usage
+    # printing exercises neither. The install script therefore runs a real
+    # binning pass over a generated two-organism community at build time --
+    # that, not this probe, is what establishes the tool works.
+    return _probe("metabat2", settings.metabat2_path, ["--help"])
+
+
+@lru_cache(maxsize=1)
+def jgi_depths() -> Tool:
+    # MetaBAT2's own depth summarizer, probed separately despite shipping in
+    # the same conda package -- because the binning job execs it as its own
+    # process, and "metabat2 is installed" is not evidence that this binary is
+    # on PATH under the name the job calls.
+    #
+    # Deliberately NOT in all_tools(): it is an implementation detail of
+    # binning rather than a capability a user chooses, and listing it on the
+    # availability panel would offer a tool with nothing to launch. The
+    # binning handler requires it directly.
+    return _probe("jgi_depths", settings.jgi_depths_path, ["--help"])
+
+
+@lru_cache(maxsize=1)
 def seqkit() -> Tool:
     # seqkit has no `--version`; `seqkit version` prints "seqkit v2.x.y".
     return _probe("seqkit", settings.seqkit_path, ["version"])
@@ -1019,6 +1052,7 @@ def all_tools() -> list[Tool]:
         bedtools(),
         mosdepth(),
         modkit(),
+        metabat2(),
         seqkit(),
         snpeff(),
         filtlong(),
@@ -2857,6 +2891,48 @@ TOOL_META: dict[str, ToolMeta] = {
         # is now dispatched to directly, not just installed alongside Merqury.
         runnable=True,
     ),
+    "metabat2": ToolMeta(
+        # REFERENCE_ASSEMBLY, not ASSEMBLE. MetaBAT2 produces assemblies but
+        # assembles nothing: it takes a finished assembly plus an alignment and
+        # separates what is already there. Declaring ASSEMBLE would list it in
+        # the picker headed "an assembler" beside Flye, as something to
+        # assemble reads *with* -- the exact confusion ASSEMBLY_QC was split
+        # off to avoid.
+        pipelines=(PipelineType.REFERENCE_ASSEMBLY,),
+        one_liner="Bins metagenome contigs into per-organism draft genomes",
+        summary=(
+            "MetaBAT 2 separates a metagenome assembly -- one FASTA holding "
+            "contigs from many organisms at once -- into bins, each a "
+            "candidate draft genome of a single organism (a MAG). It groups "
+            "contigs by tetranucleotide composition and by how their read "
+            "coverage co-varies, which are the two signals that differ "
+            "between organisms in one community."
+        ),
+        strengths=(
+            "Recovers per-organism draft genomes from a mixed-community assembly",
+            "Bins on coverage co-variance as well as composition, not either alone",
+            "Adaptive thresholds; no per-dataset parameter tuning required",
+            "Reports the contigs it could not place rather than discarding them",
+        ),
+        homepage="https://bitbucket.org/berkeleylab/metabat",
+        repository="https://bitbucket.org/berkeleylab/metabat",
+        # The MetaBAT *2* paper. The conda package's own metadata names
+        # doi:10.7717/peerj.1165, which is the 2015 MetaBAT 1 paper -- a
+        # different algorithm from the one this image ships, so citing it
+        # would misattribute the method.
+        citation="Kang et al., PeerJ 2019",
+        citation_url="https://doi.org/10.7717/peerj.7359",
+        license="BSD-3-Clause-LBNL",
+        usage=(
+            "Backs the Bin metagenome card on a community assembly. Given the "
+            "assembly and an alignment of its own reads back against it, it "
+            "writes each bin out as its own reference object, so a MAG can be "
+            "annotated, aligned to, or scored for completeness like any other "
+            "draft genome. Depth comes from MetaBAT2's own summarizer, which "
+            "reports the per-contig coverage variance the binner needs."
+        ),
+        runnable=True,
+    ),
     "mosdepth": ToolMeta(
         pipelines=(PipelineType.UTILITY,),
         one_liner="Fast per-base and per-window read-depth calculator",
@@ -3212,4 +3288,6 @@ def reset_cache() -> None:
     # the cached Tool.
     bedtools.cache_clear()
     mosdepth.cache_clear()
+    metabat2.cache_clear()
+    jgi_depths.cache_clear()
     modkit.cache_clear()

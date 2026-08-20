@@ -666,6 +666,26 @@ RUN chmod +x /srv/scripts/install-modkit.sh \
     && MODKIT_VERSION="${MODKIT_VERSION}" \
        /srv/scripts/install-modkit.sh
 
+# --- MetaBAT2 -----------------------------------------------------------
+#
+# Metagenome contig binning -- turns one community assembly into N candidate
+# genomes (MAGs). Closes #728. Same bioconda/micromamba shape as mosdepth and
+# modkit above: not in Debian trixie (checked with a control package in the
+# same container, see the install script), and bioconda publishes 2.18 for
+# linux-aarch64 as well as linux-64, so there is no arm64 skip and
+# tools.metabat2() needs no architecture special case.
+#
+# The package also ships jgi_summarize_bam_contig_depths, which is what the
+# binning job computes depth with -- deliberately, not incidentally. It emits
+# per-contig depth variance, and MetaBAT2 bins on coverage co-variance; a
+# depth file from any tool that reports means alone is one MetaBAT2 accepts
+# and silently bins worse from.
+ARG METABAT2_VERSION=2.18
+COPY scripts/install-metabat2.sh /srv/scripts/install-metabat2.sh
+RUN chmod +x /srv/scripts/install-metabat2.sh \
+    && METABAT2_VERSION="${METABAT2_VERSION}" \
+       /srv/scripts/install-metabat2.sh
+
 # --- CRAQ --------------------------------------------------------------
 #
 # Reference-free assembly error detection. Not packaged for Debian trixie;

@@ -24,6 +24,7 @@ from app.services.suggestion_service import (
     build_annotate_card,
     build_annotation_comparison_card,
     build_assemble_card,
+    build_binning_card,
     build_classify_reads_card,
     build_coverage_card,
     build_extract_sequences_card,
@@ -4096,3 +4097,100 @@ class TestExtractSequencesCard:
         assert card is not None
         assert card.status is CardStatus.UNAVAILABLE
         assert "not installed" in card.reason
+
+
+class TestBinningCard:
+    """MetaBAT2 binning, anchored on the community assembly.
+
+    Failing direction first, per the design doc's testing notes: each cause of
+    unavailability is asserted on its own message, because a card that reports
+    the wrong reason sends the user to fix the wrong thing.
+    """
+
+    def _alignments(self, count=1):
+        """The (short, long, unknown) tuple `alignments_against` returns."""
+        made = [
+            SimpleNamespace(id=f"bam{i}", name=f"reads{i}.bam", metadata={})
+            for i in range(count)
+        ]
+        return (made, [], [])
+
+    def _assembly(self, facts=None):
+        obj = _fake_obj(
+            kind=FormatKind.FASTA,
+            facts=facts if facts is not None else {"assembly_meta_mode": True},
+            role=ObjectRole.REFERENCE,
+        )
+        # `_fake_obj` carries no name; the card names both objects in its
+        # `why`, which is the whole point of that sentence.
+        obj.name = "community.assembly.fasta"
+        return obj
+
+    def test_no_card_for_a_non_fasta(self):
+        assert build_binning_card(_fake_obj(kind=FormatKind.BAM), None) is None
+
+    def test_unavailable_when_metabat2_is_not_installed(self):
+        with patch(
+            "app.services.suggestion_service.tools.metabat2",
+            return_value=_FakeTool(False, error="metabat2 was not found on PATH."),
+        ):
+            card = build_binning_card(self._assembly(), self._alignments())
+        assert card.status is CardStatus.UNAVAILABLE
+        assert card.launch is None
+        assert "metabat2" in card.reason
+
+    def test_unavailable_without_an_alignment_of_its_own_reads(self):
+        """Binning needs per-contig coverage. Without an alignment there is
+        literally nothing to bin on, and the reason has to say which of the
+        two inputs is missing."""
+        with patch(
+            "app.services.suggestion_service.tools.metabat2",
+            return_value=_FakeTool(True),
+        ):
+            card = build_binning_card(self._assembly(), None)
+        assert card.status is CardStatus.UNAVAILABLE
+        assert "align" in card.reason.lower()
+
+    def test_available_with_an_assembly_and_an_alignment(self):
+        with patch(
+            "app.services.suggestion_service.tools.metabat2",
+            return_value=_FakeTool(True),
+        ):
+            card = build_binning_card(self._assembly(), self._alignments())
+        assert card.status is CardStatus.AVAILABLE
+        assert card.launch["endpoint"] == "/pipelines/binning"
+        assert card.launch["body"]["alignment_ids"] == ["bam0"]
+
+    def test_a_non_meta_assembly_is_offered_with_an_explanation(self):
+        """The `--meta` gate is SOFT, deliberately.
+
+        Binning an isolate assembly is unusual rather than wrong -- a
+        contaminated isolate is exactly a case someone might want to bin -- so
+        this must stay AVAILABLE. Hard-gating here would be the `protein.faa`
+        mistake `build_consensus_card` already documents, in a new costume.
+        """
+        with patch(
+            "app.services.suggestion_service.tools.metabat2",
+            return_value=_FakeTool(True),
+        ):
+            card = build_binning_card(self._assembly(facts={}), self._alignments())
+        assert card.status is CardStatus.AVAILABLE
+        assert "metagenome mode" in card.why
+
+    def test_a_meta_assembly_carries_no_such_warning(self):
+        with patch(
+            "app.services.suggestion_service.tools.metabat2",
+            return_value=_FakeTool(True),
+        ):
+            card = build_binning_card(self._assembly(), self._alignments())
+        assert "metagenome mode" not in card.why
+
+    def test_every_alignment_is_offered_to_the_dialog(self):
+        """Seeded into the launch body so the picker need not re-list the
+        project."""
+        with patch(
+            "app.services.suggestion_service.tools.metabat2",
+            return_value=_FakeTool(True),
+        ):
+            card = build_binning_card(self._assembly(), self._alignments(count=3))
+        assert len(card.launch["body"]["candidate_alignments"]) == 3

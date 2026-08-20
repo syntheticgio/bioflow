@@ -289,6 +289,19 @@ async def _launch_haplotag(*, inputs: dict, params: dict, owner: str):
     )
 
 
+async def _launch_binning(*, inputs: dict, params: dict, owner: str):
+    # The assembly is the thing being split; the alignment is what supplies the
+    # coverage MetaBAT2 bins on. One BAM, not several -- multi-sample co-binning
+    # is a bigger change needing the N-input port representation, and is
+    # deliberately out of scope for this node.
+    return await pipeline_service.launch_binning(
+        object_id=inputs["assembly"],
+        owner=owner,
+        alignment_ids=[inputs["alignment"].id],
+        params=params,
+    )
+
+
 async def _launch_annotation_export(*, inputs: dict, params: dict, owner: str):
     """Export a filtered subset, holding the export behind the results
     sidecar it depends on.
@@ -1464,6 +1477,37 @@ NODE_TYPES: dict[str, NodeTypeSpec] = {
             PortSpec(
                 "phased",
                 PortType(format=FormatKind.VCF, role=ObjectRole.VARIANTS),
+            ),
+        ),
+    ),
+    "binning": NodeTypeSpec(
+        label="Bin metagenome",
+        launch_name="pipeline_service.launch_binning",
+        launch=_launch_binning,
+        run_kind=RunKind.BINNING,
+        # The one node whose output count is data-dependent: MetaBAT2 emits N
+        # bins, where N is a property of the community. The single output port
+        # describes what each produced object *is* -- a draft genome -- which is
+        # what a downstream wire needs to type-check. Nothing on the canvas
+        # today can express "N of these", and inventing that here would be a
+        # port-model change rather than a tool addition.
+        inputs=(
+            PortSpec(
+                "assembly",
+                PortType(format=FormatKind.FASTA, role=ObjectRole.REFERENCE),
+            ),
+            PortSpec(
+                "alignment",
+                PortType(format=FormatKind.BAM, role=ObjectRole.ALIGNMENT),
+            ),
+        ),
+        outputs=(
+            PortSpec(
+                "bins",
+                # REFERENCE, like every other draft genome. A MAG is usable by
+                # the align, annotate and completeness cards precisely because
+                # it carries no special role of its own.
+                PortType(format=FormatKind.FASTA, role=ObjectRole.REFERENCE),
             ),
         ),
     ),

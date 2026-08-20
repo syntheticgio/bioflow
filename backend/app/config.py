@@ -265,6 +265,25 @@ class Settings(BaseSettings):
     mosdepth_path: str = "mosdepth"
     # Same wrapper shape as mosdepth_path above. See scripts/install-modkit.sh.
     modkit_path: str = "modkit"
+    # Two paths, not one derived from the other, because they are two binaries
+    # a binning job execs separately -- and the depth summarizer is the one
+    # that is easy to assume away. Both are wrappers in /usr/local/bin for the
+    # same reason mosdepth's is. See scripts/install-metabat2.sh.
+    metabat2_path: str = "metabat2"
+    jgi_depths_path: str = "jgi_summarize_bam_contig_depths"
+    # How many bins one binning job may turn into DataObjects. A deep
+    # community can produce hundreds, and several hundred new objects from a
+    # single click is a usability failure even when every object is correct.
+    #
+    # Over the cap the job REFUSES rather than truncating -- see
+    # metabat_runner.check_bin_cap. Truncation would drop MAGs ordered by
+    # MetaBAT2's numbering rather than by quality, so the discarded set would
+    # be arbitrary and invisible; a refusal is something a user can act on by
+    # raising --minContig or asking for this number to go up.
+    #
+    # A setting rather than a constant because 200 is a guess about usability,
+    # not a fact about biology, and should be changeable without a code edit.
+    metagenome_bin_cap: int = 200
     seqkit_path: str = "seqkit"
     # Model directories, one per Clair3 --platform. The install script
     # normalizes each to hold the checkpoint files directly.
