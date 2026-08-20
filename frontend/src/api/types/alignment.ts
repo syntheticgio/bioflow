@@ -300,6 +300,12 @@ export interface BamStatsFacts {
   /** Filename of the report on disk -- truthy iff the job has run. Fetched
    * through api.coverageReport by object id, not by this path. */
   coverage_report?: string;
+
+  /** Facts produced by the gc_bias job. See GcBiasChart.tsx. Needs both this
+   * BAM's windowed coverage and its reference's gc_tracks, so it is a
+   * separate job/fact rather than folded into coverage_* above. */
+  gc_bias_status?: "ok";
+  gc_bias_curve?: GcBiasBin[];
 }
 
 export interface ContigsPage {
@@ -384,4 +390,17 @@ export interface CoverageReport {
   /** Cumulative fraction of bases at >= each depth, across the reference. */
   dist: Record<string, number>;
   window_count: number | null;
+}
+
+/**
+ * One fixed-width GC bin of `gc_coverage.bias_curve`. Bins with no observed
+ * windows are omitted by the backend, not zero-filled -- see
+ * GcBiasChart.tsx.
+ */
+export interface GcBiasBin {
+  gc_min: number;
+  gc_max: number;
+  /** Width-weighted mean depth of every window whose GC falls in this bin. */
+  mean_depth: number;
+  window_count: number;
 }

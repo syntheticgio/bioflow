@@ -636,6 +636,13 @@ export const METRIC_INFO: Record<string, MetricInfo> = {
     description:
       "Mean depth per contig against the genome-wide mean. Contigs far below the line have less material in the sample than the reference expects; far above usually means repeat content or a plasmid present in many copies.",
   },
+  "ui.chart_gc_bias": {
+    term: "Coverage vs GC bias",
+    description:
+      "Mean read depth across the reference, binned by GC content. A dome shape peaking at mid-GC is PCR amplification bias — fixable at the bench, not by re-aligning. A flat line means depth does not depend on GC. A monotonic rise or fall points at a capture or enrichment artifact instead of PCR.",
+    computed:
+      "Reference GC (gc_tracks) joined against per-window depth (mosdepth coverage) on their shared window grid, width-weighted per bin so a contig with wider windows is not over-represented.",
+  },
   "ui.chart_contig_depth_strip": {
     term: "Depth by chromosome",
     description:

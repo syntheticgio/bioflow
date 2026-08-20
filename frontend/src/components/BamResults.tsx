@@ -18,6 +18,7 @@ import { ContigDepthStrip } from "./ContigDepthStrip";
 import { CoverageDepth } from "./CoverageDepth";
 import { DepthHistogramChart } from "./DepthHistogramChart";
 import { FeatureCoverage } from "./FeatureCoverage";
+import { GcBiasChart } from "./GcBiasChart";
 import { OnDemandCompute } from "./OnDemandCompute";
 import { TranscriptQc } from "./TranscriptQc";
 
@@ -253,6 +254,13 @@ export function BamResults({ obj }: { obj: ObjectDetailData }) {
           the two coverage panels read together: per annotated feature, then
           per window across the whole reference. */}
       {f.coverage_report && <CoverageDepth objectId={obj.id} />}
+
+      {/* Same independent-job reasoning as CoverageDepth above. Needs both
+          this BAM's windowed coverage and its reference's gc_tracks, so it
+          is gated on gc_bias's own fact rather than either prerequisite's. */}
+      {f.gc_bias_status === "ok" && f.gc_bias_curve && (
+        <GcBiasChart curve={f.gc_bias_curve} />
+      )}
     </>
   );
 }
