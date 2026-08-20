@@ -496,6 +496,14 @@ FORMAT_DERIVED_ROLES: frozenset[ObjectRole] = frozenset(
         # the applier already records from the run that produced it, and a
         # results table nobody produced here is not a thing that exists.
         ObjectRole.DE_RESULTS,
+        # ASSEMBLED_TRANSCRIPTS belongs here for DE_RESULTS' reason directly
+        # above: there is nothing to ask a user about it. Which alignment,
+        # which reference annotation, which tool and version -- all of it is
+        # provenance the applier records from the run that produced it, and a
+        # transcript assembly nobody produced here is not a thing that exists.
+        # The sample-level metadata (condition, sample_id, batch) is already
+        # COMMON_FIELDS and travels forward from the reads.
+        ObjectRole.ASSEMBLED_TRANSCRIPTS,
         # An assembly graph's questions are its format's. There is nothing to
         # ask that the GFA does not already answer -- and pointedly no
         # assembly accession, since a de novo graph is precisely the case

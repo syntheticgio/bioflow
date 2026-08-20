@@ -161,6 +161,19 @@ class ObjectRole(StrEnum):
     # someone loads into Bandage to see how the contigs connect. Format alone
     # cannot say it either, since GFA is also an alignment-graph format.
     ASSEMBLY_GRAPH = "assembly_graph"
+    # Transcript models assembled from an alignment, as GTF. A separate role
+    # from ANNOTATION because the two are the same format carrying opposite
+    # authority: a downloaded GFF3 is what is known about the organism, and
+    # this is what one run proposed about one sample. The split is the same
+    # one that keeps COUNTS and DE_RESULTS apart.
+    #
+    # Note honestly what this role does and does not buy. Every gate that
+    # decides "is this an annotation" is format-first, because an ingested
+    # GFF/GTF carries role=None (see pipeline_service._is_annotation), so
+    # this role does not by itself keep assembled transcripts out of an
+    # annotation picker. The explicit exclusion in _is_annotation does that.
+    # This role is what makes the distinction visible and queryable.
+    ASSEMBLED_TRANSCRIPTS = "assembled_transcripts"
 
 
 class SidecarRole(StrEnum):
