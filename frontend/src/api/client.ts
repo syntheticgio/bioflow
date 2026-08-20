@@ -120,6 +120,7 @@ import type {
   WorkflowDefinition,
   WorkflowDefinitionInput,
   WorkflowRunSummary,
+  MultiqcStatus,
 } from "./types";
 
 import { useProfileStore } from "../stores/profileStore";
@@ -870,6 +871,31 @@ export const api = {
    */
   qcReportUrl: (objectId: string, reportPath: string) =>
     `${BASE}/pipelines/qc/report/${objectId}/${reportPath}?${profileQuery()}`,
+
+  /**
+   * A project's aggregate MultiQC report. Keyed by project, not object --
+   * it summarizes every file and belongs to none of them.
+   *
+   * Carries the profile as a query param for the same reason
+   * `qcReportUrl` does: this is a plain `<a href>` opened in a new tab, so
+   * it cannot ride the profile header.
+   */
+  multiqcReportUrl: (projectId: string, reportPath = "multiqc_report.html") =>
+    `${BASE}/pipelines/qc/multiqc/${projectId}/${reportPath}?${profileQuery()}`,
+
+  /**
+   * What the Project QC panel should say. A `fetch`, not a link, so this
+   * one rides the normal profile header.
+   */
+  multiqcStatus: (projectId: string) =>
+    request<MultiqcStatus>(`/pipelines/qc/multiqc/${projectId}/status`),
+
+  /** Queue an aggregate QC report for a whole project. */
+  launchMultiqc: (projectId: string) =>
+    request<{ id: string }>(`/pipelines/multiqc`, {
+      method: "POST",
+      body: JSON.stringify({ project_id: projectId }),
+    }),
 
   /**
    * The per-tile quality matrix. A `fetch`, not a link -- unlike

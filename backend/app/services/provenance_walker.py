@@ -194,6 +194,10 @@ _NO_NARRATIVE_STEP: frozenset[str] = frozenset(
         "reap_pipeline_scratch",
         "reap_report_dirs",
         "reap_uploads",
+        # A project-wide QC summary over reports other jobs already wrote.
+        # Derives no object and mutates none, so it belongs in no object's
+        # lineage -- the same reasoning the read-only stats jobs above take.
+        "multiqc_report",
         # Read-only drift report; touches nothing, so it is never a step in
         # any object's lineage.
         "sweep_storage_drift",
