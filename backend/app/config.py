@@ -261,6 +261,8 @@ class Settings(BaseSettings):
     # A wrapper in /usr/local/bin, not the conda binary itself: mosdepth
     # dlopens libhts from its own env's lib/. See scripts/install-mosdepth.sh.
     mosdepth_path: str = "mosdepth"
+    # Same wrapper shape as mosdepth_path above. See scripts/install-modkit.sh.
+    modkit_path: str = "modkit"
     seqkit_path: str = "seqkit"
     # Model directories, one per Clair3 --platform. The install script
     # normalizes each to hold the checkpoint files directly.
