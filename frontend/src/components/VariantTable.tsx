@@ -33,6 +33,9 @@ export function VariantTable({
   const [variantType, setVariantType] = useState("");
   const [minQualInput, setMinQualInput] = useState("");
   const [consequence, setConsequence] = useState("");
+  // "" = no restriction; "phased" keeps only whatsHap-phased records;
+  // "unphased" keeps only those without a phase set.
+  const [phased, setPhased] = useState("");
   const [sampleIdx, setSampleIdx] = useState(0);
   // Holds the last known total across a skip_count page turn, so the row
   // count does not flash to nothing while only the page changed.
@@ -54,7 +57,7 @@ export function VariantTable({
   // should leave it alone.
   useEffect(() => {
     setPage(0);
-  }, [contig, filterValue, variantType, minQual, consequence]);
+  }, [contig, filterValue, variantType, minQual, consequence, phased]);
 
   const parsedMinQual = minQual.trim() === "" ? undefined : Number(minQual);
   const minQualValid = parsedMinQual == null || !Number.isNaN(parsedMinQual);
@@ -70,6 +73,7 @@ export function VariantTable({
       variantType,
       minQualValid ? parsedMinQual : undefined,
       consequence,
+      phased === "" ? undefined : phased === "phased",
     ],
     queryFn: () =>
       api.vcfStatsVariants(objectId, {
@@ -80,6 +84,7 @@ export function VariantTable({
         variantType: variantType || undefined,
         minQual: minQualValid ? parsedMinQual : undefined,
         consequence: consequence || undefined,
+        phased: phased === "" ? undefined : phased === "phased",
         skipCount: page > 0,
       }),
     placeholderData: keepPreviousData,
@@ -183,6 +188,15 @@ export function VariantTable({
         </label>
 
         <label style={{ display: "flex", flexDirection: "column", gap: 3 }}>
+          <span style={{ color: "var(--text-faint)" }}>Phasing</span>
+          <select value={phased} onChange={(e) => setPhased(e.target.value)}>
+            <option value="">Any</option>
+            <option value="phased">Phased</option>
+            <option value="unphased">Unphased</option>
+          </select>
+        </label>
+
+        <label style={{ display: "flex", flexDirection: "column", gap: 3 }}>
           <span style={{ color: "var(--text-faint)" }}>Min QUAL</span>
           <input
             type="text"
@@ -250,6 +264,7 @@ export function VariantTable({
                 <th style={{ textAlign: "right" }}>Qual</th>
                 <th>Filter</th>
                 <th style={{ textAlign: "right" }}>Depth</th>
+                <th>Phase set</th>
                 <th>Genotype</th>
                 <th />
               </tr>
@@ -284,6 +299,9 @@ export function VariantTable({
                     )}
                   </td>
                   <td style={{ textAlign: "right" }}>{row.dp == null ? "—" : row.dp}</td>
+                  <td className="mono">
+                    {row.phase_set == null ? "—" : row.phase_set}
+                  </td>
                   <td className="mono">{genotypeFor(row.gt, sampleIdx)}</td>
                   <td>
                     {/* Variants are called against whatever reference was

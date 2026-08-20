@@ -24,6 +24,7 @@ from app.pipelines import (
     variant_db,
     variant_runner,
     vcf_stats_runner,
+    whatshap_runner,
 )
 from app.pipelines.align_runner import ReadChemistry
 from app.pipelines.variant_runner import VariantCaller
@@ -747,4 +748,155 @@ def _annotate_variants_snpeff(ctx: JobContext, object_id: str) -> dict:
         "index": {"tmp_path": str(index), "name": index.name, "role": "tbi"},
         "tool": "snpeff",
         "tool_version": settings.snpeff_image.split(":")[-1],
+    }
+
+
+def _whatshap_line_logger(ctx: JobContext) -> "callable":
+    """A line callback that classifies whatsHap's stderr as it streams.
+
+    whatsHap logs progress and INFO to stderr on a normal run, and only
+    real failures carry an error prefix (see whatshap_runner). Those are
+    logged at warning, everything else at debug, rather than either failing
+    the job on routine progress noise or hiding an unrecognised line that
+    might matter.
+    """
+
+    def on_line(line: str) -> None:
+        if not line.strip():
+            return
+        if whatshap_runner.is_benign_whatshap_stderr(line):
+            log.debug("whatshap_stderr", job_id=ctx.job_id, line=line)
+        else:
+            log.warning("whatshap_error_line", job_id=ctx.job_id, line=line)
+
+    return on_line
+
+
+@handler(
+    "phase_variants",
+    mode=HandlerMode.SUBPROCESS,
+    job_class=JobClass.COMPUTE,
+    resources=JobResources(cpu=4, mem_mb=4096, io=IoClass.HEAVY),
+    # A whatsHap failure is almost always deterministic, and retrying a
+    # multi-minute phasing run delays the error without making it less likely.
+    max_attempts=2,
+)
+def phase_variants(ctx: JobContext) -> dict:
+    """Phase a called-variant VCF against its alignments with whatsHap.
+
+    `phase` takes the first alignment; `polyphase` takes one alignment per
+    sample. The phased VCF carries PS tags, which the variant table reads as
+    phase_set. Produces a new VCF object, like annotation -- the input is the
+    caller's output and phasing is a derivation of it.
+    """
+    object_id = ctx.payload.get("object_id")
+    if not object_id:
+        raise PermanentError("phase_variants requires an 'object_id'")
+    mode = ctx.payload.get("mode", "phase")
+    if mode not in (whatshap_runner.PHASE, whatshap_runner.POLYPHASE):
+        raise PermanentError(f"unknown whatshap mode: {mode!r}")
+
+    work = _prepare_workdir(ctx, "phase")
+    whatshap = tools.require(tools.whatshap())
+
+    # The input VCF and its index, read-only (symlinked).
+    vcf = _named_link(
+        work, _resolve_blob(ctx.payload, "vcf"), ctx.payload.get("vcf_name")
+    )
+
+    # The reference and its .fai, staged as real siblings -- whatsHap reads the
+    # .fai next to the FASTA, the same convention call_variants uses.
+    ref_name = Path(ctx.payload.get("reference_name") or "reference.fa").name
+    materialized = aligners.materialize(
+        workdir=work / "ref",
+        reference_name=ref_name,
+        reference_blob=_resolve_blob(ctx.payload, "reference"),
+        sidecars={
+            f"{ref_name}{aligners.FAI_SUFFIX}": str(
+                _resolve_blob(ctx.payload, "fai")
+            )
+        },
+    )
+    if materialized.missing_index:
+        raise PermanentError(
+            f"The reference index for {ref_name!r} could not be laid out. Its "
+            f".fai may be recorded against a different reference."
+        )
+    reference = materialized.reference
+
+    # One BAM (+ .bai) per alignment, laid out as siblings.
+    count = int(ctx.payload.get("bam_count", 1))
+    if count < 1:
+        raise PermanentError("phase_variants requires at least one alignment")
+    samples: dict[str, Path] = {}
+    for i in range(count):
+        bam_name = Path(
+            ctx.payload.get(f"bam_name_{i}") or f"aligned_{i}.bam"
+        ).name
+        bam = work / bam_name
+        bam.unlink(missing_ok=True)
+        bam.symlink_to(_resolve_blob(ctx.payload, f"bam_{i}"))
+        bai = work / f"{bam_name}{aligners.BAI_SUFFIX}"
+        bai.unlink(missing_ok=True)
+        bai.symlink_to(_resolve_blob(ctx.payload, f"bai_{i}"))
+        # whatsHap names samples itself from the BAM header when --sample is
+        # omitted; polyphase needs the name explicitly and it must match the
+        # VCF, so the launcher resolves it from the BAM.
+        samples[ctx.payload.get(f"sample_{i}", f"sample_{i}")] = bam
+
+    log_path = settings.logs_dir / f"{ctx.job_id}.log"
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+
+    out = work / "phased.vcf.gz"
+    if mode == whatshap_runner.PHASE:
+        cmd = whatshap_runner.build_whatshap_phase_command(
+            whatshap_path=whatshap.path,
+            reference=reference,
+            bam=next(iter(samples.values())),
+            vcf=vcf,
+            out=out,
+            threads=int(ctx.payload.get("threads", 4)),
+            sample=ctx.payload.get("sample"),
+            ignore_read_groups=bool(ctx.payload.get("ignore_read_groups", False)),
+            distrust_genotypes=bool(ctx.payload.get("distrust_genotypes", False)),
+            indels=bool(ctx.payload.get("indels", False)),
+        )
+    else:
+        cmd = whatshap_runner.build_whatshap_polyphase_command(
+            whatshap_path=whatshap.path,
+            reference=reference,
+            samples=samples,
+            vcf=vcf,
+            out=out,
+            threads=int(ctx.payload.get("threads", 4)),
+            ignore_read_groups=bool(ctx.payload.get("ignore_read_groups", False)),
+            distrust_genotypes=bool(ctx.payload.get("distrust_genotypes", False)),
+            indels=bool(ctx.payload.get("indels", False)),
+        )
+
+    code = run_subprocess(
+        ctx, cmd, log_path=str(log_path), on_line=_whatshap_line_logger(ctx)
+    )
+    if code != 0:
+        raise _failure(code, log_path, "whatshap")
+
+    name = whatshap_runner.phased_name(
+        ctx.payload.get("vcf_name") or vcf.name, mode
+    )
+    produced = out.parent / name
+    if produced != out:
+        out.rename(produced)
+    index = _index_vcf(ctx, produced, log_path)
+    ctx.progress(phase="done", pct=1.0, message="phasing complete")
+    log.info("phase_variants_finished", job_id=ctx.job_id, mode=mode, output=produced.name)
+    return {
+        "object_id": object_id,
+        "reference_object_id": ctx.payload.get("reference_object_id"),
+        "project_id": ctx.payload.get("project_id"),
+        "job_id": ctx.job_id,
+        "output": {"tmp_path": str(produced), "name": produced.name},
+        "index": {"tmp_path": str(index), "name": index.name, "role": "tbi"},
+        "mode": mode,
+        "tool_version": whatshap.version,
+        "alignment_object_ids": ctx.payload.get("alignment_object_ids", []),
     }

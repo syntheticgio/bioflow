@@ -74,6 +74,7 @@ import { ScaffoldDialog } from "./ScaffoldDialog";
 import { QuantifyDialog } from "./QuantifyDialog";
 import { DifferentialExpressionDialog } from "./DifferentialExpressionDialog";
 import { VariantDialog } from "./VariantDialog";
+import { PhaseDialog } from "./PhaseDialog";
 import { QcReport } from "./QcReport";
 import { TaxonomyFacts } from "./TaxonomyFacts";
 import { TrimReport } from "./TrimReport";
@@ -478,6 +479,7 @@ function ObjectDetail({ id }: { id: string }) {
   const [classifyReadsOpen, setClassifyReadsOpen] = useState(false);
   const [scaffoldOpen, setScaffoldOpen] = useState(false);
   const [deOpen, setDeOpen] = useState(false);
+  const [phaseOpen, setPhaseOpen] = useState(false);
   // The suggestion card's launch body, when a dialog was opened by "Adjust…"
   // rather than from the Computations row. One piece of state for every
   // dialog, because only one is ever open: the flow type above already makes
@@ -557,6 +559,9 @@ function ObjectDetail({ id }: { id: string }) {
         break;
       case "classify_reads":
         setClassifyReadsOpen(true);
+        break;
+      case "phase":
+        setPhaseOpen(true);
         break;
       default:
         setPrefill(null);
@@ -1171,6 +1176,16 @@ function ObjectDetail({ id }: { id: string }) {
           prefill={prefill}
           onClose={() => {
             setClassifyReadsOpen(false);
+            setPrefill(null);
+          }}
+        />
+      )}
+      {phaseOpen && (
+        <PhaseDialog
+          object={obj}
+          prefill={prefill}
+          onClose={() => {
+            setPhaseOpen(false);
             setPrefill(null);
           }}
         />

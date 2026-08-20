@@ -42,6 +42,10 @@ class VariantFilters:
     variant_type: str | None = None  # "snp" | "indel"
     min_qual: float | None = None
     consequence: str | None = None
+    # Whether to restrict to phased records. True keeps only rows with a phase
+    # set (set by whatsHap), False keeps only the unphased; None means no
+    # restriction either way.
+    phased: bool | None = None
 
 
 def _num(value: str) -> float | None:
@@ -55,6 +59,20 @@ def _num(value: str) -> float | None:
         return None
     try:
         return float(value)
+    except ValueError:
+        return None
+
+
+def _phase_set(value: str) -> int | None:
+    """A whatsHap PS tag, which is '.' when a record was not phased.
+
+    None rather than 0: an absent phase set is not phase set zero, and storing
+    it as one would make an unphased record sort as the first phased block.
+    """
+    if value == "." or value == "":
+        return None
+    try:
+        return int(value)
     except ValueError:
         return None
 
@@ -93,7 +111,8 @@ def build_variant_db(*, rows, db_path: Path) -> int:
               gene        TEXT,
               consequence TEXT,
               aa_change   TEXT,
-              aa_pos      INTEGER
+              aa_pos      INTEGER,
+              phase_set   INTEGER
             )
             """
         )
@@ -116,25 +135,34 @@ def build_variant_db(*, rows, db_path: Path) -> int:
                 continue
             qual = _num(parts[4])
 
-            # Field 6 is the consequence, ahead of the repeating sample block
-            # so its position does not depend on the sample count. A row from
-            # an index built before BCSQ was queried has only 8 fields and no
-            # consequence at all.
+            # Field 6 is the BCSQ consequence -- always emitted by QUERY_FORMAT,
+            # possibly empty for an un-annotated VCF -- ahead of the repeating
+            # sample block, so its position does not depend on the sample count.
             #
-            # Every column after DP is one sample's genotype -- the query
-            # format's `[\t%GT]` repeats per sample. Rejoined rather than
-            # taking the first alone, which would silently drop samples 2..n
-            # and leave the table showing sample 1's genotype whichever
-            # sample the picker selects. The frontend splits this back apart
-            # by index.
+            # Everything after it is [DP][GT...][PS]: one optional depth field,
+            # then one genotype column per sample, then the trailing phase set
+            # that only whatsHap-produced VCFs carry. Hand-built test rows omit
+            # the PS column, so a non-numeric final field is the last genotype,
+            # not a phase set.
+            csq = None
+            dp = None
+            gt_text = ""
+            ps = None
             if len(parts) >= 9:
                 csq = csq_parse.parse_bcsq(parts[6])
-                gt_text = "\t".join(parts[8:])
-                dp = _num(parts[7])
+                body = parts[7:]
+                if body and (body[-1] == "." or body[-1].isdigit()):
+                    ps = _phase_set(body[-1])
+                    body = body[:-1]
+                if body:
+                    if body[0] == "." or body[0].isdigit():
+                        dp = _num(body[0])
+                        body = body[1:]
+                    gt_text = "\t".join(body)
             else:
-                csq = None
-                gt_text = "\t".join(parts[7:])
+                # Legacy 8-field layout (no BCSQ, no PS): depth then genotype.
                 dp = _num(parts[6])
+                gt_text = "\t".join(parts[7:])
 
             batch.append(
                 (
@@ -150,18 +178,19 @@ def build_variant_db(*, rows, db_path: Path) -> int:
                     csq.consequence if csq else None,
                     csq.aa_change if csq else None,
                     csq.aa_pos if csq else None,
+                    ps,
                 )
             )
             if len(batch) >= _INSERT_BATCH:
                 con.executemany(
-                    "INSERT INTO variants VALUES (?,?,?,?,?,?,?,?,?,?,?,?)", batch
+                    "INSERT INTO variants VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)", batch
                 )
                 inserted += len(batch)
                 batch = []
 
         if batch:
             con.executemany(
-                "INSERT INTO variants VALUES (?,?,?,?,?,?,?,?,?,?,?,?)", batch
+                "INSERT INTO variants VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)", batch
             )
             inserted += len(batch)
 
@@ -208,6 +237,10 @@ def _where(filters: VariantFilters) -> tuple[str, list]:
     if filters.consequence:
         clauses.append("consequence = ?")
         args.append(filters.consequence)
+    if filters.phased is True:
+        clauses.append("phase_set IS NOT NULL")
+    elif filters.phased is False:
+        clauses.append("phase_set IS NULL")
 
     if not clauses:
         return "", []
@@ -235,7 +268,7 @@ def query_variants(
         con.row_factory = sqlite3.Row
         cur = con.execute(
             f"SELECT chrom,pos,ref,alt,qual,filter,dp,gt,"
-            f"gene,consequence,aa_change,aa_pos FROM variants{where} "
+            f"gene,consequence,aa_change,aa_pos,phase_set FROM variants{where} "
             f"LIMIT ? OFFSET ?",
             [*args, limit, offset],
         )

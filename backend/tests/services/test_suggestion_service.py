@@ -1568,7 +1568,7 @@ class TestSuggestionsFor:
         )
         with installed_csq(True), stub_db(annotation_inputs=inputs):
             cards = await suggestions_for(_vcf())
-        assert [c["kind"] for c in cards] == ["annotate"]
+        assert [c["kind"] for c in cards] == ["annotate", "phase"]
 
     async def test_the_order_does_not_move_with_availability(self):
         """Fixed order, not sorted by availability: a card that changes
@@ -3097,6 +3097,7 @@ class TestCardBuilderRegistry:
             "completeness",
             "polish_long",
             "classify_reads",
+            "phase",
         }
 
     def test_every_launch_endpoint_is_a_real_route(self):

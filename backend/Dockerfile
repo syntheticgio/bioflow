@@ -41,6 +41,21 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 RUN pip wheel --no-deps --wheel-dir /wheels edlib==1.3.9.post1
 
+# whatshap publishes no linux-aarch64 wheel for any version -- only manylinux
+# x86-64 wheels and an sdist (verified 2026-08-20 against PyPI; latest is
+# 2.8, requires_python >=3.9). The final image carries no compiler, so pip
+# would fall back to the sdist on arm64 and die with `command 'gcc' failed`,
+# the same trap edlib springs. Building the wheel here keeps the toolchain in
+# a discarded stage; on x86-64 pip downloads the existing cp312 wheel into
+# /wheels instead, so both architectures end up with an identical whatshap 2.8.
+# Its runtime deps (pysam, numpy, scipy, networkx) already arrive via
+# NanoPlot/PyDESeq2/ragtag below, so only whatshap is installed from here.
+FROM python:3.12-slim AS whatshap-build
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends build-essential \
+    && rm -rf /var/lib/apt/lists/*
+RUN pip wheel --no-deps --wheel-dir /wheels whatshap==2.8
+
 FROM python:3.12-slim
 
 ENV PYTHONUNBUFFERED=1 \
@@ -479,6 +494,14 @@ RUN pip install --no-cache-dir ragtag==2.1.0
 COPY --from=edlib-build /wheels /tmp/wheels
 RUN pip install --no-cache-dir --find-links /tmp/wheels sniffles==2.8.0 \
     && rm -rf /tmp/wheels
+
+# WhatsHap, read-based variant phasing (phase / polyphase). Its wheel comes
+# from the whatshap-build stage above -- see there for why arm64 cannot use a
+# published wheel. --no-index is absent: deps (pysam, numpy, scipy, networkx)
+# are already present from NanoPlot/PyDESeq2/ragtag and carry arm64 wheels.
+COPY --from=whatshap-build /wheels /tmp/wheels-whatshap
+RUN pip install --no-cache-dir --find-links /tmp/wheels-whatshap whatshap==2.8 \
+    && rm -rf /tmp/wheels-whatshap
 
 # compleasm, the assembly completeness tool -- BUSCO's job, ~10-20x faster,
 # and it recovers BUSCOs the metaeuk step in Debian's own busco package

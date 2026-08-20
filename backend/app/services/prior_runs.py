@@ -40,6 +40,7 @@ _MATCH_FIELDS: dict[RunKind, tuple[str, ...]] = {
 _CARD_RUN_KINDS: dict[str, RunKind] = {
     "align": RunKind.ALIGNMENT,
     "preprocess": RunKind.TRIM,
+    "phase": RunKind.PHASE_VARIANTS,
 }
 
 

@@ -923,6 +923,74 @@ def build_annotate_card(obj, inputs) -> SuggestionCard | None:
         },
     )
 
+def build_phase_card(obj, alignments) -> SuggestionCard | None:
+    """Read-backed phasing for a called VCF against alignments on its reference.
+
+    `alignments` is the (short, long, unknown) tuple `alignments_against`
+    returned -- every alignment in the project against this variant set's
+    reference, which is what whatsHap phases against. Resolved async by the
+    caller, as the comment on `_Prefetched.phase_inputs` explains, so this
+    builder stays synchronous and pure like its siblings.
+    """
+    if obj.format.kind not in (FormatKind.VCF, FormatKind.BCF):
+        return None
+
+    whatshap_tool = tools.whatshap()
+    if not whatshap_tool.available:
+        return SuggestionCard(
+            kind="phase",
+            category="VARIANTS",
+            title="Phase variants",
+            description="Assign variants to haplotypes using read-backed phasing.",
+            status=CardStatus.UNAVAILABLE,
+            reason=whatshap_tool.error or "whatsHap is not available.",
+        )
+
+    candidates: list[DataObject] = []
+    if alignments is not None:
+        candidates = list(alignments[0]) + list(alignments[1]) + list(alignments[2])
+    if not candidates:
+        return SuggestionCard(
+            kind="phase",
+            category="VARIANTS",
+            title="Phase variants",
+            description="Assign variants to haplotypes using read-backed phasing.",
+            status=CardStatus.UNAVAILABLE,
+            reason=(
+                "No alignments against this variant set's reference were found "
+                "in the project. Phasing needs reads aligned to the same genome "
+                "the variants were called on."
+            ),
+        )
+
+    candidate_list = [
+        {"id": str(a.id), "name": a.name, "sample": pipeline_service.sample_name_for(a)}
+        for a in candidates
+    ]
+    # Default to the first alignment, single-sample phasing. The dialog lets
+    # the user pick more than one (polyphase) or switch the mode.
+    default = candidates[0]
+    return SuggestionCard(
+        kind="phase",
+        category="VARIANTS",
+        title="Phase variants",
+        description="Assign variants to haplotypes using read-backed phasing.",
+        why=f"Phase {obj.name} against {default.name}.",
+        status=CardStatus.AVAILABLE,
+        launch={
+            "endpoint": "/pipelines/phase-variants",
+            "body": {
+                "object_id": str(obj.id),
+                "alignment_ids": [str(default.id)],
+                "mode": "phase",
+                # Carried for the dialog's convenience: the frontend seeds its
+                # alignment picker from this rather than re-listing the project.
+                "candidate_alignments": candidate_list,
+            },
+        },
+    )
+
+
 def build_annotate_genome_card(obj) -> SuggestionCard | None:
     """Genome annotation for a bacterial or archaeal assembly.
 
@@ -2647,6 +2715,13 @@ class _Prefetched:
     # non-default field after a defaulted one, and None is already this
     # field's "could not tell" value rather than a placeholder.
     qc_summarizable: int | None = None
+    # Alignments against this VCF's reference, for the phasing card. None when
+    # the reference could not be resolved (the card reports unavailable rather
+    # than guessing). The tuple is (short, long, unknown) -- the same shape
+    # `alignments_against` returns for an assembly, reused here because the
+    # phasing card wants every alignment against the variant set's reference
+    # regardless of chemistry.
+    phase_inputs: object | None = None
 
 
 # Fixed order, and the order is behaviour: it is the order cards appear in the
@@ -2681,6 +2756,7 @@ _CONFIGURE_DIALOGS: dict[str, str] = {
     "align": "align",
     "variants": "variant",
     "annotate": "annotation",
+    "phase": "phase",
     "quantify": "quantify",
     "assemble": "assemble",
     "scaffold": "scaffold",
@@ -2713,6 +2789,7 @@ CARD_BUILDERS: tuple[tuple[str, object], ...] = (
     ),
     ("coverage", lambda obj, ctx: build_coverage_card(obj)),
     ("annotate", lambda obj, ctx: build_annotate_card(obj, ctx.annotation_inputs)),
+    ("phase", lambda obj, ctx: build_phase_card(obj, ctx.phase_inputs)),
     ("annotate_genome", lambda obj, ctx: build_annotate_genome_card(obj)),
     ("classify_reads", lambda obj, ctx: build_classify_reads_card(obj)),
     ("assemble", lambda obj, ctx: build_assemble_card(obj)),
@@ -2830,6 +2907,19 @@ async def suggestions_for(obj) -> list[dict]:
         # provenance to the reference and lists the project for a GFF3, which
         # keeps the builders uniformly synchronous.
         annotation_inputs = await pipeline_service.resolve_annotation_inputs(obj)
+
+    # Alignments against this VCF's reference, for the phasing card. The card
+    # (synchronous) consumes the tuple; the provenance walk that produces it
+    # is async and stays out here. None means the walk raised -- no recorded
+    # reference, or an ambiguous one -- which the card reports as unavailable.
+    phase_inputs = None
+    if obj.format.kind in (FormatKind.VCF, FormatKind.BCF):
+        try:
+            phase_inputs = await pipeline_service.alignments_against(
+                obj, owner=obj.owner
+            )
+        except Exception:  # noqa: BLE001 - a resolution failure loses one card, not the grid
+            phase_inputs = None
 
     alignment_target = None
     if obj.format.kind in reference_assembly.ALIGNMENT_KINDS:
@@ -3002,6 +3092,7 @@ async def suggestions_for(obj) -> list[dict]:
         transcriptomes=transcriptomes,
         sibling_snf_ids=sibling_snf_ids,
         qc_summarizable=qc_summarizable,
+        phase_inputs=phase_inputs,
     )
 
     cards: list[dict] = []

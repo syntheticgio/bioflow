@@ -142,6 +142,7 @@ class TestQuery:
             "consequence": None,
             "aa_change": None,
             "aa_pos": None,
+            "phase_set": None,
         }
 
     def test_filter_by_contig(self, db):
@@ -387,3 +388,52 @@ class TestConsequenceColumns:
         )[0]
         assert row["gt"] == "0|1\t1|1"
         assert row["consequence"] is None
+
+
+class TestPhaseSet:
+    """whatsHap stamps a phase set (PS) onto phased records; it rides the
+    trailing column of QUERY_FORMAT and must survive into the database as a
+    queryable, nullable integer."""
+
+    def test_phase_set_is_parsed_from_the_trailing_field(self, tmp_path):
+        path = tmp_path / "ph.v.db"
+        build_variant_db(
+            rows=iter(
+                [
+                    "c1\t1\tA\tT\t10\tPASS\t.\t5\t0|1\t7",
+                    "c1\t2\tC\tG\t20\tPASS\t.\t6\t1|1\t7",
+                    "c1\t3\tG\tA\t30\tPASS\t.\t4\t0/1\t.",
+                ]
+            ),
+            db_path=path,
+        )
+        by_pos = {
+            r["pos"]: r
+            for r in query_variants(
+                db_path=path, filters=VariantFilters(), offset=0, limit=10
+            )
+        }
+        # Two records share a phase set; the unphased one has none.
+        assert by_pos[1]["phase_set"] == 7
+        assert by_pos[2]["phase_set"] == 7
+        assert by_pos[3]["phase_set"] is None
+
+    def test_phased_filter_keeps_only_phased_rows(self, tmp_path):
+        path = tmp_path / "ph2.v.db"
+        build_variant_db(
+            rows=iter(
+                [
+                    "c1\t1\tA\tT\t10\tPASS\t.\t5\t0|1\t7",
+                    "c1\t3\tG\tA\t30\tPASS\t.\t4\t0/1\t.",
+                ]
+            ),
+            db_path=path,
+        )
+        phased = query_variants(
+            db_path=path, filters=VariantFilters(phased=True), offset=0, limit=10
+        )
+        assert [r["pos"] for r in phased] == [1]
+        unphased = query_variants(
+            db_path=path, filters=VariantFilters(phased=False), offset=0, limit=10
+        )
+        assert [r["pos"] for r in unphased] == [3]

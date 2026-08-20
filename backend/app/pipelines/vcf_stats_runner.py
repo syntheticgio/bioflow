@@ -23,19 +23,25 @@ VARIANT_COLUMNS = (
     "filter",
     "dp",
     "gt",
+    "phase_set",
 )
 
 # Real tab and newline escapes. A literal backslash-t here makes bcftools emit
 # one unsplittable column, and every variant lands in the database as a single
-# field -- verified against bcftools 1.21, this yields exactly 8 columns.
+# field -- verified against bcftools 1.21.
 #
-# DP is bracketed rather than pinned to %INFO/DP because where a caller
-# declares it varies: bcftools call declares DP in INFO, but Clair3 declares
-# it only in FORMAT and has no INFO/DP at all. %INFO/DP hardcodes the first
-# and fails outright -- "no such tag defined in the VCF header" -- on the
-# second, breaking the feature for half the callers this app offers. Inside
-# square brackets bcftools resolves %DP from whichever section declares it,
-# so the same format string works for both.
+# DP is bracketed `[\t%DP]` and GT bracketed `[\t%GT]` because both are absent
+# on some VCFs; with `-u` an undefined tag emits "." rather than failing, so a
+# caller with no DP or no genotypes still yields the right number of columns.
+# `%DP` resolves from whichever section declares it (INFO for bcftools call,
+# FORMAT for Clair3), so the bracket form works for every caller this app
+# offers without hardcoding %INFO/DP.
+#
+# PS (phase set) is appended after the sample block. whatsHap stamps it onto
+# phased records, so it is the one column that distinguishes a phased VCF from
+# an unphased one; it is always present (empty "." when a record was not
+# phased), so it sits at a fixed position -- the final field -- whatever the
+# sample count.
 #
 # BCSQ sits before the sample block, not after it. `[\t%GT]` repeats once
 # per sample, so a trailing consequence field cannot be told apart from an
@@ -44,7 +50,7 @@ VARIANT_COLUMNS = (
 # block it is always field 6, whatever the sample count. `-u` in
 # build_query_command makes an undefined tag emit "." rather than failing
 # the job, which is what every un-annotated VCF does here.
-QUERY_FORMAT = "%CHROM\t%POS\t%REF\t%ALT\t%QUAL\t%FILTER\t%INFO/BCSQ[\t%DP][\t%GT]\n"
+QUERY_FORMAT = "%CHROM\t%POS\t%REF\t%ALT\t%QUAL\t%FILTER\t%INFO/BCSQ[\t%DP][\t%GT]\t%PS\n"
 
 # `number of X:` keys in the SN section, mapped to the names used in facts.
 _SN_KEYS = {
