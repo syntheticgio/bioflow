@@ -742,6 +742,16 @@ def quast() -> Tool:
 
 
 @lru_cache(maxsize=1)
+def multiqc() -> Tool:
+    # Verified against a real installed 1.35: `multiqc --version` prints
+    # "multiqc, version 1.35" and exits zero. The binary on PATH is a
+    # wrapper around an isolated venv (see install-multiqc.sh); probing it
+    # is still the right check, since that wrapper is what every caller
+    # invokes.
+    return _probe("multiqc", settings.multiqc_path, ["--version"])
+
+
+@lru_cache(maxsize=1)
 def craq() -> Tool:
     # Verified against a real installed 1.10 (2026-08-06): `craq -h` prints
     # "CRAQ Version: 1.10" on stdout but still exits 1 -- `_probe` already
@@ -932,6 +942,7 @@ def all_tools() -> list[Tool]:
         salmon(),
         pydeseq2(),
         quast(),
+        multiqc(),
         craq(),
         meryl(),
         merqury(),
@@ -1906,6 +1917,55 @@ TOOL_META: dict[str, ToolMeta] = {
             "from one version is not comparable to a score from another."
         ),
     ),
+    "multiqc": ToolMeta(
+        # Deliberately empty, despite PipelineType.QC existing. This tuple
+        # drives PipelineToolSelector.tsx, whose QC screen asks the user to
+        # pick a tool to *run QC with*. MultiQC runs no QC -- it summarises
+        # QC other tools already produced -- so listing it there would offer
+        # it as an alternative to FastQC or fastp, which it is not. It is
+        # reached only through its Actions-tab card.
+        pipelines=(),
+        one_liner="Aggregate QC reporting across tools",
+        summary=(
+            "Scans the QC output several tools have already written and "
+            "renders one combined HTML dashboard, with a row per sample "
+            "and a section per tool. Reviewing more than one or two files "
+            "otherwise means opening a FastQC report per file and holding "
+            "the comparison in your head; the aggregate view is what makes "
+            "an outlier sample visible at a glance."
+        ),
+        strengths=(
+            "One row per sample across every tool, so an outlier is "
+            "visible without opening each report",
+            "Parses existing output rather than recomputing -- no reads "
+            "are re-read and no tool is re-run",
+            "Self-contained HTML: the report renders offline, with no CDN "
+            "or network dependency",
+        ),
+        homepage="https://multiqc.info",
+        repository="https://github.com/MultiQC/MultiQC",
+        citation=(
+            "Philip Ewels, Mans Magnusson, Sverker Lundin, Max Kaller. "
+            "MultiQC: summarize analysis results for multiple tools and "
+            "samples in a single report. Bioinformatics. "
+            "2016;32(19):3047-3048."
+        ),
+        citation_url="https://doi.org/10.1093/bioinformatics/btw354",
+        # From the installed 1.35 dist-info LICENSE, checked 2026-08-20:
+        # GNU General Public License, Version 3.
+        license="GPL-3.0",
+        usage=(
+            "Runs on demand from the Actions tab over a whole project, "
+            "never automatically after a QC job. Stages the QC output "
+            "already retained for each of the project's objects into one "
+            "directory and runs MultiQC across it, writing a combined "
+            "report keyed by project rather than by object. Reads only "
+            "files other jobs already wrote -- it re-runs no tool and "
+            "re-reads no sequence data. Runs with --no-version-check, "
+            "since MultiQC otherwise checks for a newer release over the "
+            "network on every invocation."
+        ),
+    ),
     "quast": ToolMeta(
         pipelines=(PipelineType.ASSEMBLY_QC,),
         one_liner="Reference-based misassembly detection",
@@ -2801,6 +2861,7 @@ def reset_cache() -> None:
     salmon.cache_clear()
     pydeseq2.cache_clear()
     quast.cache_clear()
+    multiqc.cache_clear()
     craq.cache_clear()
     meryl.cache_clear()
     merqury.cache_clear()

@@ -284,6 +284,7 @@ class TestSerialization:
             "salmon",
             "ivar",
             "quast",
+            "multiqc",
             "craq",
             "meryl",
             "merqury",
@@ -483,17 +484,39 @@ class TestToolMeta:
         missing = [t.name for t in tools.all_tools() if t.name not in tools.TOOL_META]
         assert missing == []
 
+    # Tools that deliberately belong to no pipeline, with the reason each
+    # one is not reachable from a selector screen. Kept as a named set
+    # rather than a chain of `if name ==` so that adding one is a decision
+    # someone writes down, not a branch that accumulates.
+    NO_PIPELINE_BY_DESIGN = {
+        # Dispatched internally by the storage layer at ingest, never a
+        # user-selectable pipeline step. See docs/superpowers/specs/
+        # 2026-08-05-object-compression-design.md.
+        "bgzip",
+        # Summarises QC that other tools already produced rather than
+        # running any itself. PipelineType.QC would put it on the screen
+        # that asks which tool to *run QC with*, offering it as an
+        # alternative to FastQC or fastp; it is reached only through its
+        # own Actions-tab card. See the TOOL_META entry's comment.
+        "multiqc",
+    }
+
     def test_every_tool_belongs_to_at_least_one_pipeline(self):
         """`pipelines` is what the selector filters on: an empty tuple is a
-        tool that exists but appears on no screen. bgzip is the one
-        deliberate exception -- it is dispatched internally by the storage
-        layer at ingest, never a user-selectable pipeline step, so it has no
-        card to appear on. See docs/superpowers/specs/
-        2026-08-05-object-compression-design.md."""
+        tool that exists but appears on no screen. The exceptions are listed
+        in NO_PIPELINE_BY_DESIGN above, each with its reason."""
         for name, meta in tools.TOOL_META.items():
-            if name == "bgzip":
+            if name in self.NO_PIPELINE_BY_DESIGN:
                 continue
             assert meta.pipelines, f"{name} belongs to no pipeline"
+
+    def test_no_pipeline_exceptions_are_all_real_tools(self):
+        """Guards the exception list itself. A name that stops existing --
+        renamed, removed -- would otherwise sit here forever, silently
+        exempting nothing and hiding the fact that the rule now has one
+        fewer real exception than it claims."""
+        unknown = self.NO_PIPELINE_BY_DESIGN - set(tools.TOOL_META)
+        assert unknown == set(), f"exempted names not in TOOL_META: {unknown}"
 
     def test_fastp_is_both_a_trimmer_and_a_qc_tool(self):
         """The reason the field is a tuple rather than a single value. A
