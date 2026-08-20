@@ -7,13 +7,13 @@ import { SvLengthChart } from "./SvLengthChart";
 import { SvTable } from "./SvTable";
 
 /**
- * What Sniffles2 structural variant calling produced: the type breakdown,
- * the log-binned length histogram, the complete filterable SV table, and the
- * VCF+TBI download.
+ * What structural variant calling produced (Sniffles2 for long reads, Delly
+ * for short reads): the type breakdown, the log-binned length histogram, the
+ * complete filterable SV table, and the VCF+TBI download.
  *
  * Unlike VariantResults there is no on-demand "compute results" step --
  * `call_structural_variants` builds the SQLite index in the same job that
- * calls Sniffles2 (see sv_handlers.py), so the summary and table are simply
+ * runs the caller (see sv_handlers.py), so the summary and table are simply
  * fetched once the VCF object exists. A 404 from either read endpoint means
  * the SV calling job has not finished yet, or failed after producing a VCF
  * with no index -- both render as "not ready" rather than an error, since
@@ -58,8 +58,8 @@ export function SvResults({ obj }: { obj: ObjectDetailData }) {
     return (
       <div className="section-note">
         No structural variant results yet. Structural variant calling builds
-        its results as part of the run, so this appears once the Sniffles2
-        job has finished.
+        its results as part of the run, so this appears once the structural
+        variant calling job has finished.
       </div>
     );
   }
