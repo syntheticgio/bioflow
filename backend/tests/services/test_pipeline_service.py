@@ -4,6 +4,8 @@ fixtures. Launch-path integration tests live in their own per-feature files
 matching this codebase's convention.
 """
 
+from types import SimpleNamespace
+
 import pytest
 
 from app.pipelines.align_runner import ReadChemistry
@@ -51,3 +53,31 @@ def test_gci_slot_refuses_short_and_unknown():
     assert gci_slot_for_chemistry(ReadChemistry.SHORT) is None
     assert gci_slot_for_chemistry(ReadChemistry.UNKNOWN) is None
     assert gci_slot_for_chemistry(None) is None
+
+
+def test_is_annotation_rejects_assembled_transcripts():
+    """A StringTie GTF must not become a reference annotation.
+
+    Without this exclusion it is offered as a featureCounts reference and as
+    StringTie's own -G input, because _is_annotation is format-first and
+    StringTie's output is GTF. This is the one place ObjectRole.
+    ASSEMBLED_TRANSCRIPTS does load-bearing work rather than display work.
+    """
+    from app.models.object import FormatKind, ObjectRole, ObjectStatus
+    from app.services import pipeline_service
+
+    assembled = SimpleNamespace(
+        status=ObjectStatus.READY,
+        format=SimpleNamespace(kind=FormatKind.GTF),
+        role=ObjectRole.ASSEMBLED_TRANSCRIPTS,
+    )
+    downloaded = SimpleNamespace(
+        status=ObjectStatus.READY,
+        format=SimpleNamespace(kind=FormatKind.GTF),
+        role=None,
+    )
+
+    assert pipeline_service._is_annotation(assembled) is False
+    # The ordinary case must keep working: a real ingested annotation carries
+    # role=None, which is why this predicate is format-first at all.
+    assert pipeline_service._is_annotation(downloaded) is True

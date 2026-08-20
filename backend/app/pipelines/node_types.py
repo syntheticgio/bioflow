@@ -282,6 +282,15 @@ async def _launch_salmon_quantify(*, inputs: dict, params: dict, owner: str):
     )
 
 
+async def _launch_transcript_assembly(*, inputs: dict, params: dict, owner: str):
+    return await pipeline_service.launch_transcript_assembly(
+        bam_id=inputs["alignment"],
+        owner=owner,
+        annotation_id=inputs.get("annotation"),
+        params=params,
+    )
+
+
 async def _launch_differential_expression(*, inputs: dict, params: dict, owner: str):
     # DIFFERENTIAL_EXPRESSION is the one RunKind with N inputs (see the
     # RunKind.DIFFERENTIAL_EXPRESSION comment in app/models/run.py), which
@@ -826,6 +835,38 @@ NODE_TYPES: dict[str, NodeTypeSpec] = {
         ),
         outputs=(
             PortSpec("counts", PortType(format=FormatKind.TEXT, role=ObjectRole.COUNTS)),
+        ),
+    ),
+    "transcript_assembly": NodeTypeSpec(
+        label="Assemble transcripts (StringTie)",
+        launch_name="pipeline_service.launch_transcript_assembly",
+        launch=_launch_transcript_assembly,
+        # A distinct RunKind, so unlike salmon_quantify this needs no
+        # run_tool to keep the (run_kind, run_tool) pair unique.
+        run_kind=RunKind.TRANSCRIPT_ASSEMBLY,
+        inputs=(
+            PortSpec(
+                "alignment",
+                PortType(format=FormatKind.BAM, role=ObjectRole.ALIGNMENT),
+            ),
+            # Optional on the port, resolved server-side from the project's
+            # annotations exactly as `quantify` does -- but unlike Salmon's
+            # transcriptome this is not optional to the *tool*: see
+            # stringtie_runner.assemble_command on why -G is required.
+            PortSpec(
+                "annotation",
+                PortType(format=FormatKind.GTF),
+                required=False,
+            ),
+        ),
+        outputs=(
+            PortSpec(
+                "transcripts",
+                PortType(
+                    format=FormatKind.GTF,
+                    role=ObjectRole.ASSEMBLED_TRANSCRIPTS,
+                ),
+            ),
         ),
     ),
     "differential_expression": NodeTypeSpec(
