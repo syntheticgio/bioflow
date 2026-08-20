@@ -167,11 +167,14 @@ def build_classification_facts(
     metadata_organism: str | None,
     db_key: str,
     bracken_note: str | None,
+    is_fasta: bool = False,
 ) -> dict:
-    """The facts payload for one classification run (spec K2-H2).
+    """The facts payload for one classification run (spec K2-H2 / L2).
 
     `taxonomy` always; `taxonomy_mismatch` only when the check fires --
     its absence is itself the "metadata agrees or is absent" claim.
+    When `is_fasta` is True (e.g. metagenome bin contigs), `bin_taxon_label`,
+    `bin_taxon_fraction`, and `bin_unclassified_fraction` are derived.
     """
     from app.pipelines import kraken_runner
 
@@ -181,6 +184,10 @@ def build_classification_facts(
         taxonomy["bracken_skipped"] = bracken_note
 
     facts: dict = {"taxonomy": taxonomy}
+    if is_fasta:
+        bin_facts = kraken_runner.derive_bin_taxonomy(kraken_rows)
+        facts.update(bin_facts)
+
     mismatch = kraken_runner.organism_mismatch(metadata_organism, kraken_rows)
     if mismatch is not None:
         facts["taxonomy_mismatch"] = mismatch
@@ -259,30 +266,35 @@ def classify_reads(ctx: JobContext) -> dict:
         report.read_text() if report.exists() else ""
     )
 
+    is_fasta = ctx.payload.get("format") == "fasta" or ctx.payload.get("is_fasta") is True
+
     # -- Bracken: non-fatal refinement --------------------------------
     bracken_rows: list[dict] = []
     bracken_note: str | None = None
-    bracken_tool = tools.bracken()
-    if not bracken_tool.available:
-        bracken_note = "bracken is not installed"
+    if is_fasta:
+        bracken_note = "skipped for FASTA/contig input"
     else:
-        ctx.progress(phase="abundance", pct=None, message="running Bracken")
-        read_len = _nearest_bracken_read_len(ctx.payload.get("mean_read_length"))
-        bcmd = kraken_runner.build_bracken_command(
-            bracken_path=bracken_tool.path,
-            db_dir=db_dir,
-            report=report,
-            output=bracken_out,
-            read_len=read_len,
-        )
-        bcode = run_subprocess(ctx, bcmd, log_path=str(log_path))
-        if bcode != 0:
-            bracken_note = f"bracken exited {bcode}"
-            log.warning("bracken_failed", job_id=ctx.job_id, code=bcode)
+        bracken_tool = tools.bracken()
+        if not bracken_tool.available:
+            bracken_note = "bracken is not installed"
         else:
-            bracken_rows = kraken_runner.parse_bracken_output(
-                bracken_out.read_text() if bracken_out.exists() else ""
+            ctx.progress(phase="abundance", pct=None, message="running Bracken")
+            read_len = _nearest_bracken_read_len(ctx.payload.get("mean_read_length"))
+            bcmd = kraken_runner.build_bracken_command(
+                bracken_path=bracken_tool.path,
+                db_dir=db_dir,
+                report=report,
+                output=bracken_out,
+                read_len=read_len,
             )
+            bcode = run_subprocess(ctx, bcmd, log_path=str(log_path))
+            if bcode != 0:
+                bracken_note = f"bracken exited {bcode}"
+                log.warning("bracken_failed", job_id=ctx.job_id, code=bcode)
+            else:
+                bracken_rows = kraken_runner.parse_bracken_output(
+                    bracken_out.read_text() if bracken_out.exists() else ""
+                )
 
     _copy_kraken_reports(ctx, report, bracken_out)
 
@@ -292,6 +304,7 @@ def classify_reads(ctx: JobContext) -> dict:
         metadata_organism=ctx.payload.get("organism"),
         db_key=db_key,
         bracken_note=bracken_note,
+        is_fasta=is_fasta,
     )
 
     ctx.progress(phase="done", pct=1.0, message="classification complete")

@@ -7220,10 +7220,15 @@ async def launch_classify_reads(
     tools.require(tools.kraken2())
 
     obj = await object_service.get_object(object_id, owner=owner)
-    if obj.format.kind is not FormatKind.FASTQ:
+    if obj.format.kind not in (FormatKind.FASTQ, FormatKind.FASTA):
         raise ValidationError(
-            "Classification runs on FASTQ reads",
+            f"{obj.name!r} is {obj.format.kind.value}, not FASTQ reads or FASTA contigs",
             details={"object_id": str(obj.id), "format": obj.format.kind.value},
+        )
+    if obj.format.kind is FormatKind.FASTA and obj.role in COMPLETENESS_EXCLUDED_ROLES:
+        raise ValidationError(
+            f"{obj.name!r} is a {obj.role.value} FASTA, not a nucleotide sequence",
+            details={"object_id": str(obj.id), "role": obj.role.value},
         )
 
     digest, path = await _resolve_readable(obj)
@@ -7236,8 +7241,13 @@ async def launch_classify_reads(
     payload: dict = {
         "object_id": str(obj.id),
         "db_key": db_key,
+        "format": obj.format.kind.value,
         "organism": (obj.metadata or {}).get("organism"),
-        "mean_read_length": (obj.facts or {}).get("qc_mean_read_length"),
+        "mean_read_length": (
+            (obj.facts or {}).get("qc_mean_read_length")
+            if obj.format.kind is FormatKind.FASTQ
+            else None
+        ),
         "threads": 4,
     }
     if digest:
@@ -7246,7 +7256,7 @@ async def launch_classify_reads(
         payload["reads_path"] = str(path)
     payload["reads_name"] = obj.name
 
-    if mate_object_id is not None:
+    if mate_object_id is not None and obj.format.kind is FormatKind.FASTQ:
         mate = await object_service.get_object(mate_object_id, owner=owner)
         m_digest, m_path = await _resolve_readable(mate)
         if m_digest:

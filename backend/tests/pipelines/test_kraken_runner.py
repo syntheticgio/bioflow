@@ -171,3 +171,47 @@ def test_mismatch_silent_without_metadata():
     kraken = [_kr(94.0, 9400, 9000, "S", 1280, "Staphylococcus aureus")]
     assert kraken_runner.organism_mismatch(None, kraken) is None
     assert kraken_runner.organism_mismatch("  ", kraken) is None
+
+
+def test_derive_bin_taxonomy_dominant():
+    kraken = [
+        _kr(5.0, 50, 50, "U", 0, "unclassified"),
+        _kr(94.0, 940, 900, "S", 817, "Bacteroides fragilis"),
+        _kr(1.0, 10, 10, "S", 562, "Escherichia coli"),
+    ]
+    res = kraken_runner.derive_bin_taxonomy(kraken)
+    assert res["bin_taxon_label"] == "Bacteroides fragilis"
+    assert res["bin_taxon_fraction"] == 0.94
+    assert res["bin_unclassified_fraction"] == 0.05
+
+
+def test_derive_bin_taxonomy_mixed_when_no_dominant_species():
+    # A thoroughly mixed bin (leading species at only 31%)
+    kraken = [
+        _kr(10.0, 100, 100, "U", 0, "unclassified"),
+        _kr(31.0, 310, 300, "S", 817, "Bacteroides fragilis"),
+        _kr(29.0, 290, 280, "S", 562, "Escherichia coli"),
+        _kr(20.0, 200, 190, "S", 1280, "Staphylococcus aureus"),
+    ]
+    res = kraken_runner.derive_bin_taxonomy(kraken)
+    assert res["bin_taxon_label"] == "mixed"
+    assert res["bin_taxon_fraction"] == 0.31
+    assert res["bin_unclassified_fraction"] == 0.1
+
+
+def test_derive_bin_taxonomy_unclassified():
+    kraken = [
+        _kr(100.0, 1000, 1000, "U", 0, "unclassified"),
+    ]
+    res = kraken_runner.derive_bin_taxonomy(kraken)
+    assert res["bin_taxon_label"] == "unclassified"
+    assert res["bin_taxon_fraction"] == 0.0
+    assert res["bin_unclassified_fraction"] == 1.0
+
+
+def test_derive_bin_taxonomy_empty():
+    res = kraken_runner.derive_bin_taxonomy([])
+    assert res["bin_taxon_label"] == "unclassified"
+    assert res["bin_taxon_fraction"] == 0.0
+    assert res["bin_unclassified_fraction"] == 0.0
+

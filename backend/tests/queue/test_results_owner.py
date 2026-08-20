@@ -937,3 +937,38 @@ class TestApplyAssessAssemblyQV:
 
         refreshed_assembly = await DataObject.get(assembly.id)
         assert refreshed_assembly.facts["assembly_qv"] == 30.0
+
+
+class TestApplyClassifyReads:
+    async def test_applies_bin_taxonomy_facts(self):
+        owner = "results-classify-a"
+        bin_obj = await _parent(owner, "bin.001.fasta")
+        await bin_obj.set({DataObject.facts: {"sequence_n50": 50000}})
+
+        await results._apply_classify_reads(
+            {
+                "object_id": str(bin_obj.id),
+                "facts": {
+                    "taxonomy": {
+                        "taxa": [
+                            {"name": "Bacteroides fragilis", "rank": "S", "taxid": 817, "pct": 94.0}
+                        ],
+                        "unclassified_pct": 5.0,
+                        "bracken_used": False,
+                        "db_key": "standard-8",
+                    },
+                    "bin_taxon_label": "Bacteroides fragilis",
+                    "bin_taxon_fraction": 0.94,
+                    "bin_unclassified_fraction": 0.05,
+                },
+            },
+            owner=owner,
+        )
+
+        refreshed = await DataObject.get(bin_obj.id)
+        assert refreshed.facts["sequence_n50"] == 50000
+        assert refreshed.facts["bin_taxon_label"] == "Bacteroides fragilis"
+        assert refreshed.facts["bin_taxon_fraction"] == 0.94
+        assert refreshed.facts["bin_unclassified_fraction"] == 0.05
+        assert refreshed.facts["taxonomy"]["taxa"][0]["name"] == "Bacteroides fragilis"
+

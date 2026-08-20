@@ -14,12 +14,31 @@ export function TaxonomyFacts({ facts }: { facts: Record<string, unknown> }) {
   if (!taxonomy || !Array.isArray(taxonomy.taxa)) return null;
 
   const mismatch = facts.taxonomy_mismatch as TaxonomyMismatchData | undefined;
+  const binLabel = facts.bin_taxon_label as string | undefined;
+  const binFraction = facts.bin_taxon_fraction as number | undefined;
+  const unclassifiedFraction = facts.bin_unclassified_fraction as number | undefined;
 
   return (
     <div className="section">
       <div className="section-title">Classification</div>
 
       {mismatch && <MismatchBanner mismatch={mismatch} />}
+
+      {binLabel && (
+        <div className="section-note" style={{ marginBottom: 8, fontSize: 13 }}>
+          Dominant taxon:{" "}
+          <strong>
+            {binLabel === "mixed" || binLabel === "unclassified" ? (
+              binLabel
+            ) : (
+              <em>{binLabel}</em>
+            )}
+          </strong>
+          {typeof binFraction === "number" && ` (${pct(binFraction * 100)})`}
+          {typeof unclassifiedFraction === "number" &&
+            ` · ${pct(unclassifiedFraction * 100)} unclassified`}
+        </div>
+      )}
 
       <table className="trim-table">
         <thead>

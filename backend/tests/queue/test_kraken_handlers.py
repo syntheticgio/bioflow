@@ -86,6 +86,29 @@ def test_build_classification_facts_records_bracken_skip():
     )
     assert facts["taxonomy"]["bracken_skipped"] == "bracken exited 1"
     assert "taxonomy_mismatch" not in facts
+    assert "bin_taxon_label" not in facts
+
+
+def test_build_classification_facts_for_fasta_derives_bin_facts():
+    kraken_rows = [
+        {"pct": 6.0, "clade_reads": 60, "direct_reads": 60,
+         "rank": "U", "taxid": 0, "name": "unclassified"},
+        {"pct": 94.0, "clade_reads": 940, "direct_reads": 900,
+         "rank": "S", "taxid": 817, "name": "Bacteroides fragilis"},
+    ]
+    facts = kraken_handlers.build_classification_facts(
+        kraken_rows=kraken_rows,
+        bracken_rows=[],
+        metadata_organism=None,
+        db_key="standard-8",
+        bracken_note="skipped for FASTA/contig input",
+        is_fasta=True,
+    )
+    assert facts["bin_taxon_label"] == "Bacteroides fragilis"
+    assert facts["bin_taxon_fraction"] == 0.94
+    assert facts["bin_unclassified_fraction"] == 0.06
+    assert facts["taxonomy"]["bracken_skipped"] == "skipped for FASTA/contig input"
+
 
 
 @pytest.mark.parametrize(

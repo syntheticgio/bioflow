@@ -1443,13 +1443,44 @@ class TestClassifyReadsCard:
         assert card is not None
         assert card.kind == "classify_reads"
         assert card.category == "CLASSIFY_READS"
+        assert card.title == "Identify organisms"
+        assert card.why is None
         assert card.status is CardStatus.AVAILABLE
         assert card.launch["endpoint"] == "/pipelines/classify-reads"
         assert card.launch["body"] == {"object_id": "fq1"}
 
-    def test_absent_for_fasta(self):
-        obj = _fake_obj(kind=FormatKind.FASTA)
-        assert build_classify_reads_card(obj) is None
+    def test_available_for_fasta_bin_with_identification_wording(self, monkeypatch):
+        from app.pipelines.tools import Tool
+        from app.services import suggestion_service
+
+        monkeypatch.setattr(
+            suggestion_service.tools,
+            "kraken2",
+            lambda: Tool(name="kraken2", path="/usr/bin/kraken2", version="2.1.3", error=None),
+        )
+        obj = _fake_obj(kind=FormatKind.FASTA, obj_id="bin1")
+        card = build_classify_reads_card(obj)
+        assert card is not None
+        assert card.kind == "classify_reads"
+        assert card.category == "CLASSIFY_READS"
+        assert card.title == "Identify this bin"
+        assert card.why is not None
+        assert "clean bin classifies overwhelmingly" in card.why
+        assert card.status is CardStatus.AVAILABLE
+        assert card.launch["endpoint"] == "/pipelines/classify-reads"
+        assert card.launch["body"] == {"object_id": "bin1"}
+
+    def test_absent_for_protein_or_transcript_fasta(self):
+        obj_prot = _fake_obj(kind=FormatKind.FASTA, role=ObjectRole.PROTEIN)
+        assert build_classify_reads_card(obj_prot) is None
+        obj_tx = _fake_obj(kind=FormatKind.FASTA, role=ObjectRole.TRANSCRIPT)
+        assert build_classify_reads_card(obj_tx) is None
+
+    def test_absent_for_non_sequence_format(self):
+        obj_bam = _fake_obj(kind=FormatKind.BAM)
+        assert build_classify_reads_card(obj_bam) is None
+        obj_vcf = _fake_obj(kind=FormatKind.VCF)
+        assert build_classify_reads_card(obj_vcf) is None
 
     def test_flips_unavailable_when_probe_off(self, monkeypatch):
         from app.pipelines.tools import Tool
