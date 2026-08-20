@@ -126,6 +126,87 @@ model away the reason for adding it.
    under a cap is the thing MEGAHIT is being compared on, so it matters that
    the cap is honoured rather than advisory.
 
+## Outcome: the measurements, and the decision (2026-08-20)
+
+Both parts of the plan ran. SPAdes `--meta` shipped, and the bake-off was then
+run against it. **MEGAHIT is justified**, on the memory criterion N2 named in
+advance.
+
+### The spikes, first — two of the three assumptions were wrong
+
+- **metaSPAdes rejects single-end input.** Verified against the installed
+  4.3.0: it exits 0 on the SE invocation only in the sense that the wrapper
+  returns, and the log carries `ERROR ... current version of metaSPAdes can
+  work either with single library (paired-end only) or in hybrid ... mode`,
+  with **no `contigs.fasta` produced**. It refuses *after* read error
+  correction, i.e. minutes into a real run — so the mode is gated at launch
+  (`pipeline_service.launch_assembly`) rather than left to fail late.
+- **`--meta` does not change the output filenames.** `contigs.fasta` and
+  `assembly_graph_with_scaffolds.gfa` are both still produced, so
+  `SPADES_SPEC.outputs` needed no meta-specific entries. Confirmed by running
+  it, per the registry's existing standard.
+- **`-m` binds hard.** metaSPAdes terminates on reaching it, exactly as its
+  help text claims — which is what made the decisive measurement possible.
+
+### The bake-off
+
+One synthetic short-read community: 5 organisms, 4.2 Mbp total, a **30x
+abundance spread** (30x down to 1x), a shared 1.5 kb repeat element seeded
+~20x per genome so the graph tangles between organisms, ART HS25 150bp paired
+reads. metaSPAdes 4.3.0 (the version this app ships) and MEGAHIT 1.2.9, same
+input, 4 threads, aarch64, peak RSS via GNU time.
+
+| | metaSPAdes | MEGAHIT |
+|---|---|---|
+| Assembly size | 3,526,808 | 3,231,398 |
+| Contigs | 1,767 | 1,089 |
+| **Contig N50** | 32,204 | **34,859** |
+| Largest contig | 175,649 | 175,822 |
+| **Wall time** | 80.5 s | **28.6 s** |
+| **Peak RSS** | **776 MB** | **294 MB** |
+
+Quality is a wash — MEGAHIT's N50 is 8% higher on 3% less assembly, which is
+exactly the "few percent" N2 said would *not* justify the addition. Speed is
+2.8x, which N2 listed as supporting rather than deciding.
+
+### The measurement that decided it
+
+N2's memory criterion is about *bounded* memory, not a smaller number on a
+small sample. So both were re-run under a cap below metaSPAdes' observed peak:
+
+| Cap | metaSPAdes | MEGAHIT |
+|---|---|---|
+| ~1 GB / 500 MB budget | **failed, exit 66**, `mmap(2) failed. Reason: Cannot allocate memory`, no contigs | **completed**, 301 MB peak |
+
+The capped MEGAHIT assembly is **byte-identical in its statistics** to its
+uncapped one (3,231,398 bases, 1,089 contigs, N50 34,859) — the bounded memory
+is real, not a quality trade.
+
+This is precisely N2's stated bar: *"an assembler that finishes where the other
+OOMs is not a marginal improvement; it is the difference between having the
+capability and not"*, on the local single-machine workloads this app targets.
+
+**Decision: MEGAHIT earns its place.** Not for quality, and not primarily for
+speed — for completing a community assembly inside a memory budget where
+metaSPAdes dies. Per N3 it becomes a normal tool addition with its own
+`Assembler` and `AssemblerSpec`, cut as its own issue citing these numbers,
+with its `bytes_per_genome_base` **measured rather than inherited from SPAdes**.
+
+### Caveat on generality
+
+One synthetic community on one machine. The abundance skew and inter-organism
+repeats are modelled deliberately, but a real gut or soil metagenome is far
+more complex, and complexity is the axis MEGAHIT's advantage grows along — so
+this measurement is a lower bound on the gap, not an upper one. Recorded here
+so the next person does not re-run it, per #731's request.
+
+### SPAdes `--meta` still ships, and is not wasted
+
+It was the cheap path (one `Choice`, one `elif`), it is the only metagenome
+option until MEGAHIT lands, and it remains the better choice where memory is
+not the binding constraint — its assembly was 9% larger here. Shipping it also
+produced the metaSPAdes baseline this decision rests on.
+
 ## Out of scope
 
 - **Adding MEGAHIT in this issue.** N2 — it becomes a normal tool addition

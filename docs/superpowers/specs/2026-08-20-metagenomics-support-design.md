@@ -181,7 +181,7 @@ of them without leaving a half-built domain.
 | 2 | **MetaBAT2 binning** | 1 (for something to bin) | The core of the epic and the carrier of M3's data-model decisions. |
 | 3 | **CheckM2 bin QC** | 2 (needs bins) | Makes bins trustworthy. Carries the database-registry work (M4). |
 | 4 | **Kraken2 labelling of bins** | 2 | Possibly trivial; verify the classify path's input binding first (M5). |
-| 5 | **MEGAHIT short-read metagenome assembly** | — | Independent. Only if SPAdes `--meta` proves insufficient (see Open questions). |
+| 5 | **MEGAHIT short-read metagenome assembly** | — | Independent. **Justified** — #731 measured metaSPAdes failing under a memory cap that MEGAHIT completes within (see Open questions). |
 
 Child 1 alone leaves the app able to assemble a community but not separate it,
 which is honest and useful (a metagenome assembly is a legitimate artifact).
@@ -189,10 +189,16 @@ Children 1–2 deliver MAGs. Children 1–3 deliver MAGs anyone should trust.
 
 ## Open questions (for the child specs, not settled here)
 
-1. **Does SPAdes `--meta` cover the short-read case?** SPAdes already ships.
-   If its metagenome mode is adequate, child 5 may never be worth cutting.
-   Settle this by running both on the same short-read community sample, not
-   by comparing documentation.
+1. ~~**Does SPAdes `--meta` cover the short-read case?**~~ **SETTLED (#731,
+   2026-08-20): partly — it ships, and MEGAHIT is still justified.** SPAdes
+   `--meta` was added as a fourth `mode` choice, and the bake-off then ran
+   against it. Quality was a wash (MEGAHIT's N50 8% higher on 3% less
+   assembly) and MEGAHIT was 2.8x faster, neither of which decided it. What
+   decided it was memory under a cap: on the same community, metaSPAdes
+   terminated with `Cannot allocate memory` and produced nothing, while
+   MEGAHIT completed within a 500 MB budget and produced an assembly identical
+   to its uncapped one. So **child 5 is worth cutting**. Full numbers in
+   `2026-08-20-short-read-metagenome-assembly-design.md`.
 2. **What replaces the single-genome memory model for metaFlye?** Per M1, the
    `bytes_per_genome_base` model has no meaningful input for a community.
 3. **What is the bin-count cap, and what does the UI do at it?** Per M3.
