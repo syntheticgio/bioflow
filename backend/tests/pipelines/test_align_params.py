@@ -222,6 +222,32 @@ class TestStar:
         assert p.align_intron_max == 0
 
 
+class TestHisat2Transcript:
+    def test_hisat2_formats_for_transcript_assembly_by_default(self):
+        """--dta is on by default now that a consumer exists.
+
+        Before StringTie landed this defaulted to False and the auto-suggested
+        RNA-seq card never set it, so the default path produced BAMs that were
+        never formatted for the tool align_params' own comment named.
+        """
+        from app.pipelines.align_params import Hisat2Params
+
+        assert Hisat2Params().dta is True
+
+    def test_hisat2_dta_default_survives_a_params_round_trip(self):
+        """The default must live in from_dict too.
+
+        A default that applies to a fresh dialog but not to a dict round-tripped
+        through the queue is a split-brain default: the flag reads as set in the
+        UI and is absent from the command line.
+        """
+        from app.pipelines.align_params import Hisat2Params
+
+        assert Hisat2Params.from_dict({}).dta is True
+        # An explicit False must still win -- this is a default, not a constant.
+        assert Hisat2Params.from_dict({"dta": False}).dta is False
+
+
 class TestWinnowmap:
     def test_preset_defaults_to_map_pb(self):
         p = align_params.from_dict({"aligner": "winnowmap"})
