@@ -11,7 +11,6 @@ Sniffles2 or bcftools are actually installed.
 
 import uuid
 from pathlib import Path
-from unittest.mock import patch
 
 import pytest
 
@@ -45,6 +44,37 @@ def _no_queue(monkeypatch):
     monkeypatch.setattr("app.queue.queue.enqueue", _skip_enqueue)
 
 
+@pytest.fixture(scope="module", autouse=True)
+def private_sv_stats_root(tmp_path_factory):
+    """Give this module its own `sv_stats_dir` for its whole lifetime.
+
+    `sv_stats_dir` is a read-only computed property (see app/config.py):
+    patching it on the *instance*, the way `bioinfo_home` gets patched
+    elsewhere, hits pydantic's own __setattr__/__delattr__ and raises "no
+    attribute". Patching the property on the class bypasses that -- and
+    leaves bioinfo_home (and therefore require_home()'s sentinel check,
+    which ingest_local_file depends on) untouched, so ingest against the
+    real configured home still succeeds.
+
+    Module-scoped rather than per-test, which is the part that matters under
+    xdist: the class is shared by every test in the *process*, so a
+    per-test `patch.object(type(settings), ...)` opened a window in which an
+    unrelated test running concurrently in the same worker read this
+    module's temporary root as its own. That was an intermittent failure of
+    `TestSvDbMove::test_snf_sidecar_is_ingested` -- roughly one run in four
+    at -n12, never reproducible under -n0 or when selected alone. Holding
+    the patch for the module closes the window without serializing anything.
+
+    Same shape as `test_object_deletion.py`'s `private_report_roots`, and for
+    the same underlying reason: a shared root plus a narrow patch is what
+    makes a module hostile to whatever runs beside it.
+    """
+    root = tmp_path_factory.mktemp("sv-stats")
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(type(settings), "sv_stats_dir", property(lambda _s: root))
+        yield root
+
+
 def _scratch_file(*, suffix: str = "") -> Path:
     settings.tmp_dir.mkdir(parents=True, exist_ok=True)
     path = settings.tmp_dir / f"sv-results-{uuid.uuid4().hex}{suffix}"
@@ -67,7 +97,9 @@ async def _bam(owner: str) -> DataObject:
 
 
 class TestSvDbMove:
-    async def test_sv_db_is_moved_to_the_vcf_keyed_directory(self, tmp_path):
+    async def test_sv_db_is_moved_to_the_vcf_keyed_directory(
+        self, tmp_path, private_sv_stats_root
+    ):
         """The success path the review round flagged as untested: a db built
         under scratch lands at sv_stats_dir/<vcf_id>/sv.db, not anywhere
         keyed by the source BAM."""
@@ -85,39 +117,30 @@ class TestSvDbMove:
         vcf_out = _scratch_file(suffix=".vcf.gz")
         tbi_out = _scratch_file(suffix=".vcf.gz.tbi")
 
-        # sv_stats_dir is a read-only computed property (see app/config.py):
-        # patching it on the *instance*, the way `bioinfo_home` gets patched
-        # elsewhere, hits pydantic's own __setattr__/__delattr__ and raises
-        # "no attribute". Patching the property on the class itself bypasses
-        # that -- and leaves bioinfo_home (and therefore require_home()'s
-        # sentinel check, which ingest_local_file depends on) untouched, so
-        # ingest against the real configured home still succeeds.
-        sv_stats_root = tmp_path / "sv_stats"
-        with patch.object(type(settings), "sv_stats_dir", property(lambda self: sv_stats_root)):
-            await results._apply_call_structural_variants(
-                {
-                    "bam_object_id": str(bam.id),
-                    "output": {"tmp_path": str(vcf_out), "name": "calls.sniffles.vcf.gz"},
-                    "index": {
-                        "tmp_path": str(tbi_out),
-                        "name": "calls.sniffles.vcf.gz.tbi",
-                    },
-                    "sv_db_path": str(scratch_db),
-                    "tool_version": "2.4",
-                    "params": {"min_sv_length": 50},
+        await results._apply_call_structural_variants(
+            {
+                "bam_object_id": str(bam.id),
+                "output": {"tmp_path": str(vcf_out), "name": "calls.sniffles.vcf.gz"},
+                "index": {
+                    "tmp_path": str(tbi_out),
+                    "name": "calls.sniffles.vcf.gz.tbi",
                 },
-                owner=OWNER,
-            )
+                "sv_db_path": str(scratch_db),
+                "tool_version": "2.4",
+                "params": {"min_sv_length": 50},
+            },
+            owner=OWNER,
+        )
 
-            produced = await DataObject.find(
-                DataObject.derived_from == bam.id, DataObject.owner == OWNER
-            ).to_list()
-            assert [p.name for p in produced] == ["calls.sniffles.vcf.gz"]
-            vcf = produced[0]
+        produced = await DataObject.find(
+            DataObject.derived_from == bam.id, DataObject.owner == OWNER
+        ).to_list()
+        assert [p.name for p in produced] == ["calls.sniffles.vcf.gz"]
+        vcf = produced[0]
 
-            dest = sv_stats_root / str(vcf.id) / "sv.db"
-            assert dest.is_file(), "sv.db was not moved to the vcf-keyed directory"
-            assert dest.read_bytes() == b"sqlite-bytes"
+        dest = private_sv_stats_root / str(vcf.id) / "sv.db"
+        assert dest.is_file(), "sv.db was not moved to the vcf-keyed directory"
+        assert dest.read_bytes() == b"sqlite-bytes"
 
         # The scratch source no longer exists -- moved, not copied.
         assert not scratch_db.exists()
@@ -137,20 +160,18 @@ class TestSvDbMove:
             results.log, "error", lambda event, **kw: errors.append((event, kw))
         )
 
-        sv_stats_root = tmp_path / "sv_stats"
-        with patch.object(type(settings), "sv_stats_dir", property(lambda self: sv_stats_root)):
-            await results._apply_call_structural_variants(
-                {
-                    "bam_object_id": str(bam.id),
-                    "output": {"tmp_path": str(vcf_out), "name": "calls.sniffles.vcf.gz"},
-                    "index": {
-                        "tmp_path": str(tbi_out),
-                        "name": "calls.sniffles.vcf.gz.tbi",
-                    },
-                    "sv_db_path": str(scratch_db),
+        await results._apply_call_structural_variants(
+            {
+                "bam_object_id": str(bam.id),
+                "output": {"tmp_path": str(vcf_out), "name": "calls.sniffles.vcf.gz"},
+                "index": {
+                    "tmp_path": str(tbi_out),
+                    "name": "calls.sniffles.vcf.gz.tbi",
                 },
-                owner=OWNER,
-            )
+                "sv_db_path": str(scratch_db),
+            },
+            owner=OWNER,
+        )
 
         # The VCF still landed despite the missing db source.
         produced = await DataObject.find(
@@ -194,16 +215,14 @@ class TestSvDbMove:
             results.log, "error", lambda event, **kw: errors.append((event, kw))
         )
 
-        sv_stats_root = tmp_path / "sv_stats"
-        with patch.object(type(settings), "sv_stats_dir", property(lambda self: sv_stats_root)):
-            await results._apply_call_structural_variants(
-                {
-                    "bam_object_id": str(bam.id),
-                    "output": {"tmp_path": str(vcf_out), "name": vcf_name},
-                    "snf": {"tmp_path": str(snf_out), "name": "calls.sniffles.snf"},
-                },
-                owner=OWNER,
-            )
+        await results._apply_call_structural_variants(
+            {
+                "bam_object_id": str(bam.id),
+                "output": {"tmp_path": str(vcf_out), "name": vcf_name},
+                "snf": {"tmp_path": str(snf_out), "name": "calls.sniffles.snf"},
+            },
+            owner=OWNER,
+        )
 
         assert errors == []
         vcf = await DataObject.find_one(DataObject.name == vcf_name)
@@ -254,7 +273,9 @@ def test_sv_provenance_does_not_override_a_present_but_falsy_caller():
 
 
 class TestMergeSvApplier:
-    async def test_apply_merge_structural_variants(self, tmp_path):
+    async def test_apply_merge_structural_variants(
+        self, tmp_path, private_sv_stats_root
+    ):
         bam = await _bam(OWNER)
         vcf_out = _scratch_file(suffix=".vcf.gz")
         snf1 = await object_service.ingest_local_file(
@@ -282,26 +303,24 @@ class TestMergeSvApplier:
         vcf_out = _scratch_file(suffix=".vcf.gz")
         tbi_out = _scratch_file(suffix=".vcf.gz.tbi")
 
-        sv_stats_root = tmp_path / "sv_stats"
-        with patch.object(type(settings), "sv_stats_dir", property(lambda self: sv_stats_root)):
-            await results._apply_merge_structural_variants(
-                {
-                    "snf_object_ids": [str(snf1.id), str(snf2.id)],
-                    "output": {"tmp_path": str(vcf_out), "name": "joint_calls.sniffles.vcf.gz"},
-                    "index": {
-                        "tmp_path": str(tbi_out),
-                        "name": "joint_calls.sniffles.vcf.gz.tbi",
-                    },
-                    "sv_db_path": str(scratch_db),
+        await results._apply_merge_structural_variants(
+            {
+                "snf_object_ids": [str(snf1.id), str(snf2.id)],
+                "output": {"tmp_path": str(vcf_out), "name": "joint_calls.sniffles.vcf.gz"},
+                "index": {
+                    "tmp_path": str(tbi_out),
+                    "name": "joint_calls.sniffles.vcf.gz.tbi",
                 },
-                owner=OWNER,
-            )
+                "sv_db_path": str(scratch_db),
+            },
+            owner=OWNER,
+        )
 
         joint_vcf = await DataObject.find_one(DataObject.name == "joint_calls.sniffles.vcf.gz")
         assert joint_vcf is not None
         assert joint_vcf.role == ObjectRole.VARIANTS
 
-        dest = sv_stats_root / str(joint_vcf.id) / "sv.db"
+        dest = private_sv_stats_root / str(joint_vcf.id) / "sv.db"
         assert dest.is_file()
         assert dest.read_bytes() == b"joint-sqlite-bytes"
 
