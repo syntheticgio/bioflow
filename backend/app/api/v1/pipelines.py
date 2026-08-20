@@ -37,6 +37,7 @@ from app.pipelines import (
 from app.pipelines.aligners import Aligner
 from app.pipelines.assemblers import Assembler
 from app.services import (
+    multiqc_status,
     object_service,
     pipeline_service,
     project_service,
@@ -1827,6 +1828,24 @@ async def launch_multiqc_route(body: MultiqcRequest, owner: OwnerDep) -> JobOut:
         owner=owner,
     )
     return JobOut.of(job)
+
+
+@router.get("/qc/multiqc/{project_id}/status")
+async def get_multiqc_status(project_id: PydanticObjectId, owner: OwnerDep) -> dict:
+    """What the Project QC panel should say about this project's report.
+
+    `OwnerDep`, not `LinkableOwnerDep`: this is fetched by the app's own
+    code with the profile header attached, never opened as a bare link --
+    the same split `get_qc_tile_matrix` makes for the same reason.
+
+    Declared above `get_multiqc_report` so that `status` is matched as a
+    literal before that route's `{report_path:path}` can swallow it. A path
+    converter matches greedily, including slashes, so route order is the
+    whole distinction between these two.
+    """
+    await project_service.get_project(project_id, owner=owner)
+    status = await multiqc_status.status_for(project_id, owner=owner)
+    return status.as_dict()
 
 
 @router.get("/qc/multiqc/{project_id}/{report_path:path}")

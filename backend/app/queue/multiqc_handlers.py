@@ -175,6 +175,58 @@ def count_summarizable(objects: list) -> int:
     return sum(1 for obj in objects if object_contributes(obj))
 
 
+def report_generated_at(project_id) -> float | None:
+    """When this project's MultiQC report was written, as a Unix timestamp.
+
+    Read from the file's own mtime rather than stored alongside the job.
+    The report *is* the artifact -- if it is deleted or restored by hand,
+    the mtime moves with it, while a database column would go on describing
+    a file that is no longer there.
+    """
+    report = multiqc_runner.report_path(
+        settings.multiqc_reports_dir / str(project_id)
+    )
+    try:
+        return report.stat().st_mtime
+    except OSError:
+        return None
+
+
+def newest_qc_output_at(objects: list) -> float | None:
+    """The most recent mtime across every object's retained QC output.
+
+    Compared against `report_generated_at` to answer "has QC run since this
+    report was generated". Deliberately a single newest-timestamp comparison
+    rather than a record of which runs a report covered: the honest question
+    the UI asks is whether the report is behind, and answering it this way
+    needs no per-report manifest to keep in sync with the artifact.
+
+    The consequence worth knowing: re-running QC on a file that was already
+    included makes the report stale, which is correct, but so does re-running
+    it with an identical result. Staleness here means "the inputs moved",
+    not "the output would differ".
+    """
+    newest: float | None = None
+
+    for obj in objects:
+        report_dir = settings.qc_reports_dir / str(obj.id)
+        if not report_dir.is_dir():
+            continue
+
+        candidates = [report_dir / rel for _, rel in RETAINED_FACT_FILES]
+        candidates += list(report_dir.glob(FASTQC_GLOB))
+
+        for path in candidates:
+            try:
+                mtime = path.stat().st_mtime
+            except OSError:
+                continue
+            if newest is None or mtime > newest:
+                newest = mtime
+
+    return newest
+
+
 @handler("multiqc_report", mode=HandlerMode.ASYNC, job_class=JobClass.USER_BACKGROUND)
 async def generate_multiqc_report(ctx: JobContext) -> dict:
     """Build one project's aggregate QC report.
