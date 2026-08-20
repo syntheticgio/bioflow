@@ -876,6 +876,19 @@ def mosdepth() -> Tool:
 
 
 @lru_cache(maxsize=1)
+def modkit() -> Tool:
+    # `modkit --version` prints "mod_kit X.Y.Z" and exits zero -- checked
+    # against a real bioconda install pattern on 2026-08-20 (mirroring
+    # mosdepth's own probe).
+    #
+    # No arm64 special-casing, unlike polypolish(): bioconda ships
+    # linux-aarch64 builds of ont-modkit, so the install script covers both
+    # architectures and a missing binary here means a genuinely broken
+    # install rather than an unsupported platform.
+    return _probe("modkit", settings.modkit_path, ["--version"])
+
+
+@lru_cache(maxsize=1)
 def seqkit() -> Tool:
     # seqkit has no `--version`; `seqkit version` prints "seqkit v2.x.y".
     return _probe("seqkit", settings.seqkit_path, ["version"])
@@ -999,6 +1012,7 @@ def all_tools() -> list[Tool]:
         winnowmap(),
         bedtools(),
         mosdepth(),
+        modkit(),
         seqkit(),
         snpeff(),
     ]
@@ -2835,6 +2849,46 @@ TOOL_META: dict[str, ToolMeta] = {
         # above went through.
         runnable=True,
     ),
+    "modkit": ToolMeta(
+        pipelines=(PipelineType.UTILITY,),
+        one_liner="Per-site base-modification (methylation) summarizer",
+        summary=(
+            "modkit reads the MM/ML tags an ONT basecaller writes into a BAM "
+            "when a modified-base model was used, and tabulates per-site "
+            "modification calls -- 5mC, 5hmC, 6mA, whichever the tags "
+            "contain -- into a bedMethyl track. It answers an epigenetic "
+            "question directly from an existing alignment, with no new "
+            "sequencing and no bisulfite prep."
+        ),
+        strengths=(
+            "Reads MM/ML tags directly; no separate modification caller",
+            "Multithreaded pileup over the whole alignment in one pass",
+            "bedMethyl output loads into IGV and standard genomics tooling",
+            "Reports whichever modification codes the tags actually carry",
+        ),
+        homepage="https://github.com/nanoporetech/modkit",
+        repository="https://github.com/nanoporetech/modkit",
+        # No paper exists for modkit; the repository is the citation. See
+        # scripts/install-modkit.sh for how this was verified.
+        citation="Oxford Nanopore Technologies, modkit, https://github.com/nanoporetech/modkit",
+        # Deliberately not "MIT" or any more familiar license -- this is the
+        # exact string from modkit's own LICENCE.txt, read on 2026-08-20.
+        # Section 2.1 restricts use "solely for Research Purposes"; this app
+        # is single-user/local-only per CLAUDE.md, which is an acceptable
+        # fit, but the field has to say what the license actually is rather
+        # than round it to something more permissive-sounding.
+        license="Oxford Nanopore Technologies PLC. Public License, v1.0",
+        usage=(
+            "Summarizes per-site base-modification calls (5mC, 5hmC, 6mA) "
+            "from MM/ML tags in an ONT BAM into a bedMethyl track, backing "
+            "the methylation card offered on a completed alignment."
+        ),
+        # Flipped to True alongside the methylation job and its
+        # launch_methylation handler (#631, stage 1) -- modkit is dispatched
+        # to directly, not merely installed. Same staging bedtools/mosdepth
+        # above went through.
+        runnable=True,
+    ),
     "seqkit": ToolMeta(
         pipelines=(PipelineType.UTILITY,),
         one_liner="Fast FASTA/FASTQ manipulation toolkit",
@@ -3103,3 +3157,11 @@ def reset_cache() -> None:
     bakta.cache_clear()
     kraken2.cache_clear()
     bracken.cache_clear()
+    # bedtools and mosdepth were absent from this function despite being
+    # registered lru_cache'd probes -- a pre-existing gap found while adding
+    # modkit here (#631). A test change to either tool's probed availability
+    # persisted across test cases without this, since nothing ever forgot
+    # the cached Tool.
+    bedtools.cache_clear()
+    mosdepth.cache_clear()
+    modkit.cache_clear()

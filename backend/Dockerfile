@@ -605,6 +605,21 @@ RUN chmod +x /srv/scripts/install-mosdepth.sh \
     && MOSDEPTH_VERSION="${MOSDEPTH_VERSION}" \
        /srv/scripts/install-mosdepth.sh
 
+# --- modkit -------------------------------------------------------------
+#
+# ONT's per-site base-modification (methylation) summarizer, closes #631.
+# Same bioconda/micromamba shape as mosdepth above: no Debian package, and
+# bioconda publishes linux-aarch64 builds (0.3.1 through the current 0.6.4,
+# verified against bioconda's linux-aarch64 repodata.json on 2026-08-20), so
+# there is no arm64 skip and tools.modkit() needs no architecture special
+# case. See install-modkit.sh for the license note -- ONT's Public License
+# v1.0 is non-commercial/research-only, recorded verbatim in TOOL_META.
+ARG MODKIT_VERSION=0.6.4
+COPY scripts/install-modkit.sh /srv/scripts/install-modkit.sh
+RUN chmod +x /srv/scripts/install-modkit.sh \
+    && MODKIT_VERSION="${MODKIT_VERSION}" \
+       /srv/scripts/install-modkit.sh
+
 # --- CRAQ --------------------------------------------------------------
 #
 # Reference-free assembly error detection. Not packaged for Debian trixie;
