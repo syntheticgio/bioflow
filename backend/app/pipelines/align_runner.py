@@ -706,7 +706,13 @@ def _prefix_aligner_argv(
         argv += ["--max-intronlen", str(params.max_intronlen)]
         if params.no_spliced_alignment:
             argv.append("--no-spliced-alignment")
-        if params.dta:
+        # --dta is meaningless without splice-aware alignment (it tunes anchor
+        # length around exon junctions), and emitting it alongside an explicit
+        # "DNA input" choice (no_spliced_alignment) would be a self-contradictory
+        # provenance record -- the argv would claim a transcript-assembly-
+        # friendly RNA-seq run while no_spliced_alignment says the opposite. See
+        # design spec Decision D6.
+        if params.dta and not params.no_spliced_alignment:
             argv.append("--dta")
 
     return argv

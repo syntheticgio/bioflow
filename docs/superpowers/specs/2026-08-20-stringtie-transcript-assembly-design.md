@@ -109,6 +109,18 @@ expression analysis, that is the right default. It cannot affect DNA-seq:
 the RNA card selects `hisat2` only for `_SPLICED_ASSAYS` on eukaryotes, and
 DNA alignments never construct `Hisat2Params`.
 
+That argument covers the auto-suggested RNA-seq card but is incomplete on
+its own: `aligner_registry.py` also exposes HISAT2 in the *manual* align
+dialog, with a `no_spliced_alignment` field labeled "Disable spliced
+alignment (DNA input)" for exactly the DNA-via-HISAT2 case the paragraph
+above says doesn't happen through the auto-suggested path. A user taking
+that manual route with `dta=True` (the new default) and
+`no_spliced_alignment=True` together would get an argv carrying `--dta`
+next to `--no-spliced-alignment` -- inert (`--dta` has no effect without
+splicing) but a self-contradictory provenance record. `align_runner.py`'s
+argv builder now guards `--dta` on `not params.no_spliced_alignment`, so the
+flag is only ever emitted when it can mean something.
+
 **D7. The aligner gate returns `None`, not `UNAVAILABLE`.** A bwa-mem2 BAM
 shows no transcript-assembly card at all. The issue calls such a card
 "nonsensical," and an `UNAVAILABLE` card advertising a capability that can
