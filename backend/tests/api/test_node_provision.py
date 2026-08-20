@@ -402,8 +402,13 @@ async def test_provision_stores_encrypted_key_not_the_password():
         host="10.0.0.9", username="ops", password="hunter2", node_name="keynode",
     )
 
+    # _VERIFY_SETTLE_SECONDS is the post-`up -d` settle window: a real 5s
+    # sleep in production, where it lets a crash-looping worker die before
+    # the state is read. Nothing here asserts on settle timing, so leaving it
+    # unpatched costs five seconds of wall clock for nothing.
     with patch("app.api.v1.nodes.asyncssh") as ssh, \
          patch("app.services.node_ssh.verify_key", _verify_key_mock()), \
+         patch("app.api.v1.nodes._VERIFY_SETTLE_SECONDS", 0), \
          patch("app.api.v1.nodes.asyncssh.scp", AsyncMock()):
         conn = ssh.connect.return_value
         conn.run = AsyncMock(return_value=type("R", (), {
@@ -492,8 +497,11 @@ async def test_provision_private_key_uses_real_import_private_key():
         private_key=private_pem, node_name="regnode",
     )
 
+    # See the note on _VERIFY_SETTLE_SECONDS above: patched to 0 because this
+    # test is about import_private_key, not the settle window.
     with patch("asyncssh.connect", AsyncMock()) as connect_mock, \
          patch("app.services.node_ssh.verify_key", _verify_key_mock()), \
+         patch("app.api.v1.nodes._VERIFY_SETTLE_SECONDS", 0), \
          patch("app.api.v1.nodes.asyncssh.scp", AsyncMock()):
         conn = connect_mock.return_value
         conn.run = AsyncMock(return_value=type("R", (), {
