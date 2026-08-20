@@ -3233,6 +3233,66 @@ async def _apply_salmon_quantify(result: dict, *, owner: str) -> None:
             await run_service.record_outputs(run_id, [counts.id], owner=counts.owner)
 
 
+async def _apply_transcript_assembly(result: dict, *, owner: str) -> None:
+    """Register a StringTie assembly as a derived object.
+
+    Role is ASSEMBLED_TRANSCRIPTS rather than ANNOTATION, unlike the two
+    other appliers in this file that produce GFF/GTF. Those both derive from
+    an authoritative annotation and stay authoritative; this one proposes
+    transcript models from one sample's alignment, and conflating the two
+    would let a hypothesis become the reference for the next run.
+    """
+    from app.services import object_service, run_service
+
+    object_id = result.get("object_id")
+    output = result.get("output")
+    if not output or not object_id:
+        return
+
+    source = await DataObject.get(PydanticObjectId(object_id))
+    if source is None:
+        log.warning("transcript_assembly_parent_missing", object_id=object_id)
+        return
+
+    job_id = result.get("job_id")
+
+    try:
+        assembled = await object_service.ingest_local_file(
+            owner=source.owner,
+            project_id=source.project_id,
+            path=Path(output["tmp_path"]),
+            name=output["name"],
+            role=ObjectRole.ASSEMBLED_TRANSCRIPTS,
+            derived_from=[source.id],
+            produced_by_job=PydanticObjectId(job_id) if job_id else None,
+            facts={
+                "assembled_by": result.get("assembled_by"),
+                "transcript_count": result.get("transcript_count"),
+                "novel_transcript_count": result.get("novel_transcript_count"),
+                "gene_count": result.get("gene_count"),
+            },
+            # The assembly describes the same sample as its alignment.
+            metadata=dict(source.metadata),
+        )
+    except Exception as e:  # noqa: BLE001
+        log.error(
+            "transcript_assembly_ingest_failed",
+            object_id=object_id,
+            error=str(e),
+        )
+        return
+
+    run_id = await run_service.run_for_job(PydanticObjectId(job_id)) if job_id else None
+    if run_id is not None:
+        await run_service.record_outputs(run_id, [assembled.id], owner=assembled.owner)
+
+    log.info(
+        "transcript_assembly_applied",
+        object_id=object_id,
+        assembled_id=str(assembled.id),
+    )
+
+
 async def _apply_differential_expression(result: dict, *, owner: str) -> None:
     """Turn a finished DE run into a results object.
 
@@ -3429,6 +3489,7 @@ _APPLIERS = {
     "annotate_variants": _apply_annotate_variants,
     "quantify": _apply_quantify,
     "salmon_quantify": _apply_salmon_quantify,
+    "transcript_assembly": _apply_transcript_assembly,
     "differential_expression": _apply_differential_expression,
     "assemble_reads": _apply_assemble_reads,
     "assess_completeness": _apply_assess_completeness,
