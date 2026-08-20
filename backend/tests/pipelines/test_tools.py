@@ -283,6 +283,7 @@ class TestSerialization:
             "datasets",
             "featurecounts",
             "salmon",
+            "stringtie",
             "ivar",
             "quast",
             "multiqc",

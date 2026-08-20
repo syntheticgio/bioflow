@@ -112,6 +112,7 @@ RUN apt-get update \
         bcftools \
         tabix \
         subread \
+        stringtie \
         flye \
         abyss \
         hmmer \

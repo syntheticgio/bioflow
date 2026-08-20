@@ -159,6 +159,7 @@ class Settings(BaseSettings):
     # application invokes.
     featurecounts_path: str = "featureCounts"
     salmon_path: str = "salmon"
+    stringtie_path: str = "stringtie"
     # The de novo assembler, for long reads only. Debian ships it depending on
     # minimap2 and samtools, both of which this image already carries, so it
     # costs ~37MB rather than a toolchain.
