@@ -16,6 +16,9 @@ export interface AssemblyParams {
   mode: string;
   threads: number;
   iterations: number;
+  /** Metagenome mode (Flye's `--meta`), for a mixed-community sample rather
+   *  than a single organism. */
+  meta?: boolean;
   /** Bases. Null when nothing in the project could say, which is the normal
    *  case for de novo work rather than a misconfiguration. */
   genome_size?: number | null;

@@ -261,6 +261,84 @@ class TestAssemblyEstimate:
             is None
         )
 
+    def test_flye_meta_estimate_ignores_genome_bases(self):
+        """Meta mode switches to the read-volume model; a genome size, if one
+        is present anyway, must not move the estimate."""
+        from app.pipelines import resource_estimator
+        from app.pipelines.assemblers import Assembler
+
+        without_genome = resource_estimator.estimate_assembly_mb(
+            assembler=Assembler.FLYE,
+            genome_bases=None,
+            threads=8,
+            read_bases=10_000_000_000,
+            meta=True,
+        )
+        with_genome = resource_estimator.estimate_assembly_mb(
+            assembler=Assembler.FLYE,
+            genome_bases=5_000_000_000,
+            threads=8,
+            read_bases=10_000_000_000,
+            meta=True,
+        )
+        assert without_genome == with_genome
+
+    def test_flye_meta_estimate_grows_with_read_bases(self):
+        from app.pipelines import resource_estimator
+        from app.pipelines.assemblers import Assembler
+
+        low = resource_estimator.estimate_assembly_mb(
+            assembler=Assembler.FLYE, genome_bases=None, threads=8,
+            read_bases=1_000_000_000, meta=True,
+        )
+        high = resource_estimator.estimate_assembly_mb(
+            assembler=Assembler.FLYE, genome_bases=None, threads=8,
+            read_bases=100_000_000_000, meta=True,
+        )
+        assert high > low
+
+    def test_flye_meta_estimate_is_none_without_read_bases(self):
+        """No genome size and no read volume leaves nothing to estimate off."""
+        from app.pipelines import resource_estimator
+        from app.pipelines.assemblers import Assembler
+
+        assert (
+            resource_estimator.estimate_assembly_mb(
+                assembler=Assembler.FLYE, genome_bases=None, threads=8,
+                read_bases=None, meta=True,
+            )
+            is None
+        )
+
+    def test_flye_meta_estimate_matches_the_benchmark_order_of_magnitude(self):
+        """Sanity check on the coefficient, not a precise claim: Flye's own
+        HMP mock benchmark (7 Gb PacBio meta input) peaked at 72 GB. A 7 Gbp
+        input here should land in the tens-of-GB range, not hundreds of MB
+        or multiple terabytes."""
+        from app.pipelines import resource_estimator
+        from app.pipelines.assemblers import Assembler
+
+        mb = resource_estimator.estimate_assembly_mb(
+            assembler=Assembler.FLYE, genome_bases=None, threads=8,
+            read_bases=7_000_000_000, meta=True,
+        )
+        assert 10_000 < mb < 200_000
+
+    def test_non_meta_flye_estimate_is_unaffected_by_the_meta_flag_default(self):
+        """meta defaults to False, so every existing single-genome caller
+        (which never passes it) is unchanged."""
+        from app.pipelines import resource_estimator
+        from app.pipelines.assemblers import Assembler
+
+        default = resource_estimator.estimate_assembly_mb(
+            assembler=Assembler.FLYE, genome_bases=5_000_000, threads=8
+        )
+        explicit_false = resource_estimator.estimate_assembly_mb(
+            assembler=Assembler.FLYE, genome_bases=5_000_000, threads=8,
+            meta=False,
+        )
+        assert default == explicit_false
+
 
 def test_exceeds_declared_budget_is_a_strict_comparison():
     # Equal fits: claim.lua admits on `mem <= mem_free`.

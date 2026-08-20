@@ -68,6 +68,7 @@ def estimate_assembly_mb(
     genome_bases: int | None,
     threads: int,
     read_bases: int | None = None,
+    meta: bool = False,
 ) -> int | None:
     """Peak resident memory for a de novo assembly, in MB. None if unknowable.
 
@@ -82,13 +83,31 @@ def estimate_assembly_mb(
     None as "no opinion" and let the run proceed -- refusing to start because
     we could not guess would be worse than starting and failing, which at
     least produces a log.
+
+    `meta=True` switches to the assembler's `meta_memory_model`, when it has
+    one, and estimates off `read_bases` instead of `genome_bases` -- a mixed
+    community has no single genome size, which is exactly the number
+    `genome_bases` would otherwise need. See
+    `assembler_registry.FLYE_SPEC.meta_memory_model` for where that model's
+    coefficient comes from.
     """
+    from app.pipelines.assembler_registry import spec_for as assembler_spec_for
+
+    spec = assembler_spec_for(assembler)
+
+    if meta and spec.meta_memory_model is not None:
+        model = spec.meta_memory_model
+        if not read_bases or read_bases <= 0:
+            return None
+        reads_mb = (read_bases * model.bytes_per_read_base) / (1024 * 1024)
+        return math.ceil(
+            model.fixed_overhead_mb + reads_mb + threads * model.mb_per_thread
+        )
+
     if genome_bases is None or genome_bases <= 0:
         return None
 
-    from app.pipelines.assembler_registry import spec_for as assembler_spec_for
-
-    model = assembler_spec_for(assembler).memory_model
+    model = spec.memory_model
     graph_mb = (genome_bases * model.bytes_per_genome_base) / (1024 * 1024)
     # Zero for every assembler whose model leaves the coefficient at its
     # default, so this term is invisible to Flye.

@@ -51,6 +51,26 @@ class TestBuildAssemblyCommand:
             "2",
         ]
 
+    def test_flye_meta_flag_appends_meta(self):
+        cmd = assembly_runner.build_assembly_command(
+            assembler=Assembler.FLYE,
+            tool_path="/usr/bin/flye",
+            reads=Path("/w/reads.fastq.gz"),
+            out_dir=Path("/w/out"),
+            params=FlyeParams(mode="nano-hq", threads=4, iterations=2, meta=True),
+        )
+        assert cmd[-1] == "--meta"
+
+    def test_flye_default_omits_meta(self):
+        cmd = assembly_runner.build_assembly_command(
+            assembler=Assembler.FLYE,
+            tool_path="/usr/bin/flye",
+            reads=Path("/w/reads.fastq.gz"),
+            out_dir=Path("/w/out"),
+            params=FlyeParams(mode="nano-hq", threads=4, iterations=2),
+        )
+        assert "--meta" not in cmd
+
     def test_genome_size_is_never_passed(self):
         """The module docstring's central claim: genome_size is collected for
         BioFlow's own memory estimate and never reaches the argv, because

@@ -77,6 +77,28 @@ def test_spades_does_not_offer_a_kmer_field():
     assert not any(f.key == "k" for f in spec.fields)
 
 
+def test_flye_offers_a_meta_field():
+    spec = assembler_registry.spec_for(Assembler.FLYE)
+    meta_field = next(f for f in spec.fields if f.key == "meta")
+    assert meta_field.kind == "bool"
+    assert meta_field.default is False
+
+
+def test_flye_declares_a_meta_memory_model():
+    """metaFlye's memory profile is not the single-genome one -- see
+    resource_estimator.estimate_assembly_mb for where this is selected."""
+    spec = assembler_registry.spec_for(Assembler.FLYE)
+    assert spec.meta_memory_model is not None
+    assert spec.meta_memory_model.bytes_per_read_base > 0
+
+
+def test_only_flye_declares_a_meta_memory_model():
+    """ABySS and SPAdes have no meta mode; a meta_memory_model on them would
+    be dead configuration nothing selects."""
+    for assembler in (Assembler.ABYSS, Assembler.SPADES, Assembler.HIFIASM):
+        assert assembler_registry.spec_for(assembler).meta_memory_model is None
+
+
 def test_short_reads_still_route_to_abyss_after_spades_is_installed():
     """Installing an assembler makes it selectable. Promoting it to the
     default changes every existing user's results and is a separate decision."""

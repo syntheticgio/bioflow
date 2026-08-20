@@ -268,6 +268,56 @@ class TestLaunchReachesTheQueue:
         assert enqueued["max_attempts"] == 1
         assert created["kind"].value == "assembly"
 
+    async def test_meta_flag_reaches_the_enqueued_payload(self):
+        """A user-selected --meta must survive to the job the worker runs."""
+        from app.models import RunInput, RunInputRole
+
+        reads = self._reads_object()
+        created = {}
+
+        async def _create_run(**kwargs):
+            for item in kwargs["inputs"]:
+                assert isinstance(item, RunInput)
+                assert item.role is RunInputRole.READS
+            created.update(kwargs)
+            return SimpleNamespace(id="run1", owner="local")
+
+        enqueued = {}
+
+        async def _enqueue(job_type, **kwargs):
+            enqueued["type"] = job_type
+            enqueued.update(kwargs)
+            return SimpleNamespace(id="job1")
+
+        with (
+            patch(
+                "app.services.object_service.get_object",
+                AsyncMock(return_value=reads),
+            ),
+            patch(
+                "app.services.pipeline_service._resolve_readable",
+                AsyncMock(return_value=("a" * 64, None)),
+            ),
+            patch("app.services.run_service.create_run", _create_run),
+            patch("app.services.run_service.link_job", AsyncMock()),
+            patch("app.queue.queue.enqueue", _enqueue),
+            patch(
+                "app.services.object_service.list_objects", AsyncMock(return_value=[])
+            ),
+            patch(
+                "app.services.pipeline_service.current_admission_budget_mb",
+                AsyncMock(return_value=10_000_000),
+            ),
+        ):
+            job = await pipeline_service.launch_assembly(
+                object_id=reads.id,
+                owner="local",
+                params={"assembler": "flye", "meta": True},
+            )
+
+        assert job.id == "job1"
+        assert enqueued["payload"]["params"]["meta"] is True
+
     async def test_short_reads_no_longer_refused(self):
         """The #490 refusal is gone: short reads now have an installed
         assembler (ABySS), so `launch_assembly` no longer raises a
