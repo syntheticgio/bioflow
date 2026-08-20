@@ -183,6 +183,13 @@ async def _launch_methylation(*, inputs: dict, params: dict, owner: str):
     )
 
 
+async def _launch_gc_bias(*, inputs: dict, params: dict, owner: str):
+    return await pipeline_service.launch_gc_bias(
+        bam_id=inputs["alignment"],
+        owner=owner,
+    )
+
+
 async def _launch_variant_calling(*, inputs: dict, params: dict, owner: str):
     return await pipeline_service.launch_variant_calling(
         bam_id=inputs["alignment"],
@@ -634,6 +641,19 @@ NODE_TYPES: dict[str, NodeTypeSpec] = {
                 PortType(format=FormatKind.BED),
             ),
         ),
+    ),
+    "gc_bias": NodeTypeSpec(
+        label="Coverage vs GC bias",
+        launch_name="pipeline_service.launch_gc_bias",
+        run_kind=None,  # Read-only: facts only, no PipelineRun.
+        launch=_launch_gc_bias,
+        inputs=(
+            PortSpec(
+                "alignment",
+                PortType(format=FormatKind.BAM, role=ObjectRole.ALIGNMENT),
+            ),
+        ),
+        outputs=(),
     ),
     "call_variants": NodeTypeSpec(
         label="Call variants",
