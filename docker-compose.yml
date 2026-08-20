@@ -143,7 +143,12 @@ services:
 
   worker:
     image: ghcr.io/syntheticgio/bioflow-backend:${BIOFLOW_TAG:-latest}
-    command: ["python", "-m", "app.worker_main"]
+    # The image's PATH puts Medaka's venv first (it must stay there: the
+    # polish jobs call `medaka` by bare name), so a bare `python` is Medaka's
+    # interpreter and has none of the app's dependencies -- the worker died
+    # on `import pydantic` before it could claim a job. `uvicorn`'s shebang
+    # is the same interpreter the api service runs on; name it, don't guess.
+    command: ["/usr/local/bin/python3.12", "-m", "app.worker_main"]
     environment:
       <<: *backend-env
       WORKER_MAX_CONCURRENT: ${WORKER_MAX_CONCURRENT:-4}
