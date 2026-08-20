@@ -1,6 +1,37 @@
 # mosdepth Coverage Depth — Implementation Plan
 
-**For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **IMPLEMENTED** (2026-08-20, #626). All three stages shipped. Five things
+> the plan got wrong or did not know, recorded here because the checked boxes
+> below would otherwise imply it was followed as written:
+>
+> 1. **Task 1 Step 3 was wrong.** Debian trixie has no `mosdepth` package at
+>    all -- verified in a clean container with `bedtools` as a control in the
+>    same run. Installed from bioconda via micromamba instead
+>    (`scripts/install-mosdepth.sh`), which also gains linux-aarch64: the
+>    upstream release binary is x86-64 only, so the apt/release route would
+>    have meant a Polypolish-shaped arm64 skip.
+> 2. **`build_windows_bed`'s snippet was off by one window.** The plan's
+>    `range(0, length, width)` emits a stray short final window whenever the
+>    width does not divide the length; gc_tracks emits exactly
+>    `window_count`, and the depth track has to share its axis.
+> 3. **Four registries the plan never mentioned** each fail silently and were
+>    found only by running the full suite: `tools.all_tools()`,
+>    `running_now.ENDPOINT_JOB_TYPES`,
+>    `provenance_walker._NO_NARRATIVE_STEP`, and the frontend's
+>    `metricInfo.METRIC_INFO`. CLAUDE.md's "Adding a pipeline tool" section
+>    now lists them.
+> 4. **Two bugs only a real run could surface**: the facts applier left the
+>    other mode's keys behind when a BAM was re-run in the opposite mode, and
+>    the dev/prod worker was crash-looping on a bare `python` that resolves
+>    to Medaka's venv (pre-existing, unrelated to this work, fixed here
+>    because it blocked verification).
+> 5. **Task 10 Step 2 assumed a resolvable regions `DataObject`.** There is
+>    no such prefetch and no target BED in the real library -- all 8 BED
+>    objects are `.fai`/index sidecars. Region mode is therefore explicit
+>    (`regions_id`) with no server-side fallback, which is also the more
+>    honest design: "the target regions" is a choice only the caller can make.
+
+**For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [x]`) syntax for tracking.
 
 **Goal: Add per-window and per-region read-depth analysis (mosdepth) alongside the existing `bam_stats` global stats.** A completed BAM gains a "Per-window coverage" suggestion card (when mosdepth is installed); launching it runs mosdepth, writes a JSON report, and merges coverage summary facts onto the BAM, reusable by the existing track-viz components.
 
@@ -69,7 +100,7 @@ Stages map to PRs: **Stage 0** = Tasks 1; **Stage 1** = Tasks 2–9 (one PR, or 
 
 **Files:** Modify `backend/app/pipelines/tools.py`, `backend/Dockerfile`; Create `backend/tests/pipelines/test_tools.py` addition (or extend existing).
 
-- [ ] **Step 1: Add the `mosdepth()` probe**
+- [x] **Step 1: Add the `mosdepth()` probe**
 
 Add near the other probes (after `bedtools` at line 813):
 
@@ -81,7 +112,7 @@ def mosdepth() -> Tool:
 
 Follow the existing `_probe` pattern (cached by `tool_cache`). Confirm `_probe` accepts `(name, configured_path, args)` — it does (bedtools uses exactly this shape at line 813).
 
-- [ ] **Step 2: Add the `TOOL_META` entry**
+- [x] **Step 2: Add the `TOOL_META` entry**
 
 Append to `TOOL_META` (after `bedtools`, line ~2469), with license/citation **verified against the mosdepth repo at implementation time**:
 
@@ -113,7 +144,7 @@ Append to `TOOL_META` (after `bedtools`, line ~2469), with license/citation **ve
 ),
 ```
 
-- [ ] **Step 3: Install in the Dockerfile**
+- [x] **Step 3: Install in the Dockerfile**
 
 Add `mosdepth` to the `apt-get install` block (lines 95–124), with a build-time version comment matching the existing style ("samtools 1.21"):
 
@@ -124,16 +155,16 @@ Add `mosdepth` to the `apt-get install` block (lines 95–124), with a build-tim
 
 Verify the exact trixie version at build time and write it in the comment.
 
-- [ ] **Step 4: Run `test_every_tool_is_documented`**
+- [x] **Step 4: Run `test_every_tool_is_documented`**
 
 Run: `docker compose exec api python -m pytest tests/pipelines/test_tools.py::TestToolMeta::test_every_tool_is_documented -q`
 Expected: PASS (the four bibliographic fields are present).
 
-- [ ] **Step 5: Confirm `/help/software` shows mosdepth**
+- [x] **Step 5: Confirm `/help/software` shows mosdepth**
 
 Build the image (`docker compose up -d --build api`) and open `/help/software`; mosdepth appears with version, license, citation, usage. This is success criterion #1.
 
-- [ ] **Step 6: Commit (Stage 0 PR)**
+- [x] **Step 6: Commit (Stage 0 PR)**
 
 ```bash
 git add backend/app/pipelines/tools.py backend/Dockerfile
@@ -146,7 +177,7 @@ git commit -m "feat(pipelines): register mosdepth tool and probe"
 
 **Files:** Create `backend/app/pipelines/mosdepth_runner.py`; Create `backend/tests/pipelines/test_mosdepth_runner.py`.
 
-- [ ] **Step 1: Write the failing test for the command builder + windows generator + parsers**
+- [x] **Step 1: Write the failing test for the command builder + windows generator + parsers**
 
 ```python
 import pytest
@@ -189,12 +220,12 @@ class TestParsers:
         ...
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `docker compose exec api python -m pytest tests/pipelines/test_mosdepth_runner.py -q`
 Expected: FAIL, `ModuleNotFoundError: No module named 'app.pipelines.mosdepth_runner'`
 
-- [ ] **Step 3: Write the runner**
+- [x] **Step 3: Write the runner**
 
 ```python
 """mosdepth command-building, windows-BED generation, and output parsing.
@@ -243,12 +274,12 @@ def summarize(report: dict) -> dict: ...  # the coverage_* facts
 fixture (verify the trixie mosdepth `.mosdepth.summary.txt` and `.regions.bed.gz`
 headers at implementation time — see Spec "Verify before implementing" #4).
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 Run: `docker compose exec api python -m pytest tests/pipelines/test_mosdepth_runner.py -q`
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add backend/app/pipelines/mosdepth_runner.py backend/tests/pipelines/test_mosdepth_runner.py
@@ -261,7 +292,7 @@ git commit -m "feat(pipelines): add mosdepth runner (command, windows, parsers)"
 
 **Files:** Modify `backend/app/config.py`.
 
-- [ ] **Step 1: Add `coverage_dir` mirroring `feature_coverage_dir`**
+- [x] **Step 1: Add `coverage_dir` mirroring `feature_coverage_dir`**
 
 After `feature_coverage_dir` (around line 405):
 
@@ -276,12 +307,12 @@ def coverage_dir(self) -> Path:
     return self.bioinfo_home / "coverage"
 ```
 
-- [ ] **Step 2: Smoke-check the property resolves**
+- [x] **Step 2: Smoke-check the property resolves**
 
 Run: `docker compose exec api python -c "from app.config import settings; print(settings.coverage_dir)"`
 Expected: prints `<bioinfo_home>/coverage`.
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add backend/app/config.py
@@ -294,7 +325,7 @@ git commit -m "feat(config): add coverage_dir for mosdepth reports"
 
 **Files:** Create `backend/app/queue/mosdepth_handlers.py`; Modify `backend/app/queue/handlers.py`; Create `backend/tests/queue/test_mosdepth_handlers.py`.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 ```python
 from unittest.mock import patch
@@ -315,12 +346,12 @@ class TestCoverageHandlerRuns:
 (`_ctx_with_payload` builds a minimal `JobContext` — mirror how
 `test_feature_coverage_handlers.py` constructs one.)
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `docker compose exec api python -m pytest tests/queue/test_mosdepth_handlers.py -q`
 Expected: FAIL, `ModuleNotFoundError: No module named 'app.queue.mosdepth_handlers'`
 
-- [ ] **Step 3: Write the handler, mirroring `feature_coverage_handlers.py`**
+- [x] **Step 3: Write the handler, mirroring `feature_coverage_handlers.py`**
 
 ```python
 """coverage: per-window/per-region read depth for one BAM via mosdepth.
@@ -376,7 +407,7 @@ def run_coverage(ctx: JobContext) -> dict:
 import json  # top of file in practice
 ```
 
-- [ ] **Step 4: Register the handler for side-effects in `handlers.py`**
+- [x] **Step 4: Register the handler for side-effects in `handlers.py`**
 
 Near the feature_coverage import (line ~1042):
 
@@ -384,13 +415,13 @@ Near the feature_coverage import (line ~1042):
 from app.queue import mosdepth_handlers  # noqa: F401  (registers @handler)
 ```
 
-- [ ] **Step 5: Run test to verify it passes**
+- [x] **Step 5: Run test to verify it passes**
 
 Run: `docker compose restart worker` (handler changed), then
 `docker compose exec api python -m pytest tests/queue/test_mosdepth_handlers.py -q`
 Expected: PASS.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add backend/app/queue/mosdepth_handlers.py backend/app/queue/handlers.py backend/tests/queue/test_mosdepth_handlers.py
@@ -403,7 +434,7 @@ git commit -m "feat(queue): add coverage handler (mosdepth)"
 
 **Files:** Modify `backend/app/services/pipeline_service.py`, `backend/app/pipelines/node_types.py`; Create `backend/tests/services/test_coverage_launch.py` (launch portion).
 
-- [ ] **Step 1: Write the failing test (exhaustiveness + launch)**
+- [x] **Step 1: Write the failing test (exhaustiveness + launch)**
 
 ```python
 from app.services import pipeline_service as ps
@@ -414,12 +445,12 @@ class TestLaunchCoverageClassified:
         assert "pipeline_service.launch_coverage" in node_types.launch_function_names()
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `docker compose exec api python -m pytest tests/pipelines/test_node_types.py -q`
 Expected: FAIL (`launch_coverage` not yet classified) — or `ModuleNotFoundError` if the launch fn isn't written yet; write both in Step 3.
 
-- [ ] **Step 3: Add `launch_coverage` to `pipeline_service.py`**
+- [x] **Step 3: Add `launch_coverage` to `pipeline_service.py`**
 
 Mirror `launch_feature_coverage` (lines 4466+): eligibility via
 `_check_bam_stats_callable`, `refuse_if_over_budget` with
@@ -457,7 +488,7 @@ async def launch_coverage(
     return await queue.enqueue("coverage", payload, owner=owner)
 ```
 
-- [ ] **Step 4: Add the node-type adapter + spec in `node_types.py`**
+- [x] **Step 4: Add the node-type adapter + spec in `node_types.py`**
 
 After `_launch_feature_coverage` (line 168):
 
@@ -475,13 +506,13 @@ And register a `NodeTypeSpec` in the `NODE_TYPES` list (mirror the
 `outputs=()`). The `launch_function_names()` exhaustiveness test then passes
 with no second hand-written list.
 
-- [ ] **Step 5: Run the node-types exhaustiveness test**
+- [x] **Step 5: Run the node-types exhaustiveness test**
 
 Run: `docker compose exec api python -m pytest tests/pipelines/test_node_types.py -q`
 Expected: PASS — the test compares `launch_function_names()` against
 `NODE_TYPES`, so `launch_coverage` must have its spec (CLAUDE.md #355/#366 trap).
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add backend/app/services/pipeline_service.py backend/app/pipelines/node_types.py backend/tests/services/test_coverage_launch.py
@@ -494,7 +525,7 @@ git commit -m "feat(services): add launch_coverage and node-type classification"
 
 **Files:** Modify `backend/app/api/v1/pipelines.py`.
 
-- [ ] **Step 1: Add routes mirroring feature-coverage (lines 748–792)**
+- [x] **Step 1: Add routes mirroring feature-coverage (lines 748–792)**
 
 ```python
 class CoverageRequest(BaseModel):
@@ -517,14 +548,14 @@ async def coverage_report(object_id: str, request: Request):
 
 Mirror the feature-coverage report route's owner/scope checks and 404 handling.
 
-- [ ] **Step 2: Run the route tests**
+- [x] **Step 2: Run the route tests**
 
 Add route tests to `backend/tests/api/test_pipelines.py` (POST returns 201
 with a job; GET report returns the stored JSON). Run:
 `docker compose exec api python -m pytest tests/api/test_pipelines.py -k coverage -q`
 Expected: PASS.
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add backend/app/api/v1/pipelines.py backend/tests/api/test_pipelines.py
@@ -537,7 +568,7 @@ git commit -m "feat(api): add /pipelines/coverage routes"
 
 **Files:** Modify `backend/app/queue/results.py`.
 
-- [ ] **Step 1: Add `_apply_coverage` mirroring `_apply_feature_coverage` (line 1738)**
+- [x] **Step 1: Add `_apply_coverage` mirroring `_apply_feature_coverage` (line 1738)**
 
 ```python
 async def _apply_coverage(result: dict, *, owner: str) -> None:
@@ -562,21 +593,21 @@ async def _apply_coverage(result: dict, *, owner: str) -> None:
              mean_depth=facts.get("coverage_mean_depth"))
 ```
 
-- [ ] **Step 2: Wire it into the applier dispatch**
+- [x] **Step 2: Wire it into the applier dispatch**
 
 Find where `_apply_feature_coverage` is mapped to its job name (the
 `APPLIERS` / `results_for` dispatch) and add `"coverage": _apply_coverage`
 alongside it. (Confirm the exact dispatch key by grepping for
 `feature_coverage` in `results.py`.)
 
-- [ ] **Step 3: Run the applier test**
+- [x] **Step 3: Run the applier test**
 
 Add a test in `backend/tests/queue/test_results.py` that `_apply_coverage`
 merges `coverage_*` facts onto a BAM and leaves other facts intact. Run:
 `docker compose exec api python -m pytest tests/queue/test_results.py -k coverage -q`
 Expected: PASS.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add backend/app/queue/results.py backend/tests/queue/test_results.py
@@ -589,7 +620,7 @@ git commit -m "feat(queue): apply coverage facts to the BAM"
 
 **Files:** Modify `backend/app/services/suggestion_service.py`; Modify `backend/tests/services/test_suggestion_service.py`.
 
-- [ ] **Step 1: Write both-direction tests**
+- [x] **Step 1: Write both-direction tests**
 
 ```python
 from unittest.mock import patch
@@ -629,12 +660,12 @@ class TestCoverageCard:
         assert card.status is CardStatus.UNAVAILABLE
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `docker compose exec api python -m pytest tests/services/test_suggestion_service.py -k coverage -q`
 Expected: FAIL, `ImportError: cannot import name 'build_coverage_card'`
 
-- [ ] **Step 3: Write `build_coverage_card`**
+- [x] **Step 3: Write `build_coverage_card`**
 
 ```python
 def build_coverage_card(obj) -> SuggestionCard | None:
@@ -669,12 +700,12 @@ def build_coverage_card(obj) -> SuggestionCard | None:
 
 Add `("coverage", build_coverage_card)` to `CARD_BUILDERS`.
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 Run: `docker compose exec api python -m pytest tests/services/test_suggestion_service.py -k coverage -q`
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add backend/app/services/suggestion_service.py backend/tests/services/test_suggestion_service.py
@@ -685,7 +716,7 @@ git commit -m "feat(services): add coverage suggestion card"
 
 ### Task 9: Real-database spot check (RS-4)
 
-- [ ] **Step 1: Against a real aligned BAM, confirm the card and the job**
+- [x] **Step 1: Against a real aligned BAM, confirm the card and the job**
 
 ```bash
 docker compose exec api python -c "
@@ -703,7 +734,7 @@ false `unavailable` from a hand-built fact the unit tests fed. This is the
 protein.faa/duplicate-assembly lesson: fixtures that already look right hide a
 rule that misreads real objects.
 
-- [ ] **Step 2: Launch end-to-end and confirm facts land**
+- [x] **Step 2: Launch end-to-end and confirm facts land**
 
 ```bash
 docker compose exec api python -c "
@@ -718,7 +749,7 @@ Then wait for the job, `docker compose restart worker` if you changed the
 handler since the stack started, and confirm `coverage_mean_depth` etc. appear
 on the BAM's facts (DB check, not just the green suite).
 
-- [ ] **Step 3: Manual UI verification**
+- [x] **Step 3: Manual UI verification**
 
 `docker compose up -d --build api web worker`, open the BAM's detail panel;
 the coverage card is present in the Actions tab, and (after Stage 2) its
@@ -731,33 +762,33 @@ component-test setup in this repo.
 
 **Files:** Modify `backend/app/pipelines/mosdepth_runner.py`, `backend/app/queue/mosdepth_handlers.py`, `backend/app/services/suggestion_service.py`, `backend/app/services/pipeline_service.py`.
 
-- [ ] **Step 1: Region mode in the runner**
+- [x] **Step 1: Region mode in the runner**
 
 `build_command` already accepts `regions_bed`; add `parse_regions` handling so
 a regions BED yields per-region depth and `summarize` records
 `coverage_mode="regions"`. Unit-test the region path against a captured
 `.regions.bed.gz` from a BED run.
 
-- [ ] **Step 2: Card offers region mode when a regions object resolves**
+- [x] **Step 2: Card offers region mode when a regions object resolves**
 
 In `build_coverage_card`, resolve a regions `DataObject` of the same reference
 (via the same `resolve_reference` machinery `feature_coverage` uses). When
 present, the launch body includes `regions_id`; the card's `why` names the
 mode ("depth over your selected regions").
 
-- [ ] **Step 3: `launch_coverage` accepts `regions_id`**
+- [x] **Step 3: `launch_coverage` accepts `regions_id`**
 
 Already in the Task 5 signature; confirm the handler reads
 `ctx.payload["regions_id"]` and passes it as `regions_bed` to `build_command`
 instead of the generated windows BED.
 
-- [ ] **Step 4: Tests**
+- [x] **Step 4: Tests**
 
 Extend `test_mosdepth_runner.py` (region parse) and `test_coverage_launch.py`
 (card offers region mode when a regions object is present, windowed otherwise).
 Run both suites.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add backend/app/pipelines/mosdepth_runner.py backend/app/queue/mosdepth_handlers.py backend/app/services/suggestion_service.py backend/app/services/pipeline_service.py backend/tests
@@ -770,26 +801,26 @@ git commit -m "feat(coverage): add BED-region mode"
 
 **Files:** Modify `frontend/src/components/BamResults.tsx`; optionally `frontend/src/components/CoverageChart.tsx`.
 
-- [ ] **Step 1: Render coverage facts in BamResults**
+- [x] **Step 1: Render coverage facts in BamResults**
 
 Read `coverage_mean_depth` / `coverage_median_depth` / `coverage_bases_ge_*`
 from the BAM's facts and show them beside the existing `bam_stats` panel, so
 the two are visible together and clearly distinct (success criterion #3).
 
-- [ ] **Step 2: Depth track**
+- [x] **Step 2: Depth track**
 
 Store the per-window depth in a `BirdsEyeCoverageChart`-compatible shape (or a
 dedicated `CoverageChart` panel) keyed by contig, reusing the `gc_tracks`
 windowing so the axis matches existing GC tracks. Confirm the chart's expected
 fact/array shape first (Spec "Verify before implementing" #5).
 
-- [ ] **Step 3: Manual UI verification**
+- [x] **Step 3: Manual UI verification**
 
 Against the worktree stack on 5273 (or the main stack on 5173), confirm the
 coverage card launches, the job completes, and the depth track renders. UI
 verification is manual.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add frontend/src/components/BamResults.tsx frontend/src/components/CoverageChart.tsx

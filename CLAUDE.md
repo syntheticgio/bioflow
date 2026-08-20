@@ -465,10 +465,38 @@ Registering in `backend/app/pipelines/tools.py` is **half** the change:
    Write `usage` as behaviour, not flags. Same for
    `backend/app/pipelines/sources.py`, which backs `/help/sources`.
 
+A tool that gets its own **job type** has four more hand-maintained
+registries, none of which fail at import -- each one goes wrong silently, in
+a different place:
+
+3. **`tools.all_tools()`** -- the probe list behind the availability panel. A
+   probe defined but not listed here reports nothing to the UI.
+4. **`node_types.NODE_TYPES`** -- needs a `_launch_*` adapter *and* a
+   `NodeTypeSpec`. This one does fail a test (`launch_function_names()` is
+   discovered by inspection), which is the exception that proves the rule.
+5. **`running_now.ENDPOINT_JOB_TYPES`** -- maps the card's endpoint to its job
+   type. Missing, the card's Launch button never greys out while the job runs.
+6. **`provenance_walker._NO_NARRATIVE_STEP`** (or a narrative verb) -- every
+   registered handler must be classified one way or the other.
+
+Frontend, if the tool's results get a panel: **`metricInfo.METRIC_INFO`** needs
+an entry per `<Stat metric="...">`, enforced by `metricInfo.test.ts`. Without
+one the InfoMarker silently renders nothing.
+
 **Testing availability:** patch `spec_for`, not `tools.<name>` (the registry
 captured the function object at import time). And assert the card flips to
 *unavailable* when the probe is patched off -- the image ships most tools, so
 an "available" assertion passes whether or not the patch worked.
+
+**Installing it:** check apt against a real container *with a control package
+in the same run* before believing "not packaged" or "packaged" -- and prefer
+bioconda to a GitHub release binary when upstream ships x86-64 only, since
+bioconda usually has a linux-aarch64 build and that is the difference between
+the tool working on Apple Silicon and an arm64 skip. This image ships without
+`curl` (install-meryl.sh and install-quast.sh purge it), so a late install
+script must reinstall and re-purge it. End the script with a real run, not
+`--version`: a tool that dlopens its libraries passes `--version` with its
+libraries deleted.
 
 → [The silent Flye failure, the `runnable` comment that lied](docs/agent-notes.md#adding-a-pipeline-tool)
 
