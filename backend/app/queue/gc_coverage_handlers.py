@@ -13,8 +13,10 @@ Read-only like coverage and bam_stats: no derived object, just facts merged
 onto the BAM by _apply_gc_bias (results.py).
 """
 
+import json
 from datetime import UTC, datetime
 
+from app.config import settings
 from app.errors import PermanentError
 from app.logging import get_logger
 from app.models import IoClass, JobClass, JobResources
@@ -42,6 +44,26 @@ def compute_gc_bias(ctx: JobContext) -> dict:
     joined = gc_coverage.join_windows(gc_contigs, depth_regions)
     curve = gc_coverage.bias_curve(joined)
 
+    # The per-contig blobplot array is bounded by cap_by_cumulative_length
+    # (V4) but can still run to thousands of entries -- too large for facts
+    # (V5), so it goes to a JSON report on disk instead, mirroring
+    # coverage_dir/coverage.json.
+    contig_rows = gc_coverage.per_contig(joined)
+    kept, dropped = gc_coverage.cap_by_cumulative_length(contig_rows)
+
+    report_dir = settings.gc_bias_dir / str(bam_id)
+    report_dir.mkdir(parents=True, exist_ok=True)
+    report_name = "gc_blob.json"
+    (report_dir / report_name).write_text(
+        json.dumps(
+            {
+                "contigs": kept,
+                "dropped_count": dropped,
+                "kept_count": len(kept),
+            }
+        )
+    )
+
     # "empty", not "ok", when every window's GC was None (a legitimate
     # all-N reference case): "ok" with an empty curve is indistinguishable
     # from "never ran" in BamResults.tsx, which gates the chart on
@@ -53,6 +75,10 @@ def compute_gc_bias(ctx: JobContext) -> dict:
         "gc_bias_curve": curve,
         "gc_bias_partial": bool(ctx.payload.get("gc_tracks_partial")),
         "gc_bias_computed_at": datetime.now(UTC).isoformat(),
+        "gc_blob_status": "ok",
+        "gc_blob_report": report_name,
+        "gc_blob_contig_count": len(kept),
+        "gc_blob_dropped_count": dropped,
     }
 
     log.info(
@@ -60,6 +86,8 @@ def compute_gc_bias(ctx: JobContext) -> dict:
         job_id=ctx.job_id,
         bam_id=bam_id,
         bin_count=len(curve),
+        contig_count=len(kept),
+        dropped_count=dropped,
     )
 
     return {

@@ -6,9 +6,12 @@ gc_coverage module -- and the applier that merges the resulting facts onto
 the BAM object.
 """
 
+import json
+
 import pytest
 
 from app.errors import PermanentError
+from app.queue import gc_coverage_handlers
 from app.queue.gc_coverage_handlers import compute_gc_bias
 from app.queue.registry import JobContext
 
@@ -19,7 +22,17 @@ def _ctx(payload: dict) -> JobContext:
     )
 
 
-def test_compute_gc_bias_returns_curve_facts():
+@pytest.fixture
+def home(tmp_path, monkeypatch):
+    """Send gc_bias_dir under the test's own directory so the handler cannot
+    write to the host's /data. Mirrors test_mosdepth_handlers.py's own
+    `home` fixture: gc_bias_dir is a derived read-only property, so patch
+    what it derives from."""
+    monkeypatch.setattr(gc_coverage_handlers.settings, "bioinfo_home", tmp_path)
+    return tmp_path
+
+
+def test_compute_gc_bias_returns_curve_facts(home):
     payload = {
         "bam_id": "abc123",
         "project_id": "proj1",
@@ -47,6 +60,10 @@ def test_compute_gc_bias_returns_curve_facts():
     ]
     assert result["facts"]["gc_bias_partial"] is False
     assert "gc_bias_computed_at" in result["facts"]
+    assert result["facts"]["gc_blob_status"] == "ok"
+    assert result["facts"]["gc_blob_report"] == "gc_blob.json"
+    assert result["facts"]["gc_blob_contig_count"] == 1
+    assert result["facts"]["gc_blob_dropped_count"] == 0
 
 
 def test_compute_gc_bias_requires_bam_id():
@@ -54,7 +71,7 @@ def test_compute_gc_bias_requires_bam_id():
         compute_gc_bias(_ctx({}))
 
 
-def test_compute_gc_bias_carries_the_partial_flag_from_the_payload():
+def test_compute_gc_bias_carries_the_partial_flag_from_the_payload(home):
     """Important #1 finding: gc_tracks truncates to MAX_STORED_CONTIGS and
     sets gc_tracks_partial on its own fact; launch_gc_bias forwards that as
     the payload's gc_tracks_partial key, and the handler must re-emit it as
@@ -77,7 +94,7 @@ def test_compute_gc_bias_carries_the_partial_flag_from_the_payload():
     assert result["facts"]["gc_bias_partial"] is True
 
 
-def test_compute_gc_bias_partial_flag_absent_from_payload_defaults_false():
+def test_compute_gc_bias_partial_flag_absent_from_payload_defaults_false(home):
     payload = {
         "bam_id": "abc123",
         "gc_contigs": [
@@ -94,7 +111,7 @@ def test_compute_gc_bias_partial_flag_absent_from_payload_defaults_false():
     assert result["facts"]["gc_bias_partial"] is False
 
 
-def test_compute_gc_bias_reports_empty_status_for_an_all_n_reference():
+def test_compute_gc_bias_reports_empty_status_for_an_all_n_reference(home):
     """Important #2 finding: an empty curve with status 'ok' is
     indistinguishable in BamResults.tsx from a job that never ran (an empty
     array is truthy in JS). All windows scoring gc=None is a legitimate
@@ -114,6 +131,55 @@ def test_compute_gc_bias_reports_empty_status_for_an_all_n_reference():
     result = compute_gc_bias(_ctx(payload))
     assert result["facts"]["gc_bias_status"] == "empty"
     assert result["facts"]["gc_bias_curve"] == []
+
+
+def test_compute_gc_bias_writes_capped_per_contig_report(home):
+    payload = {
+        "bam_id": "abc123",
+        "project_id": "proj1",
+        "gc_contigs": [
+            {"name": "c1", "length": 20, "window_bases": 10,
+             "gc": [30.0, 70.0], "skew": [0.0, 0.0]},
+        ],
+        "depth_regions": {
+            "c1": [
+                {"start": 0, "end": 10, "depth": 5.0, "name": None},
+                {"start": 10, "end": 20, "depth": 15.0, "name": None},
+            ],
+        },
+    }
+    result = compute_gc_bias(_ctx(payload))
+    assert result["facts"]["gc_blob_status"] == "ok"
+    assert result["facts"]["gc_blob_contig_count"] == 1
+    assert result["facts"]["gc_blob_dropped_count"] == 0
+    assert "gc_blob_report" in result["facts"]
+
+    report = home / "gc_bias" / "abc123" / result["facts"]["gc_blob_report"]
+    body = json.loads(report.read_text())
+    assert body["kept_count"] == 1
+    assert body["dropped_count"] == 0
+    assert len(body["contigs"]) == 1
+    assert body["contigs"][0]["contig"] == "c1"
+
+
+def test_compute_gc_bias_report_is_not_written_beside_the_bam(home):
+    """The report belongs in gc_bias_dir, outside objects/ -- mirrors
+    test_mosdepth_handlers.py's own equivalent guard."""
+    payload = {
+        "bam_id": "abc123",
+        "gc_contigs": [
+            {"name": "c1", "length": 20, "window_bases": 10, "gc": [30.0, 70.0]},
+        ],
+        "depth_regions": {
+            "c1": [
+                {"start": 0, "end": 10, "depth": 5.0},
+                {"start": 10, "end": 20, "depth": 15.0},
+            ],
+        },
+    }
+    compute_gc_bias(_ctx(payload))
+    assert not (home / "gc_blob.json").exists()
+    assert not (home / "objects").exists()
 
 
 class TestRegistration:
