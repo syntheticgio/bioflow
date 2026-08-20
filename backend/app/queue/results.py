@@ -3766,6 +3766,31 @@ async def _apply_annotate_variants(result: dict, *, owner: str) -> None:
 _SIDECAR_ROLES = {role.value: role for role in SidecarRole}
 
 
+async def _apply_gc_bias(result: dict, *, owner: str) -> None:
+    """Record a GC-vs-coverage bias curve on the BAM it was computed for.
+
+    Read-only like _apply_coverage: no files to ingest, just facts merged
+    onto the object.
+    """
+    object_id = result.get("object_id")
+    facts = result.get("facts") or {}
+    if not object_id or not facts:
+        return
+
+    obj = await DataObject.get(PydanticObjectId(object_id))
+    if obj is None:
+        log.warning("gc_bias_object_missing", object_id=object_id)
+        return
+
+    merged = {**obj.facts, **facts}
+    await obj.set(
+        {
+            DataObject.facts: merged,
+            DataObject.updated_at: datetime.now(UTC),
+        }
+    )
+
+
 _APPLIERS = {
     "ingest_headers": _apply_ingest_headers,
     "trim_reads": _apply_trim_reads,
@@ -3790,6 +3815,7 @@ _APPLIERS = {
     "feature_coverage": _apply_feature_coverage,
     "coverage": _apply_coverage,
     "methylation": _apply_methylation,
+    "gc_bias": _apply_gc_bias,
     "run_transcript_qc": _apply_run_transcript_qc,
     "run_vcf_stats": _apply_run_vcf_stats,
     "run_annotation_stats": _apply_run_annotation_stats,
