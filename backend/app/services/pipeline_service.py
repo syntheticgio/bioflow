@@ -397,6 +397,7 @@ async def launch_trim(
     return job
 
 
+
 def _trim_label(reads: DataObject, mate: DataObject | None) -> str:
     if mate is None:
         return f"Trim {reads.name}"
@@ -1411,6 +1412,9 @@ UNKNOWN_ASSEMBLY_MEM_MB = 16384
 # the exhaustiveness test in test_heavy_launcher_overrides.py read the same
 # number.
 ANNOTATE_GENOME_MEM_MB = 16384
+# Liftoff's declared reservation. Same shape as Bakta's: single target
+# assembly, heavy I/O, no database of its own to hold in RAM.
+TRANSFER_ANNOTATION_MEM_MB = 16384
 
 # Sized for bwa-mem2's alignment step, not for Polypolish -- see the handler's
 # own note on why peak RSS scales with the draft rather than the reads.
@@ -5261,6 +5265,8 @@ async def launch_coverage(
     return job
 
 
+GC_BIAS_MEM_MB = 512
+
 async def launch_salmon_quantify(
     *,
     reads_id: PydanticObjectId,
@@ -6711,6 +6717,153 @@ async def launch_annotate_genome(
 
     log.info(
         "annotate_genome_launched",
+        job_id=str(job.id),
+        object_id=str(obj.id),
+        organism=organism,
+    )
+    return job
+
+
+async def launch_transfer_annotation(
+    object_id: PydanticObjectId,
+    owner: str,
+    reference_id: PydanticObjectId | None = None,
+    resource_override: bool = False,
+) -> Job:
+    """Queue a Liftoff annotation transfer for one eukaryotic assembly.
+
+    Mirrors launch_annotate_genome's shape: single target assembly, no run
+    record, no new RunJobRole. Unlike annotate_genome, the result is a *new*
+    ANNOTATION object (the lifted GFF3), so it goes through the standard
+    ingest path rather than merging facts onto the assembly.
+
+    Gated on: a FASTA target, an available Liftoff binary, a eukaryotic
+    organism, a transferable GFF3/GTF annotation in the project, and a
+    reference sequence to build against (auto-picked when unique).
+    """
+    from app.queue import queue
+    from app.services import object_service
+
+    refuse_if_over_budget(
+        declared_mb=TRANSFER_ANNOTATION_MEM_MB,
+        budget_mb=await current_admission_budget_mb(),
+        resource_override=resource_override,
+    )
+
+    tools.require(tools.liftoff())
+    obj = await object_service.get_object(object_id, owner=owner)
+    _check_completeness_callable(obj)
+    if obj.format.kind is not FormatKind.FASTA:
+        raise ValidationError(
+            "Annotation transfer needs a FASTA assembly as its target.",
+            details={"object_id": str(obj.id), "format": obj.format.kind.value},
+        )
+
+    import app.pipelines.organism_taxonomy as ot
+
+    organism = obj.metadata.get("organism") if obj.metadata else None
+    if not ot.is_eukaryotic(organism):
+        raise ValidationError(
+            "Liftoff transfers annotations for eukaryotic assemblies. "
+            f"{organism!r} is not a recognised eukaryote (or unknown).",
+            details={"object_id": str(obj.id), "organism": organism},
+        )
+
+    digest, path = await _resolve_readable(obj)
+    if not digest and not path:
+        raise ValidationError(
+            f"{obj.name!r} has no stored content yet (status={obj.status.value})",
+            details={"object_id": str(obj.id)},
+        )
+
+    # The annotation to lift. resolve_annotation refuses its own ambiguity
+    # (more than one assembly's annotation, none named) with needs=annotation_id.
+    annotation = await resolve_annotation(obj.project_id, reference_id=None, owner=owner)
+    if annotation is None:
+        raise ValidationError(
+            "No GFF3/GTF annotation is available to transfer.",
+            details={"object_id": str(obj.id)},
+        )
+
+    # The reference is the sequence the annotation was built against. Prefer an
+    # explicit reference in the project; fall back to the annotation's own
+    # source assembly; refuse (naming the reference) when several fit.
+    refs = [
+        r
+        for r in await object_service.list_objects(obj.project_id, owner=owner)
+        if r.role is ObjectRole.REFERENCE and r.format.kind is FormatKind.FASTA
+    ]
+    if reference_id is not None:
+        reference = next((r for r in refs if r.id == reference_id), None)
+        if reference is None:
+            raise ValidationError(
+                "The chosen reference is not a FASTA reference in this project.",
+                details={"reference_id": str(reference_id)},
+            )
+    elif len(refs) == 1:
+        reference = refs[0]
+    elif len(refs) == 0:
+        source = None
+        for d in annotation.derived_from or []:  # type: ignore[union-attr]
+            cand = await object_service.get_object(d, owner=owner)
+            if cand.format.kind is FormatKind.FASTA:
+                source = cand
+                break
+        if source is None:
+            raise ValidationError(
+                "Annotation transfer needs a reference sequence (the one the "
+                "annotation was built against). Add it as a reference.",
+                details={"needs": "reference_id", "object_id": str(obj.id)},
+            )
+        reference = source
+    else:
+        raise ValidationError(
+            "Multiple reference sequences fit this transfer. Pick the one the "
+            "annotation was built against.",
+            details={"needs": "reference_id", "object_id": str(obj.id)},
+        )
+
+    ref_digest, ref_path = await _resolve_readable(reference)
+    ann_digest, ann_path = await _resolve_readable(annotation)
+
+    payload: dict = {
+        "object_id": str(obj.id),
+        "target_name": obj.name,
+        "threads": 8,
+    }
+    if digest:
+        payload["target_sha256"] = digest
+    if path:
+        payload["target_path"] = path
+    if ref_digest:
+        payload["reference_sha256"] = ref_digest
+    if ref_path:
+        payload["reference_path"] = ref_path
+    if ann_digest:
+        payload["annotation_sha256"] = ann_digest
+    if ann_path:
+        payload["annotation_path"] = ann_path
+
+    job = await queue.enqueue(
+        "transfer_annotation",
+        payload=payload,
+        job_class=JobClass.COMPUTE,
+        resources=JobResources(
+            cpu=8, mem_mb=TRANSFER_ANNOTATION_MEM_MB, io=IoClass.HEAVY
+        ),
+        max_attempts=1,
+        dedup_key=f"transfer_annotation:{obj.id}",
+        project_id=obj.project_id,
+        object_id=obj.id,
+        resource_override=resource_override,
+    )
+    if job is None:
+        raise ConflictError(
+            "Annotation transfer is already queued or running for this assembly",
+            details={"object_id": str(obj.id)},
+        )
+    log.info(
+        "transfer_annotation_launched",
         job_id=str(job.id),
         object_id=str(obj.id),
         organism=organism,

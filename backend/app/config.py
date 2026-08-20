@@ -177,6 +177,10 @@ class Settings(BaseSettings):
     # Bacterial genome annotation. On-demand delivery — the database is
     # several GB — so this probe only checks the binary, not the DB.
     bakta_path: str = "bakta"
+    # Eukaryotic annotation transfer. Bundled in the image; needs no database
+    # of its own, so this probes only the binary (like bakta's database-free
+    # half -- the reference annotation comes from the user's own project).
+    liftoff_path: str = "liftoff"
     # Taxonomic classification. On-demand delivery — the database is several
     # GB — so this probe only checks the binary, not the DB.
     kraken2_path: str = "kraken2"

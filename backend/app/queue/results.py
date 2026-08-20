@@ -551,6 +551,103 @@ async def _apply_trim_reads(result: dict, *, owner: str) -> None:
     )
 
 
+async def _apply_filter_long_reads(result: dict, *, owner: str) -> None:
+    """Turn a finished filter-long-reads run into objects.
+
+    Mirrors _apply_trim_reads but uses ObjectRole.FILTERED_READS and the
+    "filtered_by" provenance key, since length/quality filtering is conceptually
+    distinct from adapter trimming -- the resulting file is not "trimmed".
+    """
+    from app.services import object_service
+
+    object_id = result.get("object_id")
+    outputs = result.get("outputs") or []
+    if not object_id or not outputs:
+        return
+
+    parent = await DataObject.get(PydanticObjectId(object_id))
+    if parent is None:
+        log.warning("filter_parent_missing", object_id=object_id)
+        return
+
+    mate_id = result.get("mate_object_id")
+    parents = [parent.id]
+    if mate_id:
+        parents.append(PydanticObjectId(mate_id))
+
+    job_id = result.get("job_id")
+    report = result.get("report") or {}
+    params = result.get("params") or {}
+
+    provenance = {
+        "filtered_by": result.get("tool", "filtlong"),
+        "filter_tool_version": result.get("tool_version"),
+        "filter_params": params,
+    }
+
+    created: list[DataObject] = []
+    for output in outputs:
+        tmp_path = Path(output["tmp_path"])
+        try:
+            obj = await object_service.ingest_local_file(
+                owner=parent.owner,
+                project_id=parent.project_id,
+                path=tmp_path,
+                name=output["name"],
+                role=ObjectRole.FILTERED_READS,
+                derived_from=parents,
+                produced_by_job=PydanticObjectId(job_id) if job_id else None,
+                facts=dict(provenance),
+                metadata=dict(parent.metadata),
+            )
+        except Exception as e:  # noqa: BLE001 - one bad output must not lose the rest
+            log.error(
+                "filter_output_ingest_failed",
+                object_id=object_id,
+                name=output.get("name"),
+                error=str(e),
+            )
+            continue
+        created.append(obj)
+
+    if not created:
+        log.error("filter_produced_nothing", object_id=object_id)
+        return
+
+    filter_facts = {
+        "filter_report": report,
+        "filter_outputs": [str(o.id) for o in created],
+        **provenance,
+    }
+    for parent_id in parents:
+        target = await DataObject.get(parent_id)
+        if target is None:
+            continue
+        await target.set(
+            {
+                DataObject.facts: {**target.facts, **filter_facts},
+                DataObject.updated_at: datetime.now(UTC),
+            }
+        )
+
+    if job_id:
+        from app.services import run_service
+
+        run_id = await run_service.run_for_job(PydanticObjectId(job_id))
+        if run_id is not None:
+            await run_service.record_outputs(
+                run_id, [o.id for o in created], owner=created[0].owner
+            )
+
+    log.info(
+        "filter_applied",
+        object_id=object_id,
+        outputs=[str(o.id) for o in created],
+        reads_before=report.get("before", {}).get("total_reads"),
+        reads_after=report.get("after", {}).get("total_reads"),
+    )
+
+
 async def _apply_fetch_remote(result: dict, *, owner: str) -> None:
     """Re-attach fetched bytes to the object that was offloaded.
 
@@ -1966,6 +2063,58 @@ async def _apply_export_annotation_subset(result: dict, *, owner: str) -> None:
     )
 
 
+async def _apply_transfer_annotation(result: dict, *, owner: str) -> None:
+    """Register a Liftoff-lifted annotation as a new object.
+
+    `derived_from` the target assembly, so the lifted GFF3's lineage points
+    at the genome it was transferred onto (and the explorer can relate the
+    two). Carries no annotation results facts -- the new object opens to a
+    "Compute results" button like any other annotation.
+    """
+    from app.services import object_service, run_service
+
+    object_id = result.get("object_id")
+    output = result.get("output")
+    if not output or not object_id:
+        return
+
+    source = await DataObject.get(PydanticObjectId(object_id))
+    if source is None:
+        log.warning("transfer_annotation_parent_missing", object_id=object_id)
+        return
+
+    job_id = result.get("job_id")
+
+    try:
+        lifted = await object_service.ingest_local_file(
+            owner=source.owner,
+            project_id=source.project_id,
+            path=Path(output["tmp_path"]),
+            name=output["name"],
+            role=ObjectRole.ANNOTATION,
+            derived_from=[source.id],
+            produced_by_job=PydanticObjectId(job_id) if job_id else None,
+            facts={},
+            # The lifted annotation describes the target assembly's genes.
+            metadata=dict(source.metadata),
+        )
+    except Exception as e:  # noqa: BLE001
+        log.error(
+            "transfer_annotation_ingest_failed", object_id=object_id, error=str(e)
+        )
+        return
+
+    run_id = await run_service.run_for_job(PydanticObjectId(job_id)) if job_id else None
+    if run_id is not None:
+        await run_service.record_outputs(run_id, [lifted.id], owner=lifted.owner)
+
+    log.info(
+        "transfer_annotation_applied",
+        object_id=object_id,
+        lifted_id=str(lifted.id),
+    )
+
+
 async def _apply_materialize_annotation_edits(result: dict, *, owner: str) -> None:
     """Register a materialized annotation edit as a derived object and clear
     the pending edits.
@@ -2157,7 +2306,6 @@ async def _apply_assess_misassemblies(result: dict, *, owner: str) -> None:
         total=facts.get("assembly_misassembly_total"),
         reference_id=facts.get("assembly_reference_id"),
     )
-
 
 async def _apply_analyze_gc_tracks(result: dict, *, owner: str) -> None:
     """Record per-contig GC content and skew tracks on the assembly."""
@@ -3553,6 +3701,7 @@ _SIDECAR_ROLES = {role.value: role for role in SidecarRole}
 _APPLIERS = {
     "ingest_headers": _apply_ingest_headers,
     "trim_reads": _apply_trim_reads,
+    "filter_long_reads": _apply_filter_long_reads,
     "run_qc": _apply_run_qc,
     "summarize_object": _apply_summarize_object,
     "summarize_de_results": _apply_summarize_de_results,
@@ -3599,4 +3748,5 @@ _APPLIERS = {
     "polish_assembly": _apply_polish_assembly,
     "polish_long_assembly": _apply_polish_assembly,
     "scaffold_assembly": _apply_scaffold_assembly,
+    "transfer_annotation": _apply_transfer_annotation,
 }

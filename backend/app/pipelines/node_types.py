@@ -1305,6 +1305,13 @@ EXCLUDED_LAUNCHES: frozenset[str] = frozenset(
         # Read-only genome annotation — gene density facts on an existing
         # assembly, same class as gc_tracks and meryl.
         "pipeline_service.launch_annotate_genome",
+        # Annotation *transfer* (Liftoff): lifts an existing reference
+        # GFF3/GTF onto a target assembly. Card-only -- the three inputs
+        # (target assembly + reference assembly + reference annotation) are
+        # picked from the project, not wired as upstream node ports, and the
+        # output is a derived ANNOTATION object a downstream node consumes by
+        # role. No canvas node type.
+        "pipeline_service.launch_transfer_annotation",
         # Read-only classification -- taxonomy facts on an existing reads
         # object, same class as gc_tracks and annotate_genome.  The db
         # download it may chain is the download_kraken_db node type.
