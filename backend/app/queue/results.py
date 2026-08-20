@@ -3575,6 +3575,66 @@ async def _apply_differential_expression(result: dict, *, owner: str) -> None:
         log.warning("de_summary_launch_failed", object_id=str(de.id), error=str(e))
 
 
+async def _apply_merge_transcripts(result: dict, *, owner: str) -> None:
+    """Turn a finished transcript merge into a merged annotation object.
+
+    Role is ANNOTATION, not ASSEMBLED_TRANSCRIPTS (S3 in the design doc): the
+    merge output is a thing you quantify *against*, no longer a per-sample
+    hypothesis. Giving it the ANNOTATION role is what stops it being offered
+    back into another merge as though it were one more per-sample assembly.
+    `derived_from` is every input GTF, plus the reference annotation when `-G`
+    was used -- the merged annotation is a function of all of them.
+    """
+    from app.services import object_service, run_service
+
+    output = result.get("output")
+    project_id = result.get("project_id")
+    if not output or not project_id:
+        return
+
+    parent_ids = [PydanticObjectId(i) for i in (result.get("object_ids") or [])]
+    reference_id = result.get("reference_object_id")
+    if reference_id:
+        parent_ids.append(PydanticObjectId(reference_id))
+
+    job_id = result.get("job_id")
+    facts = {
+        "merged_by": result.get("merged_by"),
+        # The number of inputs, so a later reader can tell a 2-sample merge
+        # from a 12-sample one without counting provenance edges.
+        "input_count": len(parent_ids),
+        "transcript_count": result.get("transcript_count"),
+        "novel_transcript_count": result.get("novel_transcript_count"),
+        "gene_count": result.get("gene_count"),
+    }
+
+    try:
+        merged = await object_service.ingest_local_file(
+            owner=owner,
+            project_id=PydanticObjectId(project_id),
+            path=Path(output["tmp_path"]),
+            name=output["name"],
+            role=ObjectRole.ANNOTATION,
+            derived_from=parent_ids,
+            produced_by_job=PydanticObjectId(job_id) if job_id else None,
+            facts=facts,
+        )
+    except Exception as e:  # noqa: BLE001
+        log.error("merge_transcripts_ingest_failed", project_id=str(project_id), error=str(e))
+        return
+
+    if job_id:
+        run_id = await run_service.run_for_job(PydanticObjectId(job_id))
+        if run_id is not None:
+            await run_service.record_outputs(run_id, [merged.id], owner=merged.owner)
+
+    log.info(
+        "merge_transcripts_applied",
+        merged_id=str(merged.id),
+        inputs=len(parent_ids),
+    )
+
+
 def annotation_provenance(result: dict) -> dict:
     """The facts an annotation run stamps onto the VCF it produced."""
     return {
@@ -3932,6 +3992,7 @@ _APPLIERS = {
     "quantify": _apply_quantify,
     "salmon_quantify": _apply_salmon_quantify,
     "transcript_assembly": _apply_transcript_assembly,
+    "merge_transcripts": _apply_merge_transcripts,
     "differential_expression": _apply_differential_expression,
     "assemble_reads": _apply_assemble_reads,
     "assess_completeness": _apply_assess_completeness,

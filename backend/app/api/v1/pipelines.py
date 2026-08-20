@@ -2691,6 +2691,21 @@ class DifferentialExpressionRequest(BaseModel):
     resource_override: bool = False
 
 
+class MergeTranscriptsRequest(BaseModel):
+    project_id: PydanticObjectId
+    # The N assembled-transcript GTFs to merge, a list because this is the
+    # N-input launcher (mirrors DifferentialExpressionRequest.design, which
+    # also carries a set through params rather than a single object).
+    gtf_object_ids: list[PydanticObjectId]
+    # Optional reference annotation for `-G`. When passed, the merged object
+    # also derives from it (S3).
+    reference_id: PydanticObjectId | None = None
+    output_name: str | None = None
+    # "Launch anyway" from the refusal card. Skips the declared-budget refusal
+    # and persists on the job, where claim.lua admits it as sole occupant.
+    resource_override: bool = False
+
+
 @router.get("/quantify/defaults/{bam_id}")
 async def quantify_defaults(bam_id: PydanticObjectId, owner: OwnerDep) -> dict:
     """Defaults for the quantification dialog.
@@ -2840,6 +2855,37 @@ async def launch_differential_expression(
         design=body.design,
         contrast=body.contrast,
         threads=body.threads,
+        resource_override=body.resource_override,
+    )
+    return JobOut.of(job)
+
+
+@router.get("/merge-transcripts/defaults/{project_id}")
+async def merge_transcripts_defaults(
+    project_id: PydanticObjectId, owner: OwnerDep
+) -> dict:
+    """The project's assembled-transcript GTFs, for the merge dialog.
+
+    Project-scoped rather than object-scoped, like
+    `/differential-expression/defaults`: a merge is not an action on one
+    file, and the dialog lists the whole project's assemblies with checkboxes.
+    """
+    return await pipeline_service.merge_transcripts_defaults(project_id, owner=owner)
+
+
+@router.post(
+    "/merge-transcripts", response_model=JobOut, status_code=status.HTTP_201_CREATED
+)
+async def launch_merge_transcripts(
+    body: MergeTranscriptsRequest, owner: OwnerDep
+) -> JobOut:
+    """Queue a merge of N per-sample transcript assemblies."""
+    job = await pipeline_service.launch_merge_transcripts(
+        project_id=body.project_id,
+        owner=owner,
+        gtf_object_ids=body.gtf_object_ids,
+        reference_id=body.reference_id,
+        output_name=body.output_name,
         resource_override=body.resource_override,
     )
     return JobOut.of(job)

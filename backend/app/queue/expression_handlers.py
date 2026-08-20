@@ -548,3 +548,114 @@ def transcript_assembly(ctx: JobContext) -> dict:
         out_gtf=out_gtf,
         name=out_gtf.name,
     )
+
+
+def _merge_transcripts_result_dict(
+    *,
+    object_ids: list[str],
+    project_id: str,
+    job_id: str,
+    out_gtf: Path,
+    name: str,
+    reference_object_id: str | None,
+) -> dict:
+    """The dict `results._apply_merge_transcripts` consumes."""
+    facts = stringtie_runner.parse_gtf(out_gtf.read_text())
+    return {
+        "object_ids": object_ids,
+        "project_id": project_id,
+        "reference_object_id": reference_object_id,
+        "job_id": job_id,
+        "output": {"tmp_path": str(out_gtf), "name": name},
+        "merged_by": "stringtie",
+        **facts,
+    }
+
+
+@handler(
+    "merge_transcripts",
+    mode=HandlerMode.SUBPROCESS,
+    job_class=JobClass.COMPUTE,
+    # Reads N small GTF text files and writes one; memory tracks the combined
+    # annotation rather than a genome, so a generous cap is cheap. LIGHT io --
+    # unlike transcript_assembly it never streams a BAM.
+    resources=JobResources(cpu=2, mem_mb=2048, io=IoClass.LIGHT),
+    max_attempts=2,
+)
+def merge_transcripts(ctx: JobContext) -> dict:
+    """Merge N per-sample StringTie assemblies into one annotation.
+
+    The N inputs travel as `gtf_blobs` (resolved, readable paths) in the
+    payload, mirroring how `merge_structural_variants` carries its N .snf
+    files; the launcher resolves and materializes them. Runs off the event
+    loop in a worker thread, so it returns a plain dict for
+    `results._apply_merge_transcripts`.
+    """
+    stringtie = tools.require(tools.stringtie())
+
+    object_ids = ctx.payload.get("gtf_object_ids") or []
+    if len(object_ids) < 2:
+        raise PermanentError(
+            "merge_transcripts requires at least two assembled-transcript GTFs"
+        )
+
+    work = _prepare_workdir(ctx, "transcript_merge")
+
+    gtf_blobs = ctx.payload.get("gtf_blobs") or []
+    gtf_names = ctx.payload.get("gtf_names") or []
+    gtfs: list[Path] = []
+    for i, blob in enumerate(gtf_blobs):
+        name = gtf_names[i] if i < len(gtf_names) else f"input_{i + 1}.gtf"
+        p = work / name
+        p.unlink(missing_ok=True)
+        p.symlink_to(Path(blob))
+        gtfs.append(p)
+
+    reference_path: Path | None = None
+    reference_object_id = ctx.payload.get("annotation_object_id")
+    annotation_blob = ctx.payload.get("annotation_blob")
+    if annotation_blob:
+        annotation_name = Path(
+            ctx.payload.get("annotation_name") or "reference.gtf"
+        ).name
+        reference_path = work / annotation_name
+        reference_path.unlink(missing_ok=True)
+        reference_path.symlink_to(Path(annotation_blob))
+
+    log_path = settings.logs_dir / f"{ctx.job_id}.log"
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+
+    out_gtf = work / (ctx.payload.get("output_name") or "merged.transcripts.gtf")
+
+    ctx.progress(
+        phase="merging", pct=0.1, message=f"merging {len(gtfs)} transcript assemblies"
+    )
+    code = run_subprocess(
+        ctx,
+        stringtie_runner.merge_command(
+            stringtie_path=stringtie.path,
+            gtfs=gtfs,
+            out_gtf=out_gtf,
+            reference_gtf=reference_path,
+        ),
+        log_path=str(log_path),
+    )
+    if code != 0:
+        raise _failure(code, log_path, "stringtie merge")
+
+    if not out_gtf.exists():
+        raise PermanentError(
+            "StringTie reported success but wrote no merged GTF. The log names the "
+            f"reason: {log_path}"
+        )
+
+    ctx.progress(phase="merging", pct=0.9, message="reading merged annotation")
+    return _merge_transcripts_result_dict(
+        object_ids=[str(o) for o in object_ids],
+        project_id=str(ctx.payload.get("project_id")),
+        job_id=str(ctx.job_id),
+        out_gtf=out_gtf,
+        name=out_gtf.name,
+        reference_object_id=str(reference_object_id) if reference_object_id else None,
+    )
+

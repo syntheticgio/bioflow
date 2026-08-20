@@ -113,3 +113,91 @@ async def test_apply_transcript_assembly_ingests_gtf_with_assembled_role(
     assert assembled.role == ObjectRole.ASSEMBLED_TRANSCRIPTS
     assert assembled.facts["assembled_by"] == "stringtie"
     assert assembled.facts["novel_transcript_count"] == 3
+
+
+def test_merge_transcripts_applier_is_registered():
+    """_APPLIERS is hand-maintained and silently skips unknown job types: a
+    missing entry means the job succeeds and no object is ever created."""
+    from app.queue.results import _APPLIERS
+
+    assert "merge_transcripts" in _APPLIERS
+    assert _APPLIERS["merge_transcripts"] is results._apply_merge_transcripts
+
+
+@pytest.mark.usefixtures("beanie_models")
+@pytest.mark.asyncio(loop_scope="module")
+async def test_apply_merge_transcripts_ingests_annotation_role_from_all_inputs(
+    tmp_path, monkeypatch
+):
+    """The merged object must be ANNOTATION, not ASSEMBLED_TRANSCRIPTS, and
+    must derive from every input (S3).
+
+    Asserting the role explicitly because it is the whole point of the
+    applier: ingested as ASSEMBLED_TRANSCRIPTS, the merged annotation would be
+    offered back into another merge as though it were one more per-sample
+    assembly. And asserting `derived_from` holds all N inputs is the honest
+    provenance shape -- the merge is a function of all of them.
+    """
+    from beanie import PydanticObjectId
+
+    from app.services import object_service, project_service
+
+    monkeypatch.setattr(settings, "bioinfo_home", tmp_path / "home")
+    settings.tmp_dir.mkdir(parents=True, exist_ok=True)
+    settings.sentinel_path.parent.mkdir(parents=True, exist_ok=True)
+    settings.sentinel_path.write_text("biopipe-home-v1\n")
+    owner = "merge-transcripts-owner"
+
+    async def _skip_ingest(obj, **kwargs):
+        return ""
+
+    async def _skip_enqueue(*args, **kwargs):
+        return None
+
+    monkeypatch.setattr(object_service, "enqueue_ingest", _skip_ingest)
+    monkeypatch.setattr("app.queue.queue.enqueue", _skip_enqueue)
+
+    project = await project_service.create_project(name=f"{owner}-project", owner=owner)
+
+    input_ids = []
+    for i in range(3):
+        gtf_path = tmp_path / f"sample{i + 1}.transcripts.gtf"
+        gtf_path.write_bytes(uuid.uuid4().bytes)
+        obj = await object_service.ingest_local_file(
+            owner=owner,
+            project_id=project.id,
+            path=gtf_path,
+            name=gtf_path.name,
+            role=ObjectRole.ASSEMBLED_TRANSCRIPTS,
+        )
+        input_ids.append(obj.id)
+
+    merged_gtf = tmp_path / "merged.transcripts.gtf"
+    merged_gtf.write_text("# StringTie version 2.2.1\n")
+
+    await results._apply_merge_transcripts(
+        {
+            "object_ids": [str(i) for i in input_ids],
+            "project_id": str(project.id),
+            "reference_object_id": None,
+            "job_id": str(PydanticObjectId()),
+            "output": {"tmp_path": str(merged_gtf), "name": merged_gtf.name},
+            "merged_by": "stringtie",
+            "transcript_count": 42,
+            "novel_transcript_count": 7,
+            "gene_count": 30,
+        },
+        owner=owner,
+    )
+
+    from app.models.object import DataObject
+
+    merged = await DataObject.find_one(
+        DataObject.role == ObjectRole.ANNOTATION, DataObject.project_id == project.id
+    )
+    assert merged is not None
+    assert merged.role == ObjectRole.ANNOTATION
+    assert set(merged.derived_from) == set(input_ids)
+    assert merged.facts["merged_by"] == "stringtie"
+    assert merged.facts["input_count"] == 3
+    assert merged.facts["novel_transcript_count"] == 7

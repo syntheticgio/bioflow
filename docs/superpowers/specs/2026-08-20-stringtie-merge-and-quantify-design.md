@@ -201,6 +201,39 @@ artifact — loadable in a browser, usable by featureCounts today.
 4. **What `gene_id` does the merge emit for novel loci** on real data, to
    confirm the `MSTRG.*` reasoning in S5 rather than assuming it.
 
+## Amended (spike answers, 2026-08-20)
+
+Verified against the bundled StringTie **2.2.1** (`/usr/bin/stringtie`,
+`stringtie --help` in the bioflow-backend image):
+
+1. **Positional GTFs.** `stringtie --merge [Options] { gtf_list | strg1.gtf ... }`
+   — the positional form is supported and is what the command builder uses.
+   No list file is needed. `-o <out_gtf>`, `-G <guide_gff>`, `-m <min_len>`,
+   `-c <min_cov>` are all `[Options]` and come before the positional GTFs.
+2. **`-G` accepts both GTF and GFF3** — the merge help text reads
+   `-G <guide_gff>   reference annotation to include in the merging (GTF/GFF3)`.
+   GFF3 is a first-class input here, unlike featureCounts (`attributes_for_format`).
+3. **The DE path does check that its counts inputs share an annotation** —
+   `launch_differential_expression` refuses when the samples' `annotation_sha256`
+   digests differ (`digests` set length > 1). That guard is the S5 precedent;
+   stage 2 inherits it.
+4. **`MSTRG` is the default merge label** — `-l <label>  name prefix for output
+   transcripts (default: MSTRG)`. This confirms the S5 reasoning: novel loci in
+   the merged GTF carry `MSTRG.*` gene/transcript ids that exist in no other
+   annotation. (Confirmed from the help text; S5's exact gene_id emission on a
+   real merged GTF is captured in stage 1's real-data run.)
+
+## Amended (real-data run, 2026-08-20)
+
+Ran `stringtie --merge -o merged.gtf a.gtf b.gtf` (StringTie 2.2.1, bundled
+image) on two synthetic per-sample GTFs sharing one transcript locus and each
+carrying one locus the other lacks. Sum of inputs = 4 transcripts; merged
+output = **3**, confirming success criterion 1 (a non-redundant annotation
+deduplicates shared loci). The merged `transcript` lines carry
+`gene_id "MSTRG.1"; transcript_id "MSTRG.1.1"` for every locus — confirming
+S-3/S5's reasoning that novel loci in the merged GTF are keyed by `MSTRG.*`,
+an identifier that exists in no other annotation.
+
 ## Out of scope
 
 - **Making `PortSpec.multiple` real.** S1 — a separate change driven by a case

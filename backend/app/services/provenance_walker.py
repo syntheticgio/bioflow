@@ -145,6 +145,7 @@ _STEP_VERBS: dict[str, str] = {
     "quantify": "quantified with",
     "salmon_quantify": "quantified with",
     "transcript_assembly": "assembled transcripts with",
+    "merge_transcripts": "merged transcript assemblies with",
     "differential_expression": "tested for differential expression with",
     "consensus_from_alignment": "called a consensus with",
     "run_qc": "quality-checked with",

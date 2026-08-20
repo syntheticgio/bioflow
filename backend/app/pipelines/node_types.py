@@ -356,6 +356,20 @@ async def _launch_differential_expression(*, inputs: dict, params: dict, owner: 
     )
 
 
+async def _launch_merge_transcripts(*, inputs: dict, params: dict, owner: str):
+    # Same N-input problem as _launch_differential_expression above: the merge
+    # takes a *set* of assembled-transcript GTFs, which this file's scalar
+    # PortSpec model cannot represent directly. "transcripts" is wired as a
+    # single representative port; the real set travels as
+    # params["gtf_object_ids"], exactly as DE's design dict does. A reader
+    # who does not know that precedent will read this as a bug.
+    return await pipeline_service.launch_merge_transcripts(
+        project_id=params["project_id"],
+        owner=owner,
+        gtf_object_ids=params["gtf_object_ids"],
+    )
+
+
 async def _launch_assembly(*, inputs: dict, params: dict, owner: str):
     return await pipeline_service.launch_assembly(
         object_id=inputs["reads"], owner=owner, params=params
@@ -988,6 +1002,32 @@ NODE_TYPES: dict[str, NodeTypeSpec] = {
             PortSpec(
                 "results",
                 PortType(format=FormatKind.TEXT, role=ObjectRole.DE_RESULTS),
+            ),
+        ),
+    ),
+    "merge_transcripts": NodeTypeSpec(
+        label="Merge transcript assemblies (StringTie)",
+        launch_name="pipeline_service.launch_merge_transcripts",
+        launch=_launch_merge_transcripts,
+        run_kind=RunKind.MERGE_TRANSCRIPTS,
+        # See _launch_merge_transcripts's comment: the real launcher takes N
+        # assembled-transcript GTFs via params["gtf_object_ids"], which this
+        # scalar port model cannot express directly. One representative
+        # "transcripts" port stands in for the set, exactly as
+        # differential_expression's representative counts port does.
+        inputs=(
+            PortSpec(
+                "transcripts",
+                PortType(format=FormatKind.GTF, role=ObjectRole.ASSEMBLED_TRANSCRIPTS),
+            ),
+        ),
+        outputs=(
+            # ANNOTATION, not ASSEMBLED_TRANSCRIPTS (S3): the merged output is
+            # a reference you quantify against, and the role difference stops
+            # it being offered back into another merge as a per-sample input.
+            PortSpec(
+                "annotation",
+                PortType(format=FormatKind.GTF, role=ObjectRole.ANNOTATION),
             ),
         ),
     ),

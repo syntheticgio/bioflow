@@ -56,6 +56,38 @@ def assemble_command(
     ]
 
 
+def merge_command(
+    *,
+    stringtie_path: str,
+    gtfs: list[Path],
+    out_gtf: Path,
+    reference_gtf: Path | None = None,
+    min_len: int | None = None,
+    min_cov: int | None = None,
+) -> list[str]:
+    """Argv for a non-redundant merge of N assembled-transcript GTFs.
+
+    `--merge` takes the per-sample GTFs positionally (verified against
+    StringTie 2.2.1: `stringtie --merge [Options] { gtf_list | strg1.gtf ... }`).
+    The options -- `-o`, `-G`, `-m`, `-c` -- come before the positional list.
+    `-G` is the reference annotation to include in the merge, and accepts both
+    GTF and GFF3; it is present only when a reference is actually passed. A
+    merge with no inputs is a caller bug, not a tool invocation.
+    """
+    if not gtfs:
+        raise ValueError("merge_command needs at least one input GTF")
+    argv = [stringtie_path, "--merge"]
+    if reference_gtf is not None:
+        argv += ["-G", str(reference_gtf)]
+    argv += ["-o", str(out_gtf)]
+    if min_len is not None:
+        argv += ["-m", str(min_len)]
+    if min_cov is not None:
+        argv += ["-c", str(min_cov)]
+    argv += [str(g) for g in gtfs]
+    return argv
+
+
 def parse_gtf(text: str) -> dict:
     """Assembled-transcript counts from a StringTie GTF.
 

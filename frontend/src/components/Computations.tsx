@@ -7,6 +7,7 @@ interface Props {
   canScaffold: boolean;
   canScoreCompleteness: boolean;
   canDifferentialExpression: boolean;
+  canMergeTranscripts: boolean;
   canQC: boolean;
   hasQc: boolean;
   hasTrim: boolean;
@@ -22,6 +23,7 @@ interface Props {
   onScaffold: () => void;
   onScoreCompleteness: () => void;
   onDifferentialExpression: () => void;
+  onMergeTranscripts: () => void;
   onRunQC: () => void;
   qcPending: boolean;
   onReingest: () => void;
@@ -49,6 +51,7 @@ export function Computations({
   canScaffold,
   canScoreCompleteness,
   canDifferentialExpression,
+  canMergeTranscripts,
   canQC,
   hasQc,
   hasTrim,
@@ -60,6 +63,7 @@ export function Computations({
   onScaffold,
   onScoreCompleteness,
   onDifferentialExpression,
+  onMergeTranscripts,
   onRunQC,
   qcPending,
   onReingest,
@@ -171,6 +175,16 @@ export function Computations({
             title="Compare gene expression between groups of samples"
           >
             Differential expression…
+          </button>
+        )}
+        {canMergeTranscripts && (
+          <button
+            type="button"
+            className="btn primary"
+            onClick={onMergeTranscripts}
+            title="Merge this project's per-sample transcript assemblies into one annotation"
+          >
+            Merge transcript assemblies…
           </button>
         )}
         {canQC && (
