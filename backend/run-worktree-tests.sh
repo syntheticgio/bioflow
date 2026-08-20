@@ -126,8 +126,11 @@ MONGO_NAME="wt-mongo-$$"
 SSHD_NAME="wt-sshd-$$"
 
 cleanup() {
-  docker rm -f "$MONGO_NAME" >/dev/null 2>&1 || true
-  docker rm -f "$SSHD_NAME" >/dev/null 2>&1 || true
+  # -v matters: mongo:7 and the sshd image both declare anonymous VOLUMEs, and
+  # neither --rm nor `rm -f` removes those -- only `-v` does. Without it every
+  # run strands two volumes forever (#719).
+  docker rm -fv "$MONGO_NAME" >/dev/null 2>&1 || true
+  docker rm -fv "$SSHD_NAME" >/dev/null 2>&1 || true
 }
 trap cleanup EXIT
 
