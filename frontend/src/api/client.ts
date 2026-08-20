@@ -36,6 +36,7 @@ import type {
   Facets,
   CoverageReport,
   FeatureCoverageReport,
+  GcBlobReport,
   FeatureQuery,
   Feedback,
   FeedbackSubmission,
@@ -1245,6 +1246,12 @@ export const api = {
   /** The per-window (or per-region) depth report mosdepth produced for a BAM. */
   coverageReport: (objectId: string) =>
     request<CoverageReport>(`/pipelines/coverage/${objectId}/report`),
+
+  /** The per-contig GC/depth report the gc_bias job produced for a BAM --
+   * feeds ContigBlobChart's scatter. Distinct from gc_bias_curve (in facts):
+   * that is the binned bias curve, this is one row per kept contig. */
+  gcBlobReport: (objectId: string) =>
+    request<GcBlobReport>(`/pipelines/gc-bias/${objectId}/report`),
 
   /** Queue the Results computation for a VCF/BCF. Read-only: produces facts
    * and a variants TSV, no derived objects. */

@@ -313,6 +313,20 @@ export interface BamStatsFacts {
    * MAX_STORED_CONTIGS (gc_tracks.py), so this curve covers only that
    * subset of a fragmented assembly's contigs. */
   gc_bias_partial?: boolean;
+
+  /** Facts produced by the same gc_bias job, for the per-contig blobplot
+   * (ContigBlobChart.tsx). Always "ok" when set -- unlike gc_bias_status,
+   * there is no "empty" case: cap_by_cumulative_length always returns at
+   * least the contigs with usable GC, and the chart's own empty-report
+   * guard (`!data.contigs.length`) handles the degenerate case instead. */
+  gc_blob_status?: "ok";
+  /** Filename of the per-contig report on disk -- fetched through
+   * api.gcBlobReport by object id, not by this path. */
+  gc_blob_report?: string;
+  gc_blob_contig_count?: number;
+  /** Contigs omitted by the cumulative-length cap (V4); MUST drive an
+   * always-visible line in ContigBlobChart when non-zero. */
+  gc_blob_dropped_count?: number;
 }
 
 export interface ContigsPage {
@@ -410,4 +424,33 @@ export interface GcBiasBin {
   /** Width-weighted mean depth of every window whose GC falls in this bin. */
   mean_depth: number;
   window_count: number;
+}
+
+/** One contig's aggregate GC and depth, for ContigBlobChart's scatter --
+ * gc_coverage.per_contig's row shape verbatim. */
+export interface GcBlobContig {
+  contig: string;
+  /** Base-weighted GC percentage across this contig's windows; null when
+   * every window was unscoreable (all-N). */
+  gc: number | null;
+  mean_depth: number;
+  length: number;
+  window_count: number;
+}
+
+/**
+ * `GET /pipelines/gc-bias/{object_id}/report`'s full body --
+ * gc_coverage_handlers.compute_gc_bias's gc_blob.json verbatim.
+ *
+ * `contigs` is capped by cumulative length (the longest contigs covering
+ * 99% of total bases, per V4) -- `dropped_count` is how many shorter
+ * contigs were omitted, and MUST be shown whenever non-zero: a contaminant
+ * is often many small contigs, so the cap can drop exactly the cluster this
+ * chart exists to find, and a clean-looking plot must stay distinguishable
+ * from one whose contamination was truncated away.
+ */
+export interface GcBlobReport {
+  contigs: GcBlobContig[];
+  dropped_count: number;
+  kept_count: number;
 }

@@ -643,6 +643,13 @@ export const METRIC_INFO: Record<string, MetricInfo> = {
     computed:
       "Reference GC (gc_tracks) joined against per-window depth (mosdepth coverage) on their shared window grid, width-weighted per bin so a contig with wider windows is not over-represented.",
   },
+  "ui.chart_gc_blob": {
+    term: "GC vs coverage (blobplot)",
+    description:
+      "Each point is a contig, positioned by GC content and mean depth (log scale), sized by area proportional to length. A clean assembly forms one cluster; a contaminant -- a different organism present at a small fraction of total bases but often many contigs -- sits at a different coordinate and separates visually, even when every summary statistic looks acceptable. Clusters are NOT taxonomically labelled: this shows visual separation, not identity -- assigning a species or contaminant source to a cluster needs classification against a reference database, a separate, unbuilt feature.",
+    computed:
+      "Aggregated from the same GC/depth window join as the bias curve above, capped to the longest contigs covering 99% of total bases plus a hard ceiling. The omission line always shows how many shorter contigs were dropped, since a contaminant is often many small contigs -- without it a clean-looking plot cannot be told from one whose contamination was truncated away.",
+  },
   "ui.chart_contig_depth_strip": {
     term: "Depth by chromosome",
     description:
