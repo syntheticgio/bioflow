@@ -167,6 +167,22 @@ class TestBuildWindowsBed:
         assert text == "chr1\t0\t100\nchr1\t100\t200\n"
 
 
+class TestContigLengthsFromFai:
+    def test_reads_name_and_length_in_reference_order(self, tmp_path):
+        fai = tmp_path / "ref.fa.fai"
+        # Real .fai columns: name, length, offset, linebases, linewidth.
+        fai.write_text("chr2\t600\t10\t60\t61\nchr1\t2000\t700\t60\t61\n")
+        lengths = mr.contig_lengths_from_fai(fai)
+        assert lengths == {"chr2": 600, "chr1": 2000}
+        # Order is the .fai's, which is the order mosdepth reports in.
+        assert list(lengths) == ["chr2", "chr1"]
+
+    def test_skips_blank_and_malformed_rows(self, tmp_path):
+        fai = tmp_path / "ref.fa.fai"
+        fai.write_text("chr1\t100\t0\t60\t61\n\nbroken\n")
+        assert mr.contig_lengths_from_fai(fai) == {"chr1": 100}
+
+
 class TestParseSummary:
     def test_reads_per_contig_mean_and_ignores_region_rows(self, tmp_path):
         """mosdepth writes a `<contig>_region` row beside every contig row
