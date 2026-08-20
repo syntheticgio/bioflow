@@ -121,3 +121,75 @@ def bias_curve(joined: list[JoinedWindow], *, bins: int = 20) -> list[dict]:
             "window_count": counts[idx],
         })
     return result
+
+
+def per_contig(joined: list[JoinedWindow]) -> list[dict]:
+    """One row per contig: GC (base-weighted, per V3 -- Σgc_count/Σwidth,
+    reconstructing each window's approximate G/C base count from its stored
+    percentage since gc_tracks does not retain the raw count), mean depth
+    (width-weighted, same reasoning as bias_curve), total length, and how
+    many windows contributed.
+
+    Feeds #641's blobplot: each contig becomes one scatter point, GC on one
+    axis and mean_depth on the other, point area proportional to length.
+
+    Note: JoinedWindow stores gc as a percentage (not a raw G/C base count),
+    so we reconstruct an approximate G/C count as round(gc / 100 * width)
+    per window. This introduces float rounding error proportional to window
+    count, but is acceptable since gc_tracks' own stored value is already
+    rounded to 2 decimals.
+    """
+    by_contig: dict[str, list[JoinedWindow]] = {}
+    for w in joined:
+        by_contig.setdefault(w["contig"], []).append(w)
+
+    rows = []
+    for contig, windows in by_contig.items():
+        gc_bases = 0.0
+        gc_total_bases = 0.0
+        depth_sum = 0.0
+        width_sum = 0
+        for w in windows:
+            width_sum += w["width"]
+            depth_sum += w["depth"] * w["width"]
+            if w["gc"] is not None:
+                gc_bases += (w["gc"] / 100.0) * w["width"]
+                gc_total_bases += w["width"]
+        rows.append({
+            "contig": contig,
+            "gc": round(gc_bases / gc_total_bases * 100.0, 2) if gc_total_bases else None,
+            "mean_depth": round(depth_sum / width_sum, 4) if width_sum else 0.0,
+            "length": width_sum,
+            "window_count": len(windows),
+        })
+    return rows
+
+
+def cap_by_cumulative_length(
+    contigs: list[dict], *, target_fraction: float = 0.99, hard_ceiling: int = 5000
+) -> tuple[list[dict], int]:
+    """Keep the longest contigs covering `target_fraction` of total bases,
+    capped at `hard_ceiling` regardless.
+
+    Sorted descending by length, so the cut point is always the shortest
+    contigs -- a contaminant that is many SMALL contigs is exactly what this
+    can drop (V4), which is why the dropped count is returned rather than
+    only logged: the caller must always be able to say what was omitted.
+    """
+    by_length = sorted(contigs, key=lambda c: c["length"], reverse=True)
+    total = sum(c["length"] for c in by_length)
+    if total <= 0:
+        return [], 0
+
+    target = total * target_fraction
+    kept = []
+    cumulative = 0
+    for c in by_length:
+        if len(kept) >= hard_ceiling:
+            break
+        kept.append(c)
+        cumulative += c["length"]
+        if cumulative >= target:
+            break
+
+    return kept, len(contigs) - len(kept)
