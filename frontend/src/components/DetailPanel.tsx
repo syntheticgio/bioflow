@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import { api } from "../api/client";
 import { classifyChromosomes } from "../lib/chromosomes";
+import { COMPARABLE_CHARTS, hasChartFacts } from "../lib/comparableCharts";
 import { useUploads } from "../hooks/useUploads";
 import type {
   AlignerName,
@@ -21,6 +22,8 @@ import { readQuality } from "../lib/readQuality";
 import { notify } from "../stores/messageStore";
 import { AiSummary } from "./AiSummary";
 import { AssemblyFacts } from "./AssemblyFacts";
+import { ComparePicker } from "./ComparePicker";
+import { ComparisonView } from "./ComparisonView";
 import { AssemblyGraph } from "./AssemblyGraph";
 import { ChromosomeStrip } from "./ChromosomeStrip";
 import { FactsColumns } from "./FactsColumns";
@@ -93,6 +96,7 @@ const SV_CALLERS: Set<unknown> = new Set(["sniffles2", "delly"]);
 export function DetailPanel() {
   const [params] = useSearchParams();
   const sel = params.get("sel");
+  const cmp = params.get("cmp");
   const { pathname } = useLocation();
 
   if (!sel) {
@@ -104,6 +108,17 @@ export function DetailPanel() {
     return <EmptyDetail />;
   }
   const [kind, id] = sel.split(":");
+  if (kind === "object" && cmp) {
+    const [cmpKind, cmpId] = cmp.split(":");
+    // A comparison is only meaningful between two objects (C2). A `cmp` that
+    // does not name an object -- or that names the same object twice -- is
+    // ignored and falls through to the single-object panel, so `cmp` cannot
+    // render a degenerate comparison. Removing it returns to today's panel
+    // (R6) because this branch is the only place the comparison renders.
+    if (cmpKind === "object" && cmpId && cmpId !== id) {
+      return <ComparisonView idA={id} idB={cmpId} />;
+    }
+  }
   if (kind === "project") return <ProjectDetail id={id} />;
   if (kind === "object") return <ObjectDetail id={id} />;
   if (kind === "operation") {
@@ -478,6 +493,7 @@ function ObjectDetail({ id }: { id: string }) {
   const [quantifyOpen, setQuantifyOpen] = useState(false);
   const [assembleOpen, setAssembleOpen] = useState(false);
   const [completenessOpen, setCompletenessOpen] = useState(false);
+  const [compareOpen, setCompareOpen] = useState(false);
   const [polishLongOpen, setPolishLongOpen] = useState(false);
   const [classifyReadsOpen, setClassifyReadsOpen] = useState(false);
   const [filterLongReadsOpen, setFilterLongReadsOpen] = useState(false);
@@ -1070,6 +1086,15 @@ function ObjectDetail({ id }: { id: string }) {
                 qc.invalidateQueries({ queryKey: ["object", id] })
               }
               metadataDirty={metadataDirty}
+              /* The comparison lives on the Actions tab alongside the other
+                 things you can do to a file, not in the headline: it is an
+                 action on the object, and the headline already carries the
+                 species blurb and the stats. Gated exactly like the picker
+                 (R1) so a file with no comparable chart offers nothing. */
+              comparable={COMPARABLE_CHARTS.some((c) =>
+                hasChartFacts(obj.facts, c.chartId),
+              )}
+              onCompare={() => setCompareOpen(true)}
             />
           </TabPanel>
         )}
@@ -1153,6 +1178,15 @@ function ObjectDetail({ id }: { id: string }) {
             setQuantifyOpen(false);
             setPrefill(null);
           }}
+        />
+      )}
+      {compareOpen && (
+        <ComparePicker
+          objectId={obj.id}
+          objectName={obj.name}
+          projectId={obj.project_id}
+          facts={obj.facts}
+          onClose={() => setCompareOpen(false)}
         />
       )}
       {assembleOpen && (
@@ -1777,6 +1811,8 @@ function ActionsTab({
   remove,
   onTagsChanged,
   metadataDirty,
+  comparable,
+  onCompare,
 }: {
   obj: ObjectDetailData;
   computations: React.ReactNode;
@@ -1789,6 +1825,12 @@ function ActionsTab({
   remove: { mutate: () => void; isPending: boolean };
   onTagsChanged: () => void;
   metadataDirty: boolean;
+  /** True when the object carries at least one comparable chart (R1), so
+   *  the picker would offer something rather than open empty. */
+  comparable: boolean;
+  /** Opens the comparison picker. Owned by `ObjectDetail`, which holds the
+   *  dialog state -- same reasoning as `onConfigure`. */
+  onCompare: () => void;
 }) {
   return (
     <>
@@ -1813,6 +1855,23 @@ function ActionsTab({
             Suggestions appear once this file has finished ingesting.
           </p>
         )}
+      </div>
+
+      <div className="section">
+        <div className="section-title">Compare</div>
+        <div style={{ display: "flex", gap: 12 }}>
+          {/* Only offered for objects that can actually be compared: the
+              picker is filtered to same-project objects sharing a comparable
+              chart (R1), and for an object carrying none the picker would
+              offer nothing, so the control is hidden rather than opening an
+              empty list. Singular wording per C2: this is deliberately a
+              two-object comparison, not a multi-select. */}
+          {comparable && (
+            <button type="button" className="btn" onClick={onCompare}>
+              Compare with…
+            </button>
+          )}
+        </div>
       </div>
 
       <ManageFile

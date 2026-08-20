@@ -12,6 +12,21 @@
 
 import { InfoMarker } from "./InfoMarker";
 
+/** A second assembly's Nx curve, overlaid for comparison. */
+export interface CompareNxSeries {
+  /** [percent, length] pairs, same shape as the primary `curve`. */
+  curve: [number, number][];
+  /**
+   * The second assembly's own total length, from `total_bases`. Used only
+   * to enable its NGx curve; the Nx overlay needs no scaling.
+   */
+  totalBases: number;
+  /** Expected genome size, when known. Enables the NGx curve. */
+  genomeSize?: number;
+  /** Legend label, e.g. the assembly's object name. */
+  label: string;
+}
+
 interface Props {
   /** [percent, length] pairs at x = 1..100, from `sequence_nx_curve`. */
   curve: [number, number][];
@@ -25,6 +40,17 @@ interface Props {
   totalBases: number;
   /** Expected genome size, when known. Enables the NGx curve. */
   genomeSize?: number;
+  /** Legend label for the primary series (the assembly's object name),
+   *  defaulting to "Nx". With a `compare` series present this is what lets
+   *  the legend tell the two objects' lines apart. */
+  label?: string;
+  /**
+   * Optional second assembly overlaid on the same axis for comparison.
+   * When present, the y scale spans both curves so neither truncates at
+   * the other's shorter extent. The primary series keeps its Nx/NGx
+   * rendering; the comparison series draws its Nx (and NGx, if known).
+   */
+  compare?: CompareNxSeries;
 }
 
 const W = 320;
@@ -38,6 +64,9 @@ const PLOT_H = H - PAD_T - PAD_B;
 
 const NX_COLOR = "#2e7d32";
 const NGX_COLOR = "#f9a825";
+// Distinguishable from the primary green and the amber NGx. Used for the
+// comparison series' Nx line and legend swatch.
+const COMPARE_COLOR = "#1565c0";
 
 /** Compact base-count label for axis ticks: 4500000 -> "4.5 Mb". */
 function tick(n: number): string {
@@ -91,10 +120,17 @@ function ngxPoints(
   return out;
 }
 
-export function NxChart({ curve, totalBases, genomeSize }: Props) {
+export function NxChart({ curve, totalBases, genomeSize, label = "Nx", compare }: Props) {
   if (!curve || curve.length === 0) return null;
 
-  const lengths = curve.map(([, length]) => length).filter((n) => n > 0);
+  // The y scale spans the union of both series' lengths, so a comparison
+  // curve that is shorter (or longer) than the primary still renders fully
+  // on the same axis. A scale set to only the primary would clip the second
+  // at its own extreme -- a rendering bug that looks like a real finding.
+  const lengths = [
+    ...curve.map(([, length]) => length),
+    ...(compare?.curve ?? []).map(([, length]) => length),
+  ].filter((n) => n > 0);
   if (lengths.length === 0) return null;
 
   const maxLen = Math.max(...lengths);
@@ -116,11 +152,21 @@ export function NxChart({ curve, totalBases, genomeSize }: Props) {
       ? ngxPoints(curve, totalBases, genomeSize)
       : [];
 
+  const compareNgx =
+    compare &&
+    compare.genomeSize !== undefined &&
+    compare.genomeSize > 0 &&
+    compare.totalBases > 0
+      ? ngxPoints(compare.curve, compare.totalBases, compare.genomeSize)
+      : [];
+
+  const n50 = tick(curve.find(([x]) => x === 50)?.[1] ?? maxLen);
   const aria =
-    `Contiguity curve: N50 ${tick(
-      curve.find(([x]) => x === 50)?.[1] ?? maxLen,
-    )}, longest ${tick(maxLen)}, shortest ${tick(minLen)}` +
-    (ngx.length > 0 ? ", with NGx against expected genome size" : "");
+    `Contiguity curve: N50 ${n50}, longest ${tick(maxLen)}, shortest ${tick(minLen)}` +
+    (ngx.length > 0 ? ", with NGx against expected genome size" : "") +
+    (compare
+      ? `; overlaid with ${compare.label}${compareNgx.length > 0 ? " and its NGx" : ""}`
+      : "");
 
   return (
     <div style={{ marginTop: 10 }}>
@@ -179,7 +225,7 @@ export function NxChart({ curve, totalBases, genomeSize }: Props) {
         >
           % of assembly
         </text>
-        {/* curves */}
+        {/* curves: primary Nx, primary NGx, then comparison series on top. */}
         <path d={path(curve)} fill="none" stroke={NX_COLOR} strokeWidth={1.75} />
         {ngx.length > 0 && (
           <path
@@ -190,17 +236,72 @@ export function NxChart({ curve, totalBases, genomeSize }: Props) {
             strokeDasharray="5 3"
           />
         )}
-        {/* legend, only meaningful when there are two lines to tell apart */}
-        {ngx.length > 0 && (
+        {compare && (
+          <>
+            {compareNgx.length > 0 && (
+              <path
+                d={path(compareNgx)}
+                fill="none"
+                stroke={COMPARE_COLOR}
+                strokeWidth={1.75}
+                strokeDasharray="5 3"
+                opacity={0.85}
+              />
+            )}
+            <path
+              d={path(compare.curve)}
+              fill="none"
+              stroke={COMPARE_COLOR}
+              strokeWidth={1.75}
+              opacity={0.85}
+            />
+          </>
+        )}
+        {/* legend, only meaningful when there are two+ lines to tell apart */}
+        {(ngx.length > 0 || compare) && (
           <g>
             <rect x={PAD_L + 6} y={PAD_T + 2} width={9} height={3} fill={NX_COLOR} />
             <text x={PAD_L + 19} y={PAD_T + 6} fontSize={9} fill="var(--text-faint)">
-              Nx
+              {label}
             </text>
-            <rect x={PAD_L + 44} y={PAD_T + 2} width={9} height={3} fill={NGX_COLOR} />
-            <text x={PAD_L + 57} y={PAD_T + 6} fontSize={9} fill="var(--text-faint)">
-              NGx
-            </text>
+            {ngx.length > 0 && (
+              <>
+                <rect
+                  x={PAD_L + 6}
+                  y={PAD_T + 12}
+                  width={9}
+                  height={3}
+                  fill={NGX_COLOR}
+                />
+                <text
+                  x={PAD_L + 19}
+                  y={PAD_T + 16}
+                  fontSize={9}
+                  fill="var(--text-faint)"
+                >
+                  NGx
+                </text>
+              </>
+            )}
+            {compare && (
+              <>
+                <rect
+                  x={PAD_L + 6}
+                  y={PAD_T + (ngx.length > 0 ? 22 : 12)}
+                  width={9}
+                  height={3}
+                  fill={COMPARE_COLOR}
+                />
+                <text
+                  x={PAD_L + 19}
+                  y={PAD_T + (ngx.length > 0 ? 26 : 16)}
+                  fontSize={9}
+                  fill="var(--text-faint)"
+                >
+                  {compareNgx.length > 0 ? `Nx & NGx · ${compare.label}` : compare.label}
+                </text>
+              </>
+            )}
           </g>
         )}
       </svg>
