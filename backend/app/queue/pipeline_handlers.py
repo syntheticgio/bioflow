@@ -513,6 +513,12 @@ def _run_short_read_qc(
         # repeats it produces a path nothing was ever written to.
         facts["qc_fastp_report"] = "fastp.html"
 
+    # The JSON, not the HTML, is what MultiQC parses -- and unlike the HTML
+    # it would otherwise die with the workdir. FastQC needs no equivalent
+    # call: it writes its own zip straight into report_dir already.
+    if _retain_multiqc_input(json_out, report_dir, "fastp/fastp.json"):
+        facts["qc_fastp_data"] = "fastp/fastp.json"
+
     ctx.progress(phase="fastqc", pct=fastp_runner.MAX_MEASURED_PCT, message="running FastQC")
     fastqc_name = _run_fastqc(ctx, reads_in, report_dir, log_path)
     if fastqc_name:
@@ -707,6 +713,42 @@ def _parse_nanoplot_stats(out_dir: Path) -> dict:
         return {}
 
     return facts
+
+
+def _retain_multiqc_input(src: Path, report_dir: Path, rel_dest: str) -> bool:
+    """Copy a tool's machine-readable output into the object's report dir.
+
+    MultiQC parses raw tool output -- fastp's JSON, FastQC's zip -- not the
+    rendered HTML this application already keeps. Everything a QC handler
+    writes into its workdir is reaped when the job ends, so a file MultiQC
+    will need later has to be copied somewhere stable at the time the tool
+    runs; there is no way to recover it afterwards short of re-running the
+    tool over the reads.
+
+    `rel_dest` is a path relative to `report_dir` (e.g. "fastp/fastp.json")
+    rather than a bare filename: MultiQC's module detection keys partly on
+    the containing directory, and it keeps each tool's retained output
+    visually separate from the HTML reports beside it.
+
+    Best-effort by design, matching `_run_fastqc` and the QUAST report copy.
+    A retained file is a nicety that makes a *later* aggregate report
+    possible; the facts this job already computed are the half of the result
+    the user cannot get any other way, so nothing here may raise. Returns
+    whether a file actually landed, so the caller can record a fact only
+    when one did.
+    """
+    if not src.exists():
+        return False
+
+    dest = report_dir / rel_dest
+    try:
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(src, dest)
+    except OSError as e:
+        log.warning("qc_multiqc_input_retain_failed", dest=str(dest), error=str(e))
+        return False
+
+    return True
 
 
 def _run_fastqc(
