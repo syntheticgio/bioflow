@@ -2886,10 +2886,18 @@ async def _apply_call_variants(result: dict, *, owner: str) -> None:
 
 def sv_provenance(result: dict) -> dict:
     """The facts a structural variant calling run stamps onto the VCF it
-    produced. Mirrors `variant_provenance`, minus a caller field: Sniffles2
-    is the only SV caller this pipeline runs."""
+    produced. Mirrors `variant_provenance`.
+
+    The caller comes from the result rather than a literal: since #620 this
+    pipeline runs Sniffles2 for long reads and Delly for short ones, and a
+    hardcoded name would mislabel one of them permanently on disk.
+
+    A result with no caller predates #620, when Sniffles2 was the only SV
+    caller -- so that is the fallback, and it applies only when the field is
+    absent.
+    """
     return {
-        "variants_called_by": "sniffles2",
+        "variants_called_by": result.get("caller") or "sniffles2",
         "variant_caller_version": result.get("tool_version"),
         "variant_params": result.get("params") or {},
     }
