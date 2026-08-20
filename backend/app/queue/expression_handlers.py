@@ -20,7 +20,7 @@ from app.config import settings
 from app.errors import PermanentError
 from app.logging import get_logger
 from app.models import IoClass, JobClass, JobResources
-from app.pipelines import counts_runner, de_runner, salmon_runner, tools
+from app.pipelines import counts_runner, de_runner, salmon_runner, stringtie_runner, tools
 from app.queue.align_handlers import _resolve_blob, _resolve_digest_or_path
 from app.queue.executor import run_subprocess
 from app.queue.pipeline_handlers import _failure, _prepare_workdir
@@ -448,4 +448,103 @@ def salmon_quantify(ctx: JobContext) -> dict:
         transcriptome_sha256=ctx.payload.get("transcriptome_sha256"),
         facts=facts,
         workdir=str(work),
+    )
+
+
+def _transcript_assembly_result_dict(
+    *,
+    object_id: str,
+    job_id: str,
+    out_gtf: Path,
+    name: str,
+) -> dict:
+    """The dict `results._apply_transcript_assembly` consumes.
+
+    Split out of the handler for the same reason `_salmon_result_dict` is:
+    the handler runs in a worker thread against a real subprocess, and this
+    is the part with a contract worth testing on its own.
+    """
+    facts = stringtie_runner.parse_gtf(out_gtf.read_text())
+    return {
+        "object_id": object_id,
+        "job_id": job_id,
+        "output": {"tmp_path": str(out_gtf), "name": name},
+        "assembled_by": "stringtie",
+        **facts,
+    }
+
+
+@handler(
+    "transcript_assembly",
+    mode=HandlerMode.SUBPROCESS,
+    job_class=JobClass.COMPUTE,
+    # StringTie holds the current locus's read bundle plus its splice graph in
+    # memory and streams the BAM past it, so peak memory tracks locus depth
+    # rather than genome size. 4 GB covers a vertebrate RNA-seq sample.
+    # HEAVY io because it reads the BAM end to end.
+    resources=JobResources(cpu=4, mem_mb=4096, io=IoClass.HEAVY),
+    max_attempts=2,
+)
+def transcript_assembly(ctx: JobContext) -> dict:
+    """Assemble transcripts from one splice-aware alignment.
+
+    One alignment per job, matching `quantify` and `salmon_quantify`: each
+    per-sample assembly is a first-class object with its own provenance.
+
+    Runs off the event loop in a worker thread and so cannot touch the
+    database: it returns a plain dict for `results._apply_transcript_assembly`.
+    """
+    stringtie = tools.require(tools.stringtie())
+
+    object_id = ctx.payload.get("object_id")
+    if not object_id:
+        raise PermanentError("transcript_assembly requires an 'object_id'")
+
+    work = _prepare_workdir(ctx, "transcript_assembly")
+
+    bam_name = Path(ctx.payload.get("bam_name") or "alignment.bam").name
+    bam = work / bam_name
+    bam.unlink(missing_ok=True)
+    bam.symlink_to(_resolve_blob(ctx.payload, "bam"))
+
+    annotation_name = Path(
+        ctx.payload.get("annotation_name") or "annotation.gtf"
+    ).name
+    annotation = work / annotation_name
+    annotation.unlink(missing_ok=True)
+    annotation.symlink_to(_resolve_blob(ctx.payload, "annotation"))
+
+    log_path = settings.logs_dir / f"{ctx.job_id}.log"
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+
+    stem = Path(bam_name).stem
+    out_gtf = work / f"{stem}.transcripts.gtf"
+
+    ctx.progress(phase="assembling", pct=0.1, message="assembling transcripts")
+    code = run_subprocess(
+        ctx,
+        stringtie_runner.assemble_command(
+            bam=bam,
+            annotation=annotation,
+            out_gtf=out_gtf,
+            stringtie_path=stringtie.path,
+            threads=int(ctx.payload.get("threads") or 4),
+        ),
+        log_path=str(log_path),
+    )
+    if code != 0:
+        raise _failure(code, log_path, "stringtie assemble")
+
+    if not out_gtf.exists():
+        raise PermanentError(
+            "StringTie reported success but wrote no GTF. The log names the "
+            f"reason: {log_path}"
+        )
+
+    ctx.progress(phase="assembling", pct=0.9, message="reading assembled transcripts")
+    return _transcript_assembly_result_dict(
+        object_id=str(object_id),
+        job_id=str(ctx.job_id),
+        out_gtf=out_gtf,
+        name=out_gtf.name,
     )
