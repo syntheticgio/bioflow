@@ -58,6 +58,7 @@ ENDPOINT_JOB_TYPES: dict[str, frozenset[str]] = {
     "/pipelines/polish-long": frozenset({"polish_long_assembly"}),
     "/pipelines/scaffold": frozenset({"scaffold_assembly"}),
     "/pipelines/misassemblies": frozenset({"assess_misassemblies"}),
+    "/pipelines/multiqc": frozenset({"multiqc_report"}),
     "/pipelines/synteny": frozenset({"analyze_synteny"}),
     "/pipelines/assembly-errors": frozenset({"assess_assembly_errors"}),
     "/pipelines/assembly-qv": frozenset({"assess_assembly_qv"}),

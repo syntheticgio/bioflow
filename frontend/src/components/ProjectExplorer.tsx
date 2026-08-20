@@ -10,6 +10,7 @@ import { useUploads } from "../hooks/useUploads";
 import { QualityBadge } from "./QualityBadge";
 import { BioIcon, FileIcon, readPlatformFor } from "../icons/BioIcon";
 import { NewProjectModal } from "./NewProjectModal";
+import { ProjectQcSummary } from "./ProjectQcSummary";
 import { NcbiDownloadDialog } from "./NcbiDownloadDialog";
 import { UniProtDownloadDialog } from "./UniProtDownloadDialog";
 import {
@@ -412,6 +413,8 @@ function ProjectView({ projectId }: { projectId: string }) {
             </div>
           </div>
         </div>
+
+        <ProjectQcSummary projectId={projectId} />
       </div>
 
       {ncbiOpen && (

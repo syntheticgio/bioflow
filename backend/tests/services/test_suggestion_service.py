@@ -27,6 +27,7 @@ from app.services.suggestion_service import (
     build_coverage_card,
     build_feature_coverage_card,
     build_merge_structural_variants_card,
+    build_multiqc_card,
     build_preprocess_card,
     build_quantify_card,
     build_salmon_quantify_card,
@@ -102,9 +103,16 @@ class _FakeTool:
         version: str = "0.23.4",
         name: str = "tool",
         install_state=None,
+        error: str | None = None,
     ):
         self.available = available
         self.version = version
+        # Real `tools.Tool` carries this on every instance, and several
+        # cards read `tool.error or "<fallback>"` when building an
+        # unavailable reason. Without it here the fake diverges from the
+        # thing it stands in for, and a card doing the normal thing raises
+        # AttributeError in tests while working in production.
+        self.error = error
         # The align card puts this in the reason, so it has to be the real
         # binary name rather than a placeholder.
         self.name = name
@@ -1492,7 +1500,7 @@ class TestSuggestionsFor:
             cards = await suggestions_for(_fake_obj())
         assert [c["kind"] for c in cards] == [
             "preprocess", "align", "classify_reads",
-            "assemble", "salmon_quantify",
+            "assemble", "salmon_quantify", "multiqc",
         ]
 
     async def test_a_launchable_card_with_a_dialog_carries_configure(self):
@@ -1572,7 +1580,7 @@ class TestSuggestionsFor:
             cards = await suggestions_for(_fake_obj())
         assert [c["kind"] for c in cards] == [
             "preprocess", "align", "classify_reads",
-            "assemble", "salmon_quantify",
+            "assemble", "salmon_quantify", "multiqc",
         ]
         assert cards[1]["status"] == "unavailable"
 
@@ -1681,6 +1689,7 @@ class TestSuggestionsFor:
         # Align is gone; the other three survive in their usual order.
         assert [c["kind"] for c in cards] == [
             "preprocess", "classify_reads", "assemble", "salmon_quantify",
+            "multiqc",
         ]
 
 
@@ -3472,3 +3481,65 @@ class TestTranscriptAssemblyCard:
         )
         assert card is not None
         assert card.status is CardStatus.UNAVAILABLE
+class TestMultiqcCard:
+    """The aggregate QC card.
+
+    The only card whose subject is the project rather than the object it is
+    rendered beside, and the only one gated on a count of files carrying
+    *retained output on disk* rather than on completed runs -- see
+    `build_multiqc_card`'s docstring for why those differ.
+    """
+
+    def _card(self, count, *, available=True, kind=FormatKind.FASTQ):
+        with patch(
+            "app.services.suggestion_service.tools.multiqc",
+            return_value=_FakeTool(available),
+        ):
+            return build_multiqc_card(_fake_obj(kind=kind), count)
+
+    def test_offers_a_report_when_two_files_have_qc_output(self):
+        card = self._card(2)
+        assert card.status is CardStatus.AVAILABLE
+        assert card.launch["endpoint"] == "/pipelines/multiqc"
+
+    def test_launches_against_the_project_not_the_object(self):
+        """The report covers every file in the project. A body carrying an
+        object id would be the wrong request entirely, not merely a narrower
+        one."""
+        card = self._card(3)
+        assert "project_id" in card.launch["body"]
+        assert "object_id" not in card.launch["body"]
+
+    def test_one_file_is_not_an_aggregate(self):
+        """One sample is a report the per-object QC tab already shows
+        better."""
+        card = self._card(1)
+        assert card.status is CardStatus.UNAVAILABLE
+
+    def test_zero_files_is_unavailable(self):
+        assert self._card(0).status is CardStatus.UNAVAILABLE
+
+    def test_the_reason_explains_that_older_files_need_qc_rerun(self):
+        """The likeliest reason a project full of QC'd files reports zero is
+        that they were QC'd before retention shipped. A reason saying only
+        "run QC on more files" would read as wrong to someone looking at a
+        project where every file has already been QC'd."""
+        card = self._card(0)
+        assert "re-run" in card.reason
+
+    def test_an_uncountable_project_is_unavailable_rather_than_guessed(self):
+        """`None` means the count could not be taken. Treating that as zero
+        would be a guess; every other builder here reports it as
+        unavailable."""
+        card = self._card(None)
+        assert card.status is CardStatus.UNAVAILABLE
+
+    def test_unavailable_when_multiqc_is_not_installed(self):
+        card = self._card(5, available=False)
+        assert card.status is CardStatus.UNAVAILABLE
+
+    def test_not_offered_on_non_read_objects(self):
+        """A user looking at an assembly is not thinking about read QC, and
+        a card repeated identically on every object in the project would be
+        noise rather than a shortcut."""
+        assert self._card(5, kind=FormatKind.FASTA) is None
