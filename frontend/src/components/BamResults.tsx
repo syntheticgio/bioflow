@@ -12,6 +12,7 @@ import type {
 import { isStarMapqScale, mapqBucketLabel, mapqScaleNote } from "../lib/mapq";
 import { AlignmentReport } from "./AlignmentReport";
 import { BirdsEyeCoverageChart, CumulativeCoverageChart } from "./CoverageChart";
+import { ContigBlobChart } from "./ContigBlobChart";
 import { ContigTable } from "./ContigTable";
 import { ContigDepthChart } from "./ContigDepthChart";
 import { ContigDepthStrip } from "./ContigDepthStrip";
@@ -261,6 +262,11 @@ export function BamResults({ obj }: { obj: ObjectDetailData }) {
       {f.gc_bias_status === "ok" && f.gc_bias_curve && (
         <GcBiasChart curve={f.gc_bias_curve} partial={f.gc_bias_partial} />
       )}
+
+      {/* Same independent-job reasoning as GcBiasChart above -- gated on
+          its own fact since it is a second, separately-launched aggregation
+          of the same underlying join. */}
+      {f.gc_blob_status === "ok" && <ContigBlobChart objectId={obj.id} />}
     </>
   );
 }
