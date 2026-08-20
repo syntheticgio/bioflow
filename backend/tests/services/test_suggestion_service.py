@@ -889,10 +889,23 @@ class TestStructuralVariantsCard:
         """#619 left this card's SHORT branch saying a different tool was
         needed. #620 is that tool: the reason is replaced by an offer on the
         same card, not supplemented by a second SV card. Requirement
-        SV-620-9."""
-        card = build_structural_variants_card(
-            _bam(), align_runner.ReadChemistry.SHORT
-        )
+        SV-620-9.
+
+        Patches `tools.delly` rather than relying on the real environment
+        having it installed: the app's Docker image does, but the CI runner
+        image (`.github/Dockerfile.ci`) is a separate, hand-maintained tool
+        list that does not include Delly (or Sniffles), so an unpatched
+        assertion here passes locally and fails in CI. Matches the sibling
+        Sniffles tests in this class, which all patch `tools.sniffles` for
+        the same reason.
+        """
+        with patch(
+            "app.services.suggestion_service.tools.delly",
+            return_value=_FakeTool(True, name="delly"),
+        ):
+            card = build_structural_variants_card(
+                _bam(), align_runner.ReadChemistry.SHORT
+            )
         assert card.status is CardStatus.AVAILABLE
         assert card.launch is not None
 
@@ -916,9 +929,13 @@ class TestStructuralVariantsCard:
         """Paired-end and split-read signal detects SVs but resolves fewer
         of them than long reads do. A card that reads as equivalent
         misrepresents what the user gets."""
-        card = build_structural_variants_card(
-            _bam(), align_runner.ReadChemistry.SHORT
-        )
+        with patch(
+            "app.services.suggestion_service.tools.delly",
+            return_value=_FakeTool(True, name="delly"),
+        ):
+            card = build_structural_variants_card(
+                _bam(), align_runner.ReadChemistry.SHORT
+            )
         assert "long reads span breakpoints" not in (card.why or "").lower()
 
     def test_unknown_chemistry_is_refused(self):
