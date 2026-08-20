@@ -26,7 +26,7 @@ from app.pipelines import (
     assembler_registry,
     assembly_qc_registry,
     lineage_inference,
-    sniffles_runner,
+    sv_caller,
     tools,
     variant_runner,
 )
@@ -736,22 +736,31 @@ def build_structural_variants_card(obj, chemistry) -> SuggestionCard | None:
             reason="Unknown sequencing platform for this BAM.",
         )
 
-    if not sniffles_runner.sv_calling_allowed_for(chemistry):
-        # Worded so #620's short-read caller replaces this reason on the same
-        # card rather than adding a second SV card beside it.
+    caller = sv_caller.caller_for_chemistry(chemistry)
+    if caller is None:
         return SuggestionCard(
             kind="structural_variants",
             category="VARIANTS",
             title=title,
             description=description,
             status=CardStatus.UNAVAILABLE,
-            reason=(
-                "Sniffles2 needs long reads; short-read structural variant "
-                "calling needs a different tool."
-            ),
+            reason="Unknown sequencing platform for this BAM.",
         )
 
-    tool = tools.sniffles()
+    if caller is sv_caller.SvCaller.DELLY:
+        tool = tools.delly()
+        why = (
+            "Paired-end and split-read signal locates structural variants "
+            "in short-read data. Fewer events resolve than with long reads, "
+            "particularly insertions and repeats."
+        )
+    else:
+        tool = tools.sniffles()
+        why = (
+            "Long reads span breakpoints, which is what makes structural "
+            "variants resolvable."
+        )
+
     if not tool.available:
         return SuggestionCard(
             kind="structural_variants",
@@ -767,10 +776,7 @@ def build_structural_variants_card(obj, chemistry) -> SuggestionCard | None:
         category="VARIANTS",
         title=title,
         description=description,
-        why=(
-            "Long reads span breakpoints, which is what makes structural "
-            "variants resolvable."
-        ),
+        why=why,
         status=CardStatus.AVAILABLE,
         launch={
             "endpoint": "/pipelines/structural_variants",
