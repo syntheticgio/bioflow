@@ -460,8 +460,13 @@ class Hisat2Params(BaseAlignParams):
     # For DNA input: HISAT2 is splice-aware by default, and spliced alignment
     # over genomic DNA invents junctions that are not there.
     no_spliced_alignment: bool = False
-    # Formats output for downstream transcript assembly (StringTie et al).
-    dta: bool = False
+    # Formats output for downstream transcript assembly. StringTie is the
+    # consumer: `transcript_assembly` runs against these BAMs, and --dta is
+    # what makes their junction anchors long enough for it to assemble from.
+    # On by default since the assembler landed -- before that this was an
+    # opt-in checkbox nothing downstream consumed, so the RNA-seq path
+    # produced BAMs formatted for a tool that did not exist.
+    dta: bool = True
     report_k: int = 0
 
     def as_dict(self) -> dict:
@@ -496,7 +501,7 @@ class Hisat2Params(BaseAlignParams):
             rna_strandness=strandness,
             max_intronlen=max_intronlen,
             no_spliced_alignment=bool(data.get("no_spliced_alignment", False)),
-            dta=bool(data.get("dta", False)),
+            dta=bool(data.get("dta", True)),
             report_k=report_k,
             **cls._shared(data),
         )

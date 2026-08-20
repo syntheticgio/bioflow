@@ -909,12 +909,14 @@ REGISTRY: dict[Aligner, AlignerSpec] = {
                 key="dta",
                 label="Format for transcript assembly",
                 kind="bool",
-                default=False,
+                default=True,
                 group="biology",
                 help=(
-                    "Tailors the output for downstream transcript assemblers "
-                    "such as StringTie. Harmless otherwise, but only useful "
-                    "if that is the next step."
+                    "Tailors the output for StringTie, which assembles "
+                    "transcripts from this alignment. Costs a little "
+                    "alignment sensitivity for junction reads; turn it off "
+                    "if you will only be counting against a known "
+                    "annotation."
                 ),
             ),
             ParamField(
