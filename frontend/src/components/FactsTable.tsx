@@ -123,8 +123,9 @@ const SUPPRESSED = new Set([
   "trim_params",
   "trimmed_by",
   "trim_tool_version",
-  // Every qc_* key is suppressed by isSuppressed() below -- QcReport renders
-  // them properly, with units and the report links. See the note there.
+  // Every qc_*, gc_bias_*, and gc_blob_* key is suppressed by isSuppressed()
+  // below. QcReport and BamResults (GcBiasChart / ContigBlobChart) render them
+  // properly with their own charts, units, and reports.
   // BAM results have their own charts, summary row and per-contig table; see
   // BamResults. These are arrays of objects that the generic renderer can only
   // print as a wall of key: value chips, duplicating what's drawn below.
@@ -545,7 +546,12 @@ function isSuppressed(key: string, facts: Record<string, unknown>): boolean {
   // writing it, but BAMs aligned before that still carry the number, and this
   // table would print it beside every other aligner's as though comparable.
   if (key === "mean_mapping_quality" && isStarMapqScale(facts)) return true;
-  return SUPPRESSED.has(key) || key.startsWith("qc_");
+  return (
+    SUPPRESSED.has(key) ||
+    key.startsWith("qc_") ||
+    key.startsWith("gc_bias_") ||
+    key.startsWith("gc_blob_")
+  );
 }
 
 export function countVisibleFacts(facts: Record<string, unknown>): number {
