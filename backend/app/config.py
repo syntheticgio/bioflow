@@ -485,6 +485,19 @@ class Settings(BaseSettings):
         return self.bioinfo_home / "coverage"
 
     @property
+    def gc_bias_dir(self) -> Path:
+        """Generated per-contig GC-vs-depth reports (the blobplot JSON),
+        keyed by BAM object id.
+
+        Outside objects/ deliberately, same rationale as coverage_dir: this
+        is derivative and regenerable from the BAM's coverage report and its
+        reference's gc_tracks, so content-addressing it would buy
+        deduplication of something never shared and cost a blob record per
+        run.
+        """
+        return self.bioinfo_home / "gc_bias"
+
+    @property
     def methylation_dir(self) -> Path:
         """Generated per-site base-modification reports (the modkit bedMethyl
         summary), keyed by BAM object id.

@@ -892,6 +892,23 @@ async def get_coverage_report(object_id: PydanticObjectId, owner: OwnerDep) -> d
     return json.loads(target.read_text())
 
 
+@router.get("/gc-bias/{object_id}/report")
+async def get_gc_bias_report(object_id: PydanticObjectId, owner: OwnerDep) -> dict:
+    """Serve the per-contig GC-vs-depth report for a BAM (the blobplot).
+
+    Same discard-the-read-just-for-404 reasoning as get_coverage_report.
+    """
+    await object_service.get_object(object_id, owner=owner)
+
+    root = (settings.gc_bias_dir / str(object_id)).resolve()
+    target = (root / "gc_blob.json").resolve()
+
+    if not target.is_relative_to(root) or not target.is_file():
+        raise NotFoundError(f"No GC-bias report for object {object_id}")
+
+    return json.loads(target.read_text())
+
+
 class MethylationRequest(BaseModel):
     bam_id: PydanticObjectId
     resource_override: bool = False
