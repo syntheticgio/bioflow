@@ -1455,6 +1455,9 @@ DIFFERENTIAL_EXPRESSION_MEM_MB = 4096
 # memory to run than it declares to the scheduler.
 FEATURE_COVERAGE_MEM_MB = 1024
 
+# Likewise matches mosdepth_handlers.run_coverage's own registration.
+COVERAGE_MEM_MB = 1024
+
 
 def refuse_if_over_budget(
     *, declared_mb: int, budget_mb: int, resource_override: bool
@@ -4761,6 +4764,97 @@ async def launch_feature_coverage(
         bam_id=str(bam.id),
         annotation_id=str(annotation.id),
     )
+    return job
+
+
+async def launch_coverage(
+    *,
+    bam_id: PydanticObjectId,
+    owner: str,
+    resource_override: bool = False,
+) -> Job:
+    """Queue per-window read-depth analysis for one BAM.
+
+    Read-only, like bam_stats and feature_coverage: no derived object, just a
+    report plus summary facts merged onto the BAM.
+
+    Takes no annotation, which is the whole difference from
+    launch_feature_coverage: the windows are derived from the reference's own
+    contig lengths, so this is available for any completed alignment rather
+    than only for a project that has an annotation to measure against. It
+    still needs both sidecars -- the BAM's `.bai` for mosdepth to seek with,
+    and the reference's `.fai` for the contig lengths the windows are tiled
+    from -- and refuses with the same actionable message as
+    launch_feature_coverage rather than building either on the fly.
+    """
+    from app.queue import queue
+    from app.services import object_service
+
+    # Hoisted above the enqueue for the same reason as launch_assembly: a
+    # declaration the budget can never satisfy is unclaimable, and claim.lua
+    # has no starvation escape (#478, #527).
+    refuse_if_over_budget(
+        declared_mb=COVERAGE_MEM_MB,
+        budget_mb=await current_admission_budget_mb(),
+        resource_override=resource_override,
+    )
+
+    bam = await object_service.get_object(bam_id, owner=owner)
+    _check_bam_stats_callable(bam)
+
+    reference = await _resolve_variant_reference(bam, None, owner=owner)
+
+    bai = await _sidecar_of_role(bam, SidecarRole.BAI)
+    if bai is None:
+        raise ValidationError(
+            f"{bam.name!r} has no BAM index (.bai). Index it first.",
+            details={"bam_id": str(bam.id), "needs": "index_bam"},
+        )
+
+    fai = await _sidecar_of_role(reference, SidecarRole.FAI)
+    if fai is None:
+        raise ValidationError(
+            f"Reference {reference.name!r} has no FASTA index (.fai). "
+            f"Build its index first.",
+            details={"reference_id": str(reference.id), "needs": "build_index"},
+        )
+
+    payload: dict = {
+        "bam_id": str(bam.id),
+        "bam_name": bam.name,
+        "project_id": str(bam.project_id),
+    }
+    # `bai` is in this loop where launch_feature_coverage omits it: bedtools
+    # reads the BAM as a stream, but mosdepth seeks through the index and
+    # exits with "index not found" without it.
+    for key, obj in (("bam", bam), ("bai", bai), ("fai", fai)):
+        digest, path = await _resolve_readable(obj)
+        if digest:
+            payload[f"{key}_sha256"] = digest
+        if path:
+            payload[f"{key}_path"] = path
+
+    job = await queue.enqueue(
+        "coverage",
+        owner=owner,
+        payload=payload,
+        job_class=JobClass.COMPUTE,
+        resources=JobResources(cpu=1, mem_mb=COVERAGE_MEM_MB, io=IoClass.HEAVY),
+        max_attempts=2,
+        # Keyed on the BAM alone -- unlike feature_coverage, there is no
+        # second input whose change would produce a different result.
+        dedup_key=f"coverage:{bam.blob_sha256}",
+        project_id=bam.project_id,
+        object_id=bam.id,
+        resource_override=resource_override,
+    )
+    if job is None:
+        raise ConflictError(
+            "Coverage analysis is already queued or running for this BAM",
+            details={"bam_id": str(bam.id)},
+        )
+
+    log.info("coverage_launched", job_id=str(job.id), bam_id=str(bam.id))
     return job
 
 

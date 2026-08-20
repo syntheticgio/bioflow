@@ -795,6 +795,48 @@ async def get_feature_coverage_report(object_id: PydanticObjectId, owner: OwnerD
     return json.loads(target.read_text())
 
 
+class CoverageRequest(BaseModel):
+    bam_id: PydanticObjectId
+
+
+@router.post("/coverage", response_model=JobOut, status_code=status.HTTP_201_CREATED)
+async def launch_coverage(body: CoverageRequest, owner: OwnerDep) -> JobOut:
+    """Queue per-window read-depth analysis for a BAM.
+
+    Read-only, like feature_coverage and vcf_stats: no derived object, just a
+    report plus summary facts merged onto the BAM. Takes no annotation --
+    windows come from the reference's own contig lengths, so unlike
+    `/feature-coverage` there is nothing to resolve server-side.
+    """
+    job = await pipeline_service.launch_coverage(bam_id=body.bam_id, owner=owner)
+    return JobOut.of(job)
+
+
+@router.get("/coverage/{object_id}/report")
+async def get_coverage_report(object_id: PydanticObjectId, owner: OwnerDep) -> dict:
+    """Serve the per-window coverage report for a BAM.
+
+    `OwnerDep`, not `LinkableOwnerDep`: this is fetched by the app's own code
+    with the profile header attached, never opened as a bare link.
+
+    The object read is discarded -- it is there to make the 404 happen.
+    Report directories are named by object id and nothing else, so without it
+    any caller holding an id could read any profile's report.
+    """
+    await object_service.get_object(object_id, owner=owner)
+
+    root = (settings.coverage_dir / str(object_id)).resolve()
+    target = (root / "coverage.json").resolve()
+
+    # The filename is a module constant rather than user input, so traversal
+    # is not reachable through it -- but the resolve-and-recheck costs a stat
+    # and does not depend on that staying true.
+    if not target.is_relative_to(root) or not target.is_file():
+        raise NotFoundError(f"No coverage report for object {object_id}")
+
+    return json.loads(target.read_text())
+
+
 class VcfStatsRequest(BaseModel):
     object_id: PydanticObjectId
 
