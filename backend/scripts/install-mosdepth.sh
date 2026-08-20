@@ -29,6 +29,28 @@ set -eu
 MOSDEPTH_VERSION="${MOSDEPTH_VERSION:-0.3.14}"
 INSTALL_DIR="/opt/mosdepth"
 
+# This image ships WITHOUT curl by design -- install-meryl.sh and
+# install-quast.sh purge it after their own downloads, and both run before
+# this script, so no later layer may assume it exists. (Caught by a real
+# build failing here with "curl: not found", exactly the trap the Dockerfile
+# documents at its Node block.) Install it, use it, and restore that end
+# state at the finish, the same way the Node layer does.
+CURL_WAS_MISSING=""
+if ! command -v curl >/dev/null 2>&1; then
+    CURL_WAS_MISSING=1
+    apt-get update
+    apt-get install -y --no-install-recommends curl ca-certificates
+fi
+
+restore_curl_state() {
+    if [ -n "${CURL_WAS_MISSING}" ]; then
+        apt-get purge -y curl
+        apt-get autoremove -y
+        apt-get clean
+        rm -rf /var/lib/apt/lists/*
+    fi
+}
+
 # micromamba publishes per-arch builds; picking the wrong one yields an
 # "exec format error" that reads like a corrupt download.
 case "$(uname -m)" in
@@ -134,3 +156,6 @@ if [ ! -s "${MOSDEPTH_SMOKE}/smoke.regions.bed.gz" ]; then
     exit 1
 fi
 rm -rf "${MOSDEPTH_SMOKE}"
+
+# Leave the image as this script found it. See CURL_WAS_MISSING above.
+restore_curl_state
