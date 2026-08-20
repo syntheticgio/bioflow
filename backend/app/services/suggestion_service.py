@@ -1117,6 +1117,99 @@ def build_haplotag_card(obj, alignments) -> SuggestionCard | None:
     )
 
 
+def build_binning_card(obj, assembly_alignments) -> SuggestionCard | None:
+    """MetaBAT2 binning of a community assembly into per-organism MAGs.
+
+    Anchored on the assembly -- the thing being split -- rather than on the
+    alignment, which is only where the coverage signal comes from.
+
+    `assembly_alignments` is the (short, long, unknown) tuple
+    `alignments_against` returned: BAMs of reads aligned back against this very
+    assembly. That is a stricter requirement than most cards make, and the
+    right one: binning on coverage from an alignment against something else is
+    not a worse answer, it is a meaningless one.
+
+    The `--meta` gate is deliberately SOFT. Binning an isolate assembly is
+    unusual rather than wrong -- a contaminated isolate is exactly a case
+    someone might want to bin -- so a non-metagenome assembly gets the card
+    with an explanation, not a refusal. Hard-gating here would be the
+    `protein.faa` mistake `build_consensus_card` already documents, in a new
+    costume.
+    """
+    if obj.format.kind is not FormatKind.FASTA:
+        return None
+    if obj.role in pipeline_service.COMPLETENESS_EXCLUDED_ROLES:
+        return None
+
+    title = "Bin metagenome"
+    description = "Separate a community assembly into per-organism draft genomes."
+
+    metabat_tool = tools.metabat2()
+    if not metabat_tool.available:
+        return SuggestionCard(
+            kind="binning",
+            category="ASSEMBLY",
+            title=title,
+            description=description,
+            status=CardStatus.UNAVAILABLE,
+            reason=metabat_tool.error or "MetaBAT2 is not available.",
+        )
+
+    candidates: list[DataObject] = []
+    if assembly_alignments is not None:
+        short, long_, unknown = assembly_alignments
+        candidates = list(short) + list(long_) + list(unknown)
+    if not candidates:
+        return SuggestionCard(
+            kind="binning",
+            category="ASSEMBLY",
+            title=title,
+            description=description,
+            status=CardStatus.UNAVAILABLE,
+            reason=(
+                "No alignment of reads back against this assembly was found. "
+                "Binning needs per-contig coverage, so align this assembly's "
+                "own reads to it first."
+            ),
+        )
+
+    facts = obj.facts or {}
+    meta_mode = bool(facts.get("assembly_meta_mode"))
+    default = candidates[0]
+    why = f"Separate {obj.name} into per-organism genomes using {default.name}."
+    if not meta_mode:
+        # Said on an AVAILABLE card, not used to refuse one. The user may know
+        # something the facts do not -- that this isolate is contaminated, or
+        # that the assembly predates the metagenome-mode flag entirely.
+        why += (
+            " Note this assembly was not assembled in metagenome mode, so its"
+            " contigs may not represent a mixed community."
+        )
+
+    candidate_list = [
+        {"id": str(a.id), "name": a.name, "sample": pipeline_service.sample_name_for(a)}
+        for a in candidates
+    ]
+    return SuggestionCard(
+        kind="binning",
+        category="ASSEMBLY",
+        title=title,
+        description=description,
+        why=why,
+        status=CardStatus.AVAILABLE,
+        launch={
+            "endpoint": "/pipelines/binning",
+            "body": {
+                "object_id": str(obj.id),
+                "alignment_ids": [str(default.id)],
+                # Carried for the dialog's convenience: the frontend seeds its
+                # alignment picker from this rather than re-listing the project.
+                "candidate_alignments": candidate_list,
+            },
+        },
+    )
+
+
 def build_annotate_genome_card(obj) -> SuggestionCard | None:
     """Genome annotation for a bacterial or archaeal assembly.
 
@@ -3317,6 +3410,7 @@ CARD_BUILDERS: tuple[tuple[str, object], ...] = (
     ("phase", lambda obj, ctx: build_phase_card(obj, ctx.phase_inputs)),
     ("haplotag", lambda obj, ctx: build_haplotag_card(obj, ctx.haplotag_inputs)),
     ("annotate_genome", lambda obj, ctx: build_annotate_genome_card(obj)),
+    ("binning", lambda obj, ctx: build_binning_card(obj, ctx.assembly_alignments)),
     ("classify_reads", lambda obj, ctx: build_classify_reads_card(obj)),
     ("assemble", lambda obj, ctx: build_assemble_card(obj)),
     ("completeness", lambda obj, ctx: build_completeness_card(obj)),

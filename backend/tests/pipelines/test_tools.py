@@ -317,6 +317,7 @@ class TestSerialization:
             "bedtools",
             "mosdepth",
             "modkit",
+            "metabat2",
             "seqkit",
             # Not a binary at all -- a Python library, probed by import rather
             # than by shutil.which. It is in `all_tools` deliberately: the

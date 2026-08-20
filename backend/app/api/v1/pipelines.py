@@ -1150,6 +1150,35 @@ async def launch_haplotag_route(body: HaplotagVariantsRequest, owner: OwnerDep) 
     return JobOut.of(job)
 
 
+class BinningRequest(BaseModel):
+    object_id: PydanticObjectId
+    # The alignment of this assembly's reads back against itself. A list for
+    # consistency with the other alignment-taking launchers, though MetaBAT2
+    # bins from one BAM -- multi-sample co-binning, where coverage across
+    # several samples is the strongest signal MetaBAT2 has, is deliberately a
+    # separate piece of work (see the design doc's "out of scope").
+    alignment_ids: list[PydanticObjectId]
+    params: dict = Field(default_factory=dict)
+    # Carried from the suggestion card's seed body so the dialog can populate
+    # its alignment picker without re-listing the project; not used here.
+    candidate_alignments: list | None = None
+    # "Launch anyway" from the refusal card. Skips the declared-budget refusal.
+    resource_override: bool = False
+
+
+@router.post("/binning", response_model=JobOut, status_code=status.HTTP_201_CREATED)
+async def launch_binning_route(body: BinningRequest, owner: OwnerDep) -> JobOut:
+    """Queue MetaBAT2 binning of a community assembly into MAGs."""
+    job = await pipeline_service.launch_binning(
+        object_id=body.object_id,
+        owner=owner,
+        alignment_ids=body.alignment_ids,
+        params=body.params or {},
+        resource_override=body.resource_override,
+    )
+    return JobOut.of(job)
+
+
 @router.get("/vcfstats/variants/{object_id}")
 async def get_vcf_stats_variants(
     object_id: PydanticObjectId,

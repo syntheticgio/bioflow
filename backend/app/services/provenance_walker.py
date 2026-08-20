@@ -169,6 +169,11 @@ _STEP_VERBS: dict[str, str] = {
     # docs/superpowers/specs/2026-08-20-modkit-methylation-design.md.
     "methylation": "summarized base modifications with",
     "sequence_extraction": "extracted regions from",
+    # A narrative verb, not a _NO_NARRATIVE_STEP entry: binning produces MAG
+    # objects a person opens, annotates and aligns to -- and each one's whole
+    # claim to being a genome rests on which community assembly it came out of,
+    # which is exactly what a lineage step says.
+    "binning": "binned contigs from",
 }
 
 # Registered handlers that legitimately produce no narrative step.

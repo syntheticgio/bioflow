@@ -97,6 +97,15 @@ class RunKind(StrEnum):
     # separate from de novo assembly and assembly QC because it improves,
     # scaffolds, or derives an assembly from existing reference-like inputs.
     REFERENCE_ASSEMBLY = "reference_assembly"
+    # Separating a metagenome assembly into per-organism bins (MAGs). Kept
+    # separate from REFERENCE_ASSEMBLY for the display-and-grouping reason
+    # every other split here has: "binned a community into 40 genomes" is not
+    # the same line in an activity view as "scaffolded an assembly", and the
+    # (run_kind, run_tool) pair must stay unique so workflow_derive does not
+    # mislabel one node type as the other. It is also the only run kind whose
+    # OUTPUT count is data-dependent -- DIFFERENTIAL_EXPRESSION is the first
+    # with N inputs, this is the first with N outputs.
+    BINNING = "binning"
 
     # Genome annotation: gene finding, functional annotation, and feature
     # coordinate extraction on a bacterial or archaeal assembly.
@@ -289,6 +298,9 @@ class RunJobRole(StrEnum):
     # Read-based haplotagging. The whole point of its run -- a haplotag run
     # whose haplotagging failed produced nothing -- so it is not in OPTIONAL_ROLES.
     HAPLOTAG = "haplotag"
+    # Metagenome contig binning. The whole point of its run -- a binning run
+    # whose binning failed produced no MAGs -- so it is not in OPTIONAL_ROLES.
+    BIN = "bin"
 
 
 # Roles whose failure does not fail the run. The test is whether the expensive

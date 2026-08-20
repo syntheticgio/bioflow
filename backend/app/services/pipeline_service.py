@@ -4780,6 +4780,184 @@ async def launch_haplotag(
     return job
 
 
+# --- Metagenomics: binning a community assembly into MAGs -------------------
+
+BINNING_MEM_MB = 8192
+
+
+def _binning_dedup_key(contigs_id, bam_id, params: dict) -> str:
+    """Identity of a binning request.
+
+    The assembly, the alignment its depth comes from, and the parameter
+    fingerprint. Binning the same assembly against the same alignment the same
+    way again is the same work -- and, because `build_binning_command` pins
+    `--seed`, it is work that produces the same MAGs.
+    """
+    return f"binning:{contigs_id}:{bam_id}:{_params_fingerprint(params)}"
+
+
+async def launch_binning(
+    *,
+    object_id: PydanticObjectId,
+    alignment_ids: list[PydanticObjectId],
+    owner: str,
+    params: dict | None = None,
+    resource_override: bool = False,
+):
+    """Queue a MetaBAT2 run separating a community assembly into bins (MAGs).
+
+    Takes the assembly *and* an alignment of reads back against it: MetaBAT2
+    bins on coverage as well as composition, so without the BAM there is
+    nothing to bin on. That alignment is exactly what the align card already
+    offers on a de novo assembly, which is why `_apply_assemble_reads` gives
+    contigs `ObjectRole.REFERENCE`.
+
+    Deliberately NOT gated on the assembly having been assembled with
+    `--meta`. Binning an isolate assembly is unusual rather than wrong -- a
+    contaminated isolate is exactly a case someone might want to bin -- so the
+    card explains the mismatch and the launcher allows it. Same posture as
+    `build_consensus_card`, which refuses to gate on the reference looking
+    viral.
+    """
+    from app.queue import queue
+    from app.services import object_service
+
+    if not alignment_ids:
+        raise ValidationError(
+            "Binning needs an alignment of the reads against this assembly.",
+            details={"object_id": str(object_id), "needs": "alignment_ids"},
+        )
+
+    contigs = await object_service.get_object(object_id, owner=owner)
+    if contigs is None or contigs.format.kind is not FormatKind.FASTA:
+        raise ValidationError(
+            f"{contigs.name!r} is not a FASTA assembly."
+            if contigs
+            else "Assembly not found.",
+            details={"object_id": str(object_id)},
+        )
+    if contigs.status is not ObjectStatus.READY:
+        raise ValidationError(
+            f"{contigs.name!r} is not ready ({contigs.status.value}).",
+            details={"object_id": str(contigs.id), "status": contigs.status.value},
+        )
+
+    bam_id = alignment_ids[0]
+    bam = await object_service.get_object(bam_id, owner=owner)
+    if bam is None or bam.format.kind is not FormatKind.BAM:
+        raise ValidationError(
+            f"{bam.name!r} is not a BAM." if bam else "Alignment not found.",
+            details={"object_id": str(bam_id)},
+        )
+    if bam.status is not ObjectStatus.READY:
+        raise ValidationError(
+            f"{bam.name!r} is not ready ({bam.status.value}).",
+            details={"object_id": str(bam.id), "status": bam.status.value},
+        )
+    bai = await _sidecar_of_role(bam, SidecarRole.BAI)
+    if bai is None:
+        raise ValidationError(
+            f"{bam.name!r} has no BAM index (.bai). Index it first.",
+            details={"bam_id": str(bam.id), "needs": "index_bam"},
+        )
+
+    # That the alignment is actually *of this assembly*. Checked here rather
+    # than left to fail as an empty depth file mid-job: the depth step exits
+    # zero against a mismatched BAM, and the resulting error names a file
+    # rather than the wrong input that caused it.
+    if bam.derived_from and contigs.id not in bam.derived_from:
+        raise ValidationError(
+            f"{bam.name!r} is not an alignment against {contigs.name!r}. "
+            f"Binning needs the reads aligned back to the assembly being "
+            f"binned.",
+            details={"object_id": str(contigs.id), "bam_id": str(bam.id)},
+        )
+
+    settings_params = params or {}
+    min_contig = int(settings_params.get("min_contig") or 2500)
+    if min_contig < 1500:
+        raise ValidationError(
+            "Minimum contig length must be at least 1500 -- below that "
+            "MetaBAT2 cannot bin on composition.",
+            details={"min_contig": min_contig},
+        )
+    threads = int(settings_params.get("threads") or 4)
+    seed = int(settings_params.get("seed") or 1)
+    binning_params = {"min_contig": min_contig, "threads": threads, "seed": seed}
+
+    tools.require(tools.metabat2())
+
+    refuse_if_over_budget(
+        declared_mb=BINNING_MEM_MB,
+        budget_mb=await current_admission_budget_mb(),
+        resource_override=resource_override,
+    )
+
+    payload: dict = {
+        "contigs_id": str(contigs.id),
+        "contigs_name": contigs.name,
+        "bam_object_id": str(bam.id),
+        "bam_name": bam.name,
+        "project_id": str(contigs.project_id),
+        **binning_params,
+    }
+    for key, obj in (("contigs", contigs), ("bam", bam), ("bai", bai)):
+        digest, path = await _resolve_readable(obj)
+        if digest:
+            payload[f"{key}_sha256"] = digest
+        if path:
+            payload[f"{key}_path"] = path
+
+    run = await run_service.create_run(
+        kind=RunKind.BINNING,
+        project_id=contigs.project_id,
+        label=f"{contigs.name} → bins",
+        inputs=[
+            RunInput(
+                object_id=contigs.id,
+                name=contigs.name,
+                role=RunInputRole.ASSEMBLY,
+            ),
+            RunInput(
+                object_id=bam.id, name=bam.name, role=RunInputRole.ALIGNMENT
+            ),
+        ],
+        params=binning_params,
+        owner=owner,
+        tool="metabat2",
+    )
+
+    job = await queue.enqueue(
+        "binning",
+        owner=owner,
+        payload=payload,
+        job_class=JobClass.COMPUTE,
+        resources=JobResources(
+            cpu=threads, mem_mb=BINNING_MEM_MB, io=IoClass.HEAVY
+        ),
+        max_attempts=2,
+        dedup_key=_binning_dedup_key(contigs.id, bam.id, binning_params),
+        project_id=contigs.project_id,
+        object_id=contigs.id,
+        resource_override=resource_override,
+    )
+    if job is None:
+        await run_service.discard_run(run.id, owner=run.owner)
+        raise ConflictError(
+            "An identical binning run is already queued or running",
+            details={"object_id": str(contigs.id), "alignment_id": str(bam.id)},
+        )
+
+    await run_service.link_job(run.id, job.id, RunJobRole.BIN)
+    log.info(
+        "binning_launched",
+        contigs_id=str(contigs.id),
+        alignment_id=str(bam.id),
+        job_id=str(job.id),
+    )
+    return job
+
+
 # --- Expression: quantification and differential testing --------------------
 
 
