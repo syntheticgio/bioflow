@@ -315,7 +315,18 @@ jobs:
         # alive. The marker is currently empty, so that phase collects
         # nothing and exits 5; `|| [ $? -eq 5 ]` is what keeps that green.
         run: |
-          pytest backend/tests/ -q --tb=no -m "not heavy" -n auto --dist loadgroup
+          # Workers from the runner's real core count, not `-n auto`. Inside a
+          # container `os.cpu_count()` reports the *host's* cores and ignores
+          # the cgroup quota, so `auto` oversubscribes badly: measured at a
+          # 4-CPU cap, `auto` spawned 24 workers and took 136s where `-n 4`
+          # took 67s. nproc reads the same unaware count, so the quota is read
+          # from the cgroup directly, with nproc as the fallback for a runner
+          # that is not cgroup-limited.
+          quota=$(cat /sys/fs/cgroup/cpu.max 2>/dev/null | awk '{if ($1 != "max" && $2 > 0) print int($1/$2)}')
+          workers="${quota:-$(nproc)}"
+          [ "${workers:-0}" -ge 1 ] || workers=2
+          echo "running with $workers workers"
+          pytest backend/tests/ -q --tb=no -m "not heavy" -n "$workers" --dist loadgroup
           pytest backend/tests/ -q --tb=no -m heavy || [ $? -eq 5 ]
         env:
           MONGO_URL: "mongodb://mongo:27017/biopipe_test?replicaSet=rs0&directConnection=true"
