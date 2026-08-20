@@ -1784,9 +1784,27 @@ async def _apply_coverage(result: dict, *, owner: str) -> None:
         log.warning("coverage_object_missing", object_id=object_id)
         return
 
+    # Facts merge, so the mode-specific keys of a *previous* run survive one in
+    # the other mode: re-running a windowed BAM against a target BED otherwise
+    # leaves `coverage_window_count` beside the new `coverage_region_count`,
+    # and only one of the two describes the report now on disk. Observed on a
+    # real BAM before this drop was added. Every other coverage_* key is
+    # overwritten by this run, so only these two need clearing.
+    merged = {**obj.facts, **facts}
+    stale = (
+        "coverage_window_count"
+        if facts.get("coverage_mode") == "regions"
+        else "coverage_region_count"
+    )
+    merged.pop(stale, None)
+    if facts.get("coverage_mode") != "regions":
+        # Likewise unattributable once the run it named is no longer the
+        # report on disk.
+        merged.pop("coverage_regions_id", None)
+
     await obj.set(
         {
-            DataObject.facts: {**obj.facts, **facts},
+            DataObject.facts: merged,
             DataObject.updated_at: datetime.now(UTC),
         }
     )
@@ -1794,6 +1812,7 @@ async def _apply_coverage(result: dict, *, owner: str) -> None:
     log.info(
         "coverage_applied",
         object_id=object_id,
+        mode=facts.get("coverage_mode"),
         mean_depth=facts.get("coverage_mean_depth"),
         contig_count=facts.get("coverage_contig_count"),
     )

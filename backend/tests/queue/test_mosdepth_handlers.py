@@ -325,3 +325,146 @@ class TestRegistration:
         from app.queue.registry import get_handler
 
         assert get_handler("coverage") is not None
+
+
+pytestmark_apply = [
+    pytest.mark.usefixtures("beanie_models"),
+    pytest.mark.asyncio(loop_scope="module"),
+]
+
+
+class TestApplyCoverage:
+    """The applier that merges a coverage run's facts onto the BAM.
+
+    Mirrors TestApplyFeatureCoverage in test_feature_coverage_handlers.py,
+    including its no-Redis fixture.
+    """
+
+    pytestmark = pytestmark_apply
+
+    @pytest.fixture(autouse=True)
+    def _no_queue(self, monkeypatch):
+        from app.services import object_service
+
+        async def _skip_ingest(obj, **kwargs):
+            return ""
+
+        async def _skip_enqueue(*args, **kwargs):
+            return None
+
+        monkeypatch.setattr(object_service, "enqueue_ingest", _skip_ingest)
+        monkeypatch.setattr("app.queue.queue.enqueue", _skip_enqueue)
+
+    async def _bam(self, name):
+        from app.config import settings
+        from app.services import object_service, project_service
+
+        project = await project_service.create_project(name=name, owner="local")
+        settings.tmp_dir.mkdir(parents=True, exist_ok=True)
+        scratch = settings.tmp_dir / f"{name}.bam"
+        scratch.write_bytes(b"fake-bam-bytes")
+        return await object_service.ingest_local_file(
+            owner="local",
+            project_id=project.id,
+            path=scratch,
+            name="aligned.bam",
+        )
+
+    async def test_merges_facts_onto_the_stored_object(self):
+        from app.queue import results
+
+        bam = await self._bam("coverage-apply")
+        await results._apply_coverage(
+            {
+                "object_id": str(bam.id),
+                "facts": {
+                    "coverage_status": "ok",
+                    "coverage_mode": "windows",
+                    "coverage_mean_depth": 4.34,
+                    "coverage_window_count": 500,
+                },
+            },
+            owner="local",
+        )
+        refreshed = await results.DataObject.get(bam.id)
+        assert refreshed.facts["coverage_mean_depth"] == 4.34
+        assert refreshed.facts["coverage_window_count"] == 500
+
+    async def test_a_region_run_drops_the_previous_windowed_count(self):
+        """Facts merge, so without an explicit drop the earlier run's
+        `coverage_window_count` survives beside the new
+        `coverage_region_count` and the object reports two mutually
+        exclusive descriptions of one report. Observed on a real BAM.
+        """
+        from app.queue import results
+
+        bam = await self._bam("coverage-apply-modes")
+        await results._apply_coverage(
+            {
+                "object_id": str(bam.id),
+                "facts": {"coverage_mode": "windows", "coverage_window_count": 500},
+            },
+            owner="local",
+        )
+        await results._apply_coverage(
+            {
+                "object_id": str(bam.id),
+                "facts": {
+                    "coverage_mode": "regions",
+                    "coverage_region_count": 3,
+                    "coverage_regions_id": "bed-1",
+                },
+            },
+            owner="local",
+        )
+
+        refreshed = await results.DataObject.get(bam.id)
+        assert refreshed.facts["coverage_region_count"] == 3
+        assert "coverage_window_count" not in refreshed.facts
+
+    async def test_a_windowed_run_drops_the_previous_region_facts(self):
+        """The other direction: a region set id left behind by an earlier run
+        attributes the windowed report to a BED it never read."""
+        from app.queue import results
+
+        bam = await self._bam("coverage-apply-back")
+        await results._apply_coverage(
+            {
+                "object_id": str(bam.id),
+                "facts": {
+                    "coverage_mode": "regions",
+                    "coverage_region_count": 3,
+                    "coverage_regions_id": "bed-1",
+                },
+            },
+            owner="local",
+        )
+        await results._apply_coverage(
+            {
+                "object_id": str(bam.id),
+                "facts": {"coverage_mode": "windows", "coverage_window_count": 500},
+            },
+            owner="local",
+        )
+
+        refreshed = await results.DataObject.get(bam.id)
+        assert refreshed.facts["coverage_window_count"] == 500
+        assert "coverage_region_count" not in refreshed.facts
+        assert "coverage_regions_id" not in refreshed.facts
+
+    async def test_does_nothing_when_the_object_is_missing(self):
+        from beanie import PydanticObjectId
+
+        from app.queue import results
+
+        await results._apply_coverage(
+            {"object_id": str(PydanticObjectId()), "facts": {"coverage_status": "ok"}},
+            owner="local",
+        )
+
+    async def test_does_nothing_without_facts_or_object_id(self):
+        from app.queue import results
+
+        await results._apply_coverage({}, owner="local")
+        await results._apply_coverage({"object_id": "x"}, owner="local")
+        await results._apply_coverage({"facts": {"a": 1}}, owner="local")
