@@ -3249,7 +3249,16 @@ def _variant_dedup_key(*, bam_id, params: dict) -> str:
     """Identity of a variant calling request.
 
     Includes the caller: calling one BAM with Clair3 and with bcftools is two
-    results worth comparing, not a double-submit to collapse.
+    results worth comparing, not a double-submit to collapse. That happens
+    via the fingerprint rather than a separate field in the key --
+    `VariantParams.as_dict` puts `caller` in `params`, and
+    `_params_fingerprint` hashes every key it is given. Adding the caller to
+    the key string as well would change every existing key to no effect.
+
+    So a caller added to `VariantCaller` needs nothing here, but a params
+    class that stops carrying `caller` in `as_dict` would silently collapse
+    two callers into one job -- `TestVariantDedupKey.
+    test_a_different_caller_differs` is what fails if that happens.
     """
     return f"call_variants:{bam_id}:{_params_fingerprint(params)}"
 

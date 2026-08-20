@@ -10,7 +10,7 @@ import pytest
 
 from app.errors import PermanentError, ValidationError
 from app.models import FormatKind, ObjectStatus
-from app.pipelines import tools
+from app.pipelines import tools, variant_runner
 from app.pipelines.align_runner import ReadChemistry
 from app.services import pipeline_service
 
@@ -283,6 +283,23 @@ class TestVariantDedupKey:
         """Calling the same BAM with Clair3 and with bcftools is two real
         results to compare, not a double-submit to collapse."""
         assert self._key() != self._key(params={"caller": "bcftools"})
+
+    def test_every_caller_pair_differs(self):
+        """Built from `VariantParams`, not from a params dict written here.
+
+        The two tests above pass a hand-written dict, so they would keep
+        passing if `VariantParams.as_dict` stopped emitting `caller` -- the
+        one change that would actually collapse two callers into one job,
+        since the caller reaches the key only through the fingerprint (#699).
+        """
+        keys = {
+            caller: pipeline_service._variant_dedup_key(
+                bam_id="bam1",
+                params=variant_runner.VariantParams(caller=caller).as_dict(),
+            )
+            for caller in variant_runner.VariantCaller
+        }
+        assert len(set(keys.values())) == len(keys), keys
 
     def test_a_different_thread_count_differs(self):
         assert self._key() != self._key(params={"threads": 8})
