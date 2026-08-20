@@ -2627,12 +2627,18 @@ TOOL_META: dict[str, ToolMeta] = {
     "mosdepth": ToolMeta(
         pipelines=(PipelineType.UTILITY,),
         one_liner="Fast per-base and per-window read-depth calculator",
+        # Describes what BioFlow's coverage job accepts, not everything the
+        # binary can read. mosdepth itself also reads CRAM, and saying so here
+        # promised a capability the job does not have: CRAM is refused both by
+        # build_coverage_card's format check and by _check_bam_stats_callable,
+        # so the help page advertised a format that never produces a card
+        # (#717). Widen this again only alongside the job.
         summary=(
-            "mosdepth computes read depth from an indexed BAM or CRAM in a "
-            "single pass, over fixed-size windows, a target region set, or "
-            "every base. It answers the per-region and depth-uniformity "
-            "questions that alignment-wide statistics cannot: whether a gene, "
-            "a panel target, or a contig actually got enough sequencing."
+            "mosdepth computes read depth from an indexed BAM in a single "
+            "pass, over fixed-size windows, a target region set, or every "
+            "base. It answers the per-region and depth-uniformity questions "
+            "that alignment-wide statistics cannot: whether a gene, a panel "
+            "target, or a contig actually got enough sequencing."
         ),
         strengths=(
             "Per-base, per-window, and per-region depth in one pass",
