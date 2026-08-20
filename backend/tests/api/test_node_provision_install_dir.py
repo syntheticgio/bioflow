@@ -83,6 +83,11 @@ def _patched(conn):
         patch("app.api.v1.nodes.node_ssh.verify_key",
               AsyncMock(return_value=(MagicMock(), "ssh-ed25519 AAAA"))),
         patch("app.api.v1.nodes.crypto.encrypt", MagicMock(return_value="enc")),
+        # The post-`up -d` settle window. It is a real 5s sleep in production,
+        # where it exists to let a crash-looping worker actually die before
+        # the state is read -- but nothing here asserts on settle timing, so
+        # unpatched it is five seconds of wall clock per test for nothing.
+        patch("app.api.v1.nodes._VERIFY_SETTLE_SECONDS", 0),
     )
 
 
