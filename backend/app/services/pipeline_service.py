@@ -6,6 +6,7 @@ handler expects. Kept out of the router so the launch rules are testable
 without HTTP.
 """
 
+import json
 import shutil
 from dataclasses import dataclass
 from enum import StrEnum
@@ -1474,6 +1475,10 @@ COVERAGE_MEM_MB = 1024
 
 # Matches methylation_handlers.run_methylation's own registration.
 METHYLATION_MEM_MB = 4096
+
+# Matches gc_coverage_handlers.compute_gc_bias's own @handler registration:
+# arithmetic over two already-loaded arrays, no subprocess.
+GC_BIAS_MEM_MB = 256
 
 
 def refuse_if_over_budget(
@@ -5357,7 +5362,110 @@ async def launch_methylation(
     return job
 
 
-GC_BIAS_MEM_MB = 512
+async def launch_gc_bias(
+    *,
+    bam_id: PydanticObjectId,
+    owner: str,
+    resource_override: bool = False,
+) -> Job:
+    """Queue the GC-vs-coverage bias curve for one BAM.
+
+    Read-only, like coverage and gc_tracks: no derived object, just a curve
+    of facts merged onto the BAM. Three preconditions, each refused by name
+    rather than auto-chained (V2, docs/superpowers/specs/
+    2026-08-20-gc-coverage-visualizations-design.md): the BAM's alignment
+    target must resolve, that target must have run gc_tracks, and this BAM
+    must have a *windowed* (not region-mode) coverage run -- a region-mode
+    run is on a different, non-shared grid and the join cannot use it. The
+    handler runs in a thread and cannot reach the database (mirrors
+    de_summary_handlers' reasoning), so every read below happens here and is
+    handed to the handler pre-loaded in the payload.
+    """
+    from app.queue import queue
+    from app.services import object_service, reference_assembly
+
+    # Hoisted above the enqueue for the same reason as launch_coverage: a
+    # declaration the budget can never satisfy is unclaimable, and claim.lua
+    # has no starvation escape (#478, #527).
+    refuse_if_over_budget(
+        declared_mb=GC_BIAS_MEM_MB,
+        budget_mb=await current_admission_budget_mb(),
+        resource_override=resource_override,
+    )
+
+    bam = await object_service.get_object(bam_id, owner=owner)
+
+    reference = await reference_assembly.resolve_alignment_target_for_bam(
+        bam, owner=owner
+    )
+
+    gc_tracks_fact = (reference.facts or {}).get("gc_tracks")
+    if not gc_tracks_fact or not gc_tracks_fact.get("contigs"):
+        raise ValidationError(
+            f"Reference {reference.name!r} has no GC tracks computed. "
+            f"Run the Circos GC tracks analysis on it first.",
+            details={"reference_id": str(reference.id), "needs": "analyze_gc_tracks"},
+        )
+
+    if (bam.facts or {}).get("coverage_status") != "ok":
+        raise ValidationError(
+            f"{bam.name!r} has no coverage computed. Run coverage depth "
+            f"analysis on it first.",
+            details={"bam_id": str(bam.id), "needs": "coverage"},
+        )
+    if (bam.facts or {}).get("coverage_mode") != "windows":
+        raise ValidationError(
+            f"{bam.name!r}'s coverage was computed against a target region "
+            f"set, not uniform windows. gc_bias needs a windowed coverage "
+            f"run -- run coverage depth analysis without a target BED.",
+            details={"bam_id": str(bam.id), "needs": "coverage"},
+        )
+
+    report_name = bam.facts.get("coverage_report")
+    if not report_name:
+        raise ValidationError(
+            f"{bam.name!r}'s coverage report is missing on disk. Re-run "
+            f"coverage depth analysis.",
+            details={"bam_id": str(bam.id), "needs": "coverage"},
+        )
+    report_path = settings.coverage_dir / str(bam.id) / report_name
+    try:
+        depth_regions = json.loads(report_path.read_text())["regions"]
+    except (OSError, KeyError, ValueError) as e:
+        raise ValidationError(
+            f"{bam.name!r}'s coverage report could not be read. Re-run "
+            f"coverage depth analysis.",
+            details={"bam_id": str(bam.id), "needs": "coverage"},
+        ) from e
+
+    payload = {
+        "bam_id": str(bam.id),
+        "project_id": str(bam.project_id),
+        "gc_contigs": gc_tracks_fact["contigs"],
+        "depth_regions": depth_regions,
+    }
+
+    job = await queue.enqueue(
+        "gc_bias",
+        owner=owner,
+        payload=payload,
+        job_class=JobClass.COMPUTE,
+        resources=JobResources(cpu=1, mem_mb=GC_BIAS_MEM_MB, io=IoClass.LIGHT),
+        max_attempts=2,
+        dedup_key=f"gc_bias:{bam.blob_sha256}:{reference.blob_sha256}",
+        project_id=bam.project_id,
+        object_id=bam.id,
+        resource_override=resource_override,
+    )
+    if job is None:
+        raise ConflictError(
+            "GC bias analysis is already queued or running for this BAM",
+            details={"bam_id": str(bam.id)},
+        )
+
+    log.info("gc_bias_launched", job_id=str(job.id), bam_id=str(bam.id))
+    return job
+
 
 async def launch_salmon_quantify(
     *,

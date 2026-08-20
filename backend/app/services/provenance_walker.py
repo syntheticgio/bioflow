@@ -178,6 +178,7 @@ _NO_NARRATIVE_STEP: frozenset[str] = frozenset(
         "run_bam_stats",
         "feature_coverage",
         "coverage",
+        "gc_bias",
         "run_transcript_qc",
         "run_vcf_stats",
         "run_annotation_stats",
