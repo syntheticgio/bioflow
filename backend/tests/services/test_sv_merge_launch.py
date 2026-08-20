@@ -5,7 +5,7 @@ import pytest
 
 from app.config import settings
 from app.errors import ValidationError
-from app.models import ObjectRole, SidecarRole
+from app.models import DataObject, FormatInfo, FormatKind, ObjectRole, SidecarRole
 from app.services import object_service, pipeline_service, project_service
 
 pytestmark = [
@@ -64,6 +64,7 @@ async def _setup_snf_pair(*, same_reference: bool = True):
         role=ObjectRole.VARIANTS,
         derived_from=[ref1.id],
     )
+    await vcf1.set({DataObject.format: FormatInfo(kind=FormatKind.VCF)})
     snf1 = await object_service.ingest_local_file(
         owner=OWNER,
         project_id=project.id,
@@ -83,6 +84,7 @@ async def _setup_snf_pair(*, same_reference: bool = True):
         role=ObjectRole.VARIANTS,
         derived_from=[ref2.id],
     )
+    await vcf2.set({DataObject.format: FormatInfo(kind=FormatKind.VCF)})
     snf2 = await object_service.ingest_local_file(
         owner=OWNER,
         project_id=project.id,
@@ -137,3 +139,52 @@ async def test_merge_structural_variants_succeeds_on_same_reference(monkeypatch)
         owner=OWNER,
     )
     assert job is not None
+
+
+async def test_sibling_snf_callsets_finds_all_snf_sidecars_on_same_reference():
+    snf1, snf2, ref1, _ = await _setup_snf_pair(same_reference=True)
+
+    siblings = await pipeline_service.sibling_snf_callsets(snf1)
+
+    assert len(siblings) == 2
+    assert str(snf1.id) in siblings
+    assert str(snf2.id) in siblings
+    # Sorted, as the function promises.
+    assert siblings == sorted(siblings)
+
+
+async def test_sibling_snf_callsets_excludes_snfs_on_different_reference():
+    snf1, snf2, ref1, ref2 = await _setup_snf_pair(same_reference=False)
+
+    siblings = await pipeline_service.sibling_snf_callsets(snf1)
+
+    # Only snf1 is on ref1; snf2 is on ref2, so it is excluded.
+    assert len(siblings) == 1
+    assert str(snf1.id) in siblings
+
+
+async def test_sibling_snf_callsets_returns_empty_when_not_an_snf():
+    project = await project_service.create_project(
+        name=f"proj-{uuid.uuid4().hex}", owner=OWNER
+    )
+    ref = await object_service.ingest_local_file(
+        owner=OWNER,
+        project_id=project.id,
+        path=_scratch_file(suffix=".fa"),
+        name="ref.fa",
+        role=ObjectRole.REFERENCE,
+    )
+    plain_vcf = await object_service.ingest_local_file(
+        owner=OWNER,
+        project_id=project.id,
+        path=_scratch_file(suffix=".vcf.gz"),
+        name="sample.vcf.gz",
+        role=ObjectRole.VARIANTS,
+        derived_from=[ref.id],
+    )
+    await plain_vcf.set({DataObject.format: FormatInfo(kind=FormatKind.VCF)})
+
+    # A plain VCF (not an SNF sidecar) has no sidecar_of, so the reference
+    # walk fails and the function returns an empty list.
+    siblings = await pipeline_service.sibling_snf_callsets(plain_vcf)
+    assert siblings == []

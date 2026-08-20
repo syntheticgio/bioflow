@@ -10,7 +10,7 @@ from unittest.mock import patch
 
 import pytest
 
-from app.models import FormatKind, ObjectRole, ObjectStatus
+from app.models import FormatKind, ObjectRole, ObjectStatus, SidecarRole
 from app.pipelines import align_runner, aligner_registry, assembler_registry, tools
 from app.pipelines.assemblers import Assembler
 from app.services import pipeline_service
@@ -22,6 +22,7 @@ from app.services.suggestion_service import (
     build_assemble_card,
     build_classify_reads_card,
     build_feature_coverage_card,
+    build_merge_structural_variants_card,
     build_preprocess_card,
     build_quantify_card,
     build_salmon_quantify_card,
@@ -3185,3 +3186,85 @@ class TestPolishCardsDoNotCollide:
             short_card = suggestion_service.build_polish_card(obj, [])
         assert long_card.status is CardStatus.AVAILABLE
         assert short_card.status is CardStatus.UNAVAILABLE
+
+
+class TestMergeStructuralVariantsCard:
+    """Pin each branch of build_merge_structural_variants_card's gating.
+
+    The card takes a *pre-fetched* sibling list from suggestions_for rather
+    than re-querying, so the unit tests pass it directly -- the database
+    integration is covered separately in test_sv_merge_launch.py.
+    """
+
+    @staticmethod
+    def _snf_obj(obj_id: str = "snf1"):
+        """A stand-in SNF sidecar: sidecar_role must be SNF for the card to apply."""
+        o = _fake_obj(obj_id=obj_id)
+        o.sidecar_role = SidecarRole.SNF
+        return o
+
+    def test_not_offered_for_a_non_snf(self):
+        """The card only fires on SNF sidecars; anything else is None (not
+        an unavailable card), so it does not waste grid space."""
+        obj = _fake_obj()  # sidecar_role is unset / None
+        obj.sidecar_role = None
+        assert build_merge_structural_variants_card(obj, ["a", "b"]) is None
+
+    def test_not_offered_for_a_vcf(self):
+        obj = _fake_obj()
+        obj.sidecar_role = None
+        obj.role = ObjectRole.VARIANTS
+        assert build_merge_structural_variants_card(obj, ["a", "b"]) is None
+
+    def test_unavailable_when_sniffles_is_not_installed(self):
+        with patch("app.services.suggestion_service.tools.sniffles",
+                   return_value=_FakeTool(False, name="sniffles")):
+            card = build_merge_structural_variants_card(self._snf_obj(), ["a", "b"])
+        assert card.status is CardStatus.UNAVAILABLE
+        assert card.launch is None
+        assert "sniffles" in card.reason.lower() or "not installed" in card.reason.lower()
+
+    def test_unavailable_when_sibling_lookup_failed(self):
+        """None means suggestions_for could not resolve siblings -- the card
+        must decline rather than guess, which would silently offer a merge
+        of one."""
+        with patch("app.services.suggestion_service.tools.sniffles",
+                   return_value=_FakeTool(True)):
+            card = build_merge_structural_variants_card(self._snf_obj(), None)
+        assert card.status is CardStatus.UNAVAILABLE
+        assert card.launch is None
+
+    def test_unavailable_with_only_one_sibling(self):
+        """A single .snf cannot be merged with itself; the card must refuse
+        rather than emit a degenerate single-sample combine."""
+        with patch("app.services.suggestion_service.tools.sniffles",
+                   return_value=_FakeTool(True)):
+            card = build_merge_structural_variants_card(self._snf_obj(), ["snf1"])
+        assert card.status is CardStatus.UNAVAILABLE
+        assert card.launch is None
+
+    def test_available_with_two_siblings_carries_all_ids_in_body(self):
+        """The launch body must contain every sibling ID, not just the one
+        the card was clicked on -- this is the whole point of the sibling
+        lookup."""
+        with patch("app.services.suggestion_service.tools.sniffles",
+                   return_value=_FakeTool(True)):
+            card = build_merge_structural_variants_card(
+                self._snf_obj("snf1"), ["snf1", "snf2"]
+            )
+        assert card.status is CardStatus.AVAILABLE
+        assert card.launch["endpoint"] == "/pipelines/merge_structural_variants"
+        assert card.launch["body"]["snf_object_ids"] == ["snf1", "snf2"]
+
+    def test_available_with_many_siblings_preserves_order(self):
+        """sibling_snf_callsets returns a sorted list; the card must pass it
+        through unchanged so the launch body matches what the service
+        dedups against."""
+        ids = ["snf-a", "snf-b", "snf-c"]
+        with patch("app.services.suggestion_service.tools.sniffles",
+                   return_value=_FakeTool(True)):
+            card = build_merge_structural_variants_card(
+                self._snf_obj("snf-a"), ids
+            )
+        assert card.status is CardStatus.AVAILABLE
+        assert card.launch["body"]["snf_object_ids"] == ids
