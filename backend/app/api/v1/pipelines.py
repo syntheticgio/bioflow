@@ -825,6 +825,8 @@ async def launch_coverage(body: CoverageRequest, owner: OwnerDep) -> JobOut:
     return JobOut.of(job)
 
 
+
+
 @router.get("/coverage/{object_id}/report")
 async def get_coverage_report(object_id: PydanticObjectId, owner: OwnerDep) -> dict:
     """Serve the per-window coverage report for a BAM.
@@ -2134,6 +2136,32 @@ async def launch_annotate_genome_route(
     job = await pipeline_service.launch_annotate_genome(
         object_id=body.object_id,
         owner=owner,
+        resource_override=body.resource_override,
+    )
+    return JobOut.of(job)
+
+
+class TransferAnnotationRequest(BaseModel):
+    object_id: PydanticObjectId
+    # Optional: the reference sequence the annotation was built against. When
+    # the project has exactly one, the launch auto-picks it.
+    reference_id: PydanticObjectId | None = None
+    resource_override: bool = False
+
+
+@router.post("/transfer-annotation", response_model=JobOut, status_code=status.HTTP_201_CREATED)
+async def launch_transfer_annotation_route(
+    body: TransferAnnotationRequest, owner: OwnerDep
+) -> JobOut:
+    """Queue a Liftoff annotation transfer for one eukaryotic assembly.
+
+    Lifts an existing GFF3/GTF annotation (resolved from the project) onto the
+    target assembly, producing a new ANNOTATION object via the standard ingest
+    path."""
+    job = await pipeline_service.launch_transfer_annotation(
+        object_id=body.object_id,
+        owner=owner,
+        reference_id=body.reference_id,
         resource_override=body.resource_override,
     )
     return JobOut.of(job)

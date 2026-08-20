@@ -226,7 +226,6 @@ def build_preprocess_card(obj) -> SuggestionCard | None:
         },
     )
 
-
 @dataclass(frozen=True)
 class ReferenceChoice:
     """Which reference the align card would use, or why it cannot."""
@@ -1039,6 +1038,63 @@ def build_annotate_genome_card(obj) -> SuggestionCard | None:
         status=CardStatus.AVAILABLE,
         launch={
             "endpoint": "/pipelines/annotate-genome",
+            "body": {"object_id": str(obj.id)},
+        },
+    )
+
+
+def build_transfer_annotation_card(obj, reference_annotations) -> SuggestionCard | None:
+    """Transfer an existing annotation onto a eukaryotic assembly with Liftoff.
+
+    The eukaryotic counterpart to Bakta: instead of predicting genes, it lifts
+    an annotation the user already trusts (a GFF3/GTF in the project) onto this
+    assembly via alignment. Offered on any FASTA assembly once a reference
+    annotation exists in the project; the user judges whether the annotation's
+    source organism is close enough to transfer.
+    """
+    if obj.format.kind is not FormatKind.FASTA:
+        return None
+    if obj.role in pipeline_service.COMPLETENESS_EXCLUDED_ROLES:
+        return None
+
+    organism = obj.metadata.get("organism") if obj.metadata else None
+    if not is_eukaryotic(organism):
+        return None
+
+    description = (
+        "Lift an existing gene annotation (GFF3/GTF) from a reference "
+        "onto this eukaryotic assembly with Liftoff."
+    )
+    if not reference_annotations:
+        return SuggestionCard(
+            kind="transfer_annotation",
+            category="TRANSFER_ANNOTATION",
+            title="Transfer annotation",
+            description=description,
+            status=CardStatus.UNAVAILABLE,
+            reason="No reference annotation in this project to transfer.",
+        )
+
+    liftoff_tool = tools.liftoff()
+    if not liftoff_tool.available:
+        return SuggestionCard(
+            kind="transfer_annotation",
+            category="TRANSFER_ANNOTATION",
+            title="Transfer annotation",
+            description=description,
+            status=CardStatus.UNAVAILABLE,
+            reason=liftoff_tool.error or "Liftoff is unavailable.",
+        )
+
+    return SuggestionCard(
+        kind="transfer_annotation",
+        category="TRANSFER_ANNOTATION",
+        title="Transfer annotation",
+        description=description,
+        why="Transferring a reference annotation onto this assembly with Liftoff.",
+        status=CardStatus.AVAILABLE,
+        launch={
+            "endpoint": "/pipelines/transfer-annotation",
             "body": {"object_id": str(obj.id)},
         },
     )
@@ -2517,7 +2573,6 @@ def build_coverage_card(obj) -> SuggestionCard | None:
         },
     )
 
-
 def build_salmon_quantify_card(obj, transcriptomes) -> SuggestionCard | None:
     """Alignment-free transcript quantification for RNA-seq reads.
 
@@ -2706,6 +2761,7 @@ class _Prefetched:
     assembly_alignments: object | None
     continuity_candidates: object | None
     transcriptomes: list[DataObject]
+    reference_annotations: list[DataObject] = field(default_factory=list)
     sibling_snf_ids: list[str] | None = None
     # How many of the project's objects carry QC output MultiQC can parse.
     # An int rather than a list: the only question the card asks is "are
@@ -2825,6 +2881,12 @@ CARD_BUILDERS: tuple[tuple[str, object], ...] = (
         "transcript_assembly",
         lambda obj, ctx: build_transcript_assembly_card(obj, ctx.annotations),
     ),
+    (
+        "transfer_annotation",
+        lambda obj, ctx: build_transfer_annotation_card(
+            obj, ctx.reference_annotations
+        ),
+    ),
     # Last deliberately. It is the only card whose subject is the whole
     # project rather than the file being looked at, so it reads as a
     # footer to the per-file actions above it rather than competing with
@@ -2880,6 +2942,16 @@ async def suggestions_for(obj) -> list[dict]:
         # BAM only: the quantify card is the sole consumer, so listing a
         # project's annotations on a FASTQ click would discard the result.
         annotations = await pipeline_service.annotations_for_project(
+            obj.project_id, owner=obj.owner
+        )
+
+    reference_annotations: list[DataObject] = []
+    if obj.format.kind is FormatKind.FASTA:
+        # The transfer card lifts an existing annotation onto this assembly,
+        # so it needs every GFF3/GTF in the project to choose from (or to
+        # report "none available"). Listed for FASTA only -- the sole
+        # consumer is build_transfer_annotation_card.
+        reference_annotations = await pipeline_service.annotations_for_project(
             obj.project_id, owner=obj.owner
         )
 
@@ -3093,6 +3165,7 @@ async def suggestions_for(obj) -> list[dict]:
         sibling_snf_ids=sibling_snf_ids,
         qc_summarizable=qc_summarizable,
         phase_inputs=phase_inputs,
+        reference_annotations=reference_annotations,
     )
 
     cards: list[dict] = []

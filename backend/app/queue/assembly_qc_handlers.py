@@ -24,6 +24,7 @@ from app.pipelines import (
     completeness_runner,
     craq_runner,
     gci_runner,
+    liftoff_runner,
     merqury_runner,
     meryl_runner,
     polypolish_runner,
@@ -1430,4 +1431,75 @@ def annotate_genome(ctx: JobContext) -> dict:
         "job_id": ctx.job_id,
         "output_dir": str(out_dir),
         "facts": facts,
+    }
+
+
+@handler(
+    "transfer_annotation",
+    mode=HandlerMode.SUBPROCESS,
+    job_class=JobClass.COMPUTE,
+    resources=JobResources(cpu=8, mem_mb=16384, io=IoClass.HEAVY),
+    max_attempts=1,
+)
+def transfer_annotation(ctx: JobContext) -> dict:
+    """Transfer a reference annotation onto a target assembly with Liftoff.
+
+    Lifts the GFF3/GTF annotation supplied as ``reference_annotation`` from its
+    own reference sequence onto the target assembly by aligning features with
+    minimap2 and projecting them. The lifted GFF3 is the single output; the
+    applier ingests it as a new ANNOTATION object deriving from the target.
+    """
+    liftoff_tool = tools.require(tools.liftoff())
+    work = _prepare_workdir(ctx, "transfer")
+    log_path = settings.logs_dir / f"{ctx.job_id}.log"
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+
+    target = _resolve_input(ctx.payload, "target")
+    reference = _resolve_input(ctx.payload, "reference")
+    reference_annotation = _resolve_input(ctx.payload, "annotation")
+    threads = max(1, int(ctx.payload.get("threads") or 4))
+    copies = bool(ctx.payload.get("copies", True))
+
+    out_gff = work / f"{target.stem}.liftoff.gff3"
+    unmapped_gff = work / f"{target.stem}.liftoff.unmapped.gff3"
+
+    ctx.progress(phase="transferring", pct=None, message="running Liftoff annotation transfer")
+    ctx.extend_lease(_ANNOTATION_LEASE_SECONDS)
+
+    log.info(
+        "liftoff_transfer_started",
+        job_id=ctx.job_id,
+        target=str(target),
+        reference=str(reference),
+        annotation=str(reference_annotation),
+    )
+
+    cmd = liftoff_runner.build_liftoff_command(
+        liftoff_path=liftoff_tool.path,
+        target=target,
+        reference=reference,
+        reference_annotation=reference_annotation,
+        out_gff=out_gff,
+        threads=threads,
+        copies=copies,
+        unmapped_gff=unmapped_gff,
+    )
+    code = run_subprocess(ctx, cmd, log_path=str(log_path))
+    if code != 0:
+        raise _failure(code, log_path, "liftoff")
+
+    ctx.progress(phase="done", pct=1.0, message="annotation transfer complete")
+    log.info(
+        "liftoff_transfer_finished",
+        job_id=ctx.job_id,
+        output=str(out_gff),
+    )
+
+    return {
+        "object_id": ctx.payload.get("object_id"),
+        "job_id": ctx.job_id,
+        "output": {
+            "tmp_path": str(out_gff),
+            "name": f"{ctx.payload.get('target_name', target.stem)}_liftoff.gff3",
+        },
     }

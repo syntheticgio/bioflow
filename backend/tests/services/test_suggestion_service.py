@@ -106,6 +106,7 @@ class _FakeTool:
         error: str | None = None,
     ):
         self.available = available
+        self.error = None
         self.version = version
         # Real `tools.Tool` carries this on every instance, and several
         # cards read `tool.error or "<fallback>"` when building an
@@ -2255,6 +2256,7 @@ class TestScaffoldCardOrchestration:
                         name="self.fasta",
                         role=ObjectRole.REFERENCE,
                         format=SimpleNamespace(kind=FormatKind.FASTA),
+                        status=ObjectStatus.READY,
                     )
                 ],
             ),
@@ -2289,12 +2291,14 @@ class TestScaffoldCardOrchestration:
                         name="self.fasta",
                         role=ObjectRole.REFERENCE,
                         format=SimpleNamespace(kind=FormatKind.FASTA),
+                        status=ObjectStatus.READY,
                     ),
                     SimpleNamespace(
                         id="ref2",
                         name="real_reference.fasta",
                         role=ObjectRole.REFERENCE,
                         format=SimpleNamespace(kind=FormatKind.FASTA),
+                        status=ObjectStatus.READY,
                     ),
                 ],
             ),
@@ -2337,6 +2341,7 @@ class TestMisassemblyCardOrchestration:
                         name="self.fasta",
                         role=ObjectRole.REFERENCE,
                         format=SimpleNamespace(kind=FormatKind.FASTA),
+                        status=ObjectStatus.READY,
                     )
                 ],
             ),
@@ -2368,12 +2373,14 @@ class TestMisassemblyCardOrchestration:
                         name="self.fasta",
                         role=ObjectRole.REFERENCE,
                         format=SimpleNamespace(kind=FormatKind.FASTA),
+                        status=ObjectStatus.READY,
                     ),
                     SimpleNamespace(
                         id="ref2",
                         name="real_reference.fasta",
                         role=ObjectRole.REFERENCE,
                         format=SimpleNamespace(kind=FormatKind.FASTA),
+                        status=ObjectStatus.READY,
                     ),
                 ],
             ),
@@ -2417,6 +2424,7 @@ class TestSyntenyCardOrchestration:
                         role=ObjectRole.REFERENCE,
                         format=SimpleNamespace(kind=FormatKind.FASTA),
                         blob_sha256="digest-draft1",
+                        status=ObjectStatus.READY,
                     )
                 ],
             ),
@@ -2449,12 +2457,14 @@ class TestSyntenyCardOrchestration:
                         role=ObjectRole.REFERENCE,
                         format=SimpleNamespace(kind=FormatKind.FASTA),
                         blob_sha256="digest-draft1",
+                        status=ObjectStatus.READY,
                     ),
                     SimpleNamespace(
                         id="ref2",
                         name="real_reference.fasta",
                         role=ObjectRole.REFERENCE,
                         format=SimpleNamespace(kind=FormatKind.FASTA),
+                        status=ObjectStatus.READY,
                         blob_sha256="digest-ref2",
                     ),
                 ],
@@ -2470,6 +2480,119 @@ class TestSyntenyCardOrchestration:
         synteny = next(c for c in cards if c["kind"] == "synteny")
         assert synteny["status"] == "available"
         assert synteny["launch"]["body"]["reference_object_id"] == "ref2"
+
+
+class TestTransferAnnotationCard:
+    """The eukaryote annotation-transfer card (Liftoff): offered on a FASTA
+    assembly once a GFF3/GTF annotation exists in the project, gated on
+    organism kind (eukaryotic, not bacterial)."""
+
+    async def test_available_when_annotation_present(self):
+        from types import SimpleNamespace
+
+        obj = _fake_obj(kind=FormatKind.FASTA, obj_id="asm1")
+        obj.role = None
+        with (
+            patch("app.services.suggestion_service.tools.liftoff",
+                  return_value=_FakeTool(True)),
+            patch(
+                "app.services.object_service.list_objects",
+                return_value=[
+                    SimpleNamespace(
+                        id="ann1",
+                        name="ref.gff3",
+                        role=None,
+                        format=SimpleNamespace(kind=FormatKind.GFF),
+                        status=ObjectStatus.READY,
+                    )
+                ],
+            ),
+            patch("app.services.pipeline_service.read_chemistry_for_alignment",
+                  return_value=None),
+            patch("app.services.pipeline_service.resolve_annotation_inputs",
+                  return_value=None),
+            patch("app.services.prior_runs._runs_touching", return_value=[]),
+            patch("app.services.running_now._active_jobs_for", return_value=[]),
+        ):
+            cards = await suggestions_for(obj)
+        card = next(c for c in cards if c["kind"] == "transfer_annotation")
+        assert card["status"] == "available"
+        assert card["launch"]["endpoint"] == "/pipelines/transfer-annotation"
+        assert card["launch"]["body"]["object_id"] == "asm1"
+
+    async def test_unavailable_when_no_annotation(self):
+        obj = _fake_obj(kind=FormatKind.FASTA, obj_id="asm1")
+        obj.role = None
+        with (
+            patch("app.services.suggestion_service.tools.liftoff",
+                  return_value=_FakeTool(True)),
+            patch("app.services.object_service.list_objects",
+                  return_value=[]),
+            patch("app.services.pipeline_service.read_chemistry_for_alignment",
+                  return_value=None),
+            patch("app.services.pipeline_service.resolve_annotation_inputs",
+                  return_value=None),
+            patch("app.services.prior_runs._runs_touching", return_value=[]),
+            patch("app.services.running_now._active_jobs_for", return_value=[]),
+        ):
+            cards = await suggestions_for(obj)
+        card = next(c for c in cards if c["kind"] == "transfer_annotation")
+        assert card["status"] == "unavailable"
+        assert "No reference annotation" in card["reason"]
+
+    async def test_not_offered_for_prokaryote(self):
+        obj = _fake_obj(
+            kind=FormatKind.FASTA,
+            obj_id="asm1",
+            metadata={"organism": "Escherichia coli"},
+        )
+        obj.role = None
+        with (
+            patch("app.services.suggestion_service.tools.liftoff",
+                  return_value=_FakeTool(True)),
+            patch("app.services.object_service.list_objects",
+                  return_value=[]),
+            patch("app.services.pipeline_service.read_chemistry_for_alignment",
+                  return_value=None),
+            patch("app.services.pipeline_service.resolve_annotation_inputs",
+                  return_value=None),
+            patch("app.services.prior_runs._runs_touching", return_value=[]),
+            patch("app.services.running_now._active_jobs_for", return_value=[]),
+        ):
+            cards = await suggestions_for(obj)
+        assert not any(c["kind"] == "transfer_annotation" for c in cards)
+
+    async def test_unavailable_when_liftoff_missing(self):
+        from types import SimpleNamespace
+
+        obj = _fake_obj(kind=FormatKind.FASTA, obj_id="asm1")
+        obj.role = None
+        with (
+            patch("app.services.suggestion_service.tools.liftoff",
+                  return_value=_FakeTool(False)),
+            patch(
+                "app.services.object_service.list_objects",
+                return_value=[
+                    SimpleNamespace(
+                        id="ann1",
+                        name="ref.gff3",
+                        role=None,
+                        format=SimpleNamespace(kind=FormatKind.GFF),
+                        status=ObjectStatus.READY,
+                    )
+                ],
+            ),
+            patch("app.services.pipeline_service.read_chemistry_for_alignment",
+                  return_value=None),
+            patch("app.services.pipeline_service.resolve_annotation_inputs",
+                  return_value=None),
+            patch("app.services.prior_runs._runs_touching", return_value=[]),
+            patch("app.services.running_now._active_jobs_for", return_value=[]),
+        ):
+            cards = await suggestions_for(obj)
+        card = next(c for c in cards if c["kind"] == "transfer_annotation")
+        assert card["status"] == "unavailable"
+        assert "Liftoff" in card["reason"]
 
 
 def _assembly_object(obj_id="asm1"):

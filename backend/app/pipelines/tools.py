@@ -653,6 +653,14 @@ def bakta() -> Tool:
     return _probe("bakta", settings.bakta_path, ["--version"])
 
 
+def liftoff() -> Tool:
+    # Needs no database of its own -- it aligns an existing annotation onto a
+    # target assembly with minimap2, which is already bundled. This probe
+    # therefore checks only the binary, exactly like every other tool whose
+    # data is the user's own files rather than a fetched reference set.
+    return _probe("liftoff", settings.liftoff_path, ["--version"])
+
+
 @lru_cache(maxsize=1)
 def kraken2() -> Tool:
     """k-mer taxonomic classifier; database delivered on demand, not bundled."""
@@ -2721,6 +2729,41 @@ TOOL_META: dict[str, ToolMeta] = {
         # TODO(#214): flip to Delivery.ON_DEMAND_IMAGE once the Bakta image is
         # built and tagged -- the database is several GB and should not be in
         # the base image. image and download_bytes must be filled in together.
+        delivery=Delivery.BUNDLED,
+    ),
+    "liftoff": ToolMeta(
+        pipelines=(PipelineType.ANNOTATION,),
+        one_liner="Transfer an existing gene annotation onto a new assembly",
+        summary=(
+            "Liftoff transfers gene annotations from a reference GFF3 or GTF "
+            "onto a target assembly by mapping the annotated features with "
+            "minimap2 and projecting them into the target's coordinates. It is "
+            "the eukaryotic counterpart to Bakta: where Bakta *predicts* genes "
+            "on a bacterial genome, Liftoff *moves* an annotation you already "
+            "trust onto a related but re-assembled genome."
+        ),
+        strengths=(
+            "Reuses an existing, curated annotation instead of predicting de novo",
+            "Handles fragmented targets via minimap2's split mappings",
+            "-copies places multicopy genes independently, not as one locus",
+            "Reports unmappable features to a separate GFF for inspection",
+        ),
+        homepage="https://github.com/agdawe/liftoff",
+        repository="https://github.com/agdawe/liftoff",
+        citation=(
+            "Shumate A, Salzberg SL. Liftoff: accurate mapping of gene "
+            "annotations. Bioinformatics. 2021;37(12):1639-1643."
+        ),
+        citation_url="https://doi.org/10.1093/bioinformatics/btaa1016",
+        license="MIT",
+        usage=(
+            "Takes a target assembly, a reference sequence, and that reference's "
+            "GFF3/GTF annotation, and writes a lifted annotation (GFF3) for the "
+            "target. Offered for eukaryotic assemblies whenever a GFF3/GTF "
+            "annotation object exists in the project; the reference is the one "
+            "that annotation is built against. Bundled in the image, so no "
+            "database is fetched."
+        ),
         delivery=Delivery.BUNDLED,
     ),
     "bedtools": ToolMeta(

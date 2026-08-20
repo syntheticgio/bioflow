@@ -157,6 +157,7 @@ _STEP_VERBS: dict[str, str] = {
     "download_uniprot": "downloaded from UniProt",
     "download_lineage": "downloaded",
     "export_annotation_subset": "filtered to a subset of",
+    "transfer_annotation": "transferred annotation from",
     "materialize_annotation_edits": "edited with",
     "extract_genbank_sequence": "extracted the sequence from",
 }

@@ -169,6 +169,15 @@ RUN apt-get update \
 # Python's stdlib gzip rather than failing an ingest, so this package is a
 # performance and seekability dependency, not a hard one.
 
+# --- Filtlong ---------------------------------------------------------------
+#
+# Filtlong is a single C++ binary with no Debian package (verified 2026-08-17).
+# Installed from the upstream GitHub release tarball -- a self-contained binary
+# with no runtime dependencies beyond the C++ standard library already present.
+RUN curl -fsSL \
+    "https://github.com/rrwick/Filtlong/releases/download/v0.2.1/Filtlong_linux_x86_64.tar.gz" \
+    | tar -xz -C /usr/local/bin --strip-components=1 Filtlong
+
 # --- flye-samtools shim -----------------------------------------------------
 #
 # Flye 2.9.5 upstream vendors its own samtools build and invokes it as
@@ -486,6 +495,14 @@ RUN pip install --no-cache-dir pydeseq2==0.5.4
 # image -- networkx, numpy and pysam already arrived via NanoPlot/PyDESeq2
 # and pysam's own top-level dependency.
 RUN pip install --no-cache-dir ragtag==2.1.0
+
+# Liftoff, eukaryotic annotation transfer (lifts an existing GFF3/GTF onto a
+# related assembly). Pure Python on PyPI and its only external binary is
+# minimap2, already installed above for both architectures, so pip is correct
+# here and there is no arm64 build problem. Pinned because a transferred
+# annotation is only comparable to another when the same Liftoff version made
+# both. Networkx and numpy arrive via the PyDESeq2/NanoPlot stack above.
+RUN pip install --no-cache-dir liftoff==1.7.2
 
 # Sniffles2, the long-read structural variant caller. Its edlib dependency
 # comes from the wheel built in the edlib-build stage above -- see there for
