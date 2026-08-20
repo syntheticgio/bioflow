@@ -7289,6 +7289,56 @@ async def launch_misassembly_qc(
     return job
 
 
+async def launch_multiqc_report(
+    *,
+    project_id: PydanticObjectId,
+    owner: str,
+) -> Job:
+    """Queue a MultiQC run: one aggregate QC report for a whole project.
+
+    The only launcher here scoped to a project rather than an object. There
+    is no `object_id` because the report summarises many objects and belongs
+    to none of them -- see `queue/multiqc_handlers.py`.
+
+    Read-only, and cheaper than every other pipeline launcher: MultiQC
+    parses QC output other jobs already wrote, re-running no tool and
+    re-reading no sequence data. Measured at ~1.6s over four tools' output,
+    which is why there is no `refuse_if_over_budget` call and no
+    `JobResources` declaration -- this is not a COMPUTE job competing for
+    the admission budget, it is a file-parsing pass.
+
+    The dedup key is the project, so pressing the card twice while a report
+    is building coalesces rather than queueing a second identical run.
+    """
+    from app.queue import queue
+
+    tool = tools.require(tools.multiqc())
+
+    job = await queue.enqueue(
+        "multiqc_report",
+        owner=owner,
+        payload={"project_id": str(project_id), "owner": owner},
+        job_class=JobClass.USER_BACKGROUND,
+        max_attempts=1,
+        dedup_key=f"multiqc_report:{project_id}",
+        project_id=project_id,
+    )
+    if job is None:
+        raise ConflictError(
+            "A QC summary report is already queued or running for this "
+            "project",
+            details={"project_id": str(project_id)},
+        )
+
+    log.info(
+        "multiqc_report_launched",
+        job_id=str(job.id),
+        project_id=str(project_id),
+        tool_version=tool.version,
+    )
+    return job
+
+
 async def launch_synteny(
     *,
     draft_object_id: PydanticObjectId,

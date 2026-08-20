@@ -141,6 +141,40 @@ def stage_multiqc_inputs(objects: list, stage_dir: Path) -> int:
     return contributing
 
 
+def object_contributes(obj) -> bool:
+    """Whether one object carries QC output MultiQC could parse.
+
+    The card's gate and the handler's staging must agree on this, or a card
+    offers a report the job then refuses to build. Sharing one predicate is
+    what keeps them from drifting -- the alternative is the same rule
+    written twice, in two modules, with only a user's confusion to report
+    the disagreement.
+
+    Checks disk rather than facts alone: a fact naming a file that has since
+    been offloaded or cleaned up would otherwise count toward a report that
+    cannot include it.
+    """
+    report_dir = settings.qc_reports_dir / str(obj.id)
+    if not report_dir.is_dir():
+        return False
+
+    for fact_key, rel in RETAINED_FACT_FILES:
+        if (obj.facts or {}).get(fact_key) and (report_dir / rel).is_file():
+            return True
+
+    return any(report_dir.glob(FASTQC_GLOB))
+
+
+def count_summarizable(objects: list) -> int:
+    """How many of `objects` carry QC output worth aggregating.
+
+    Read by the Actions-tab card to decide whether to offer a report. The
+    handler re-checks the same condition while staging rather than trusting
+    this count, since the two run at different times.
+    """
+    return sum(1 for obj in objects if object_contributes(obj))
+
+
 @handler("multiqc_report", mode=HandlerMode.ASYNC, job_class=JobClass.USER_BACKGROUND)
 async def generate_multiqc_report(ctx: JobContext) -> dict:
     """Build one project's aggregate QC report.
