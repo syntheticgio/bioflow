@@ -738,7 +738,9 @@ export const METRIC_INFO: Record<string, MetricInfo> = {
   "ui.vcf_substitutions": {
     term: "Substitution types",
     description:
-      "Counts for each of the twelve possible base changes. The pairs that make up Ti/Tv dominate a healthy set; an unusual excess of C→A is the classic signature of oxidative damage during library preparation rather than of real variation.",
+      "Counts for each of the twelve possible base changes, banded into the two categories Ti/Tv divides -- transitions (A↔G, C↔T) and transversions -- each with its subtotal, so the class driving an unusual ratio is visible without arithmetic. An unusual excess of C→A among the transversions is the classic signature of oxidative damage during library preparation rather than of real variation.",
+    computed:
+      "Subtotals are the TSTV counts behind the summary row's Ti/Tv statistic, not a sum of the rows, so they cannot drift from the ratio above them.",
   },
   "ui.vcf_filters": {
     term: "Filters",
