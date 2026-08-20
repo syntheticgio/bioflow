@@ -108,6 +108,27 @@ def render_windows_bed(windows: list[tuple[str, int, int]]) -> str:
     return "".join(f"{chrom}\t{start}\t{end}\n" for chrom, start, end in windows)
 
 
+def contig_lengths_from_fai(fai_path: Path) -> dict[str, int]:
+    """Read `{contig: length}` from a `.fai`, preserving the reference's order.
+
+    A dict rather than a list because build_windows_bed keys by name, and
+    insertion order is the .fai's own order -- which is the order mosdepth
+    reports contigs in, so windows and output stay aligned.
+    """
+    lengths: dict[str, int] = {}
+    for raw in Path(fai_path).read_text().splitlines():
+        if not raw.strip():
+            continue
+        fields = raw.split("\t")
+        if len(fields) < 2:
+            continue
+        try:
+            lengths[fields[0]] = int(fields[1])
+        except ValueError:
+            log.warning("mosdepth_fai_bad_row", path=str(fai_path), row=raw)
+    return lengths
+
+
 def parse_summary(path: Path) -> dict:
     """Parse `<prefix>.mosdepth.summary.txt`.
 

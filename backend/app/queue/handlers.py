@@ -1042,6 +1042,7 @@ from app.queue import (  # noqa: E402, F401
     feature_coverage_handlers,
     kraken_handlers,
     lineage_handlers,
+    mosdepth_handlers,
     ncbi_assembly_handlers,
     pipeline_handlers,
     prediction_handlers,
