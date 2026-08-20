@@ -75,6 +75,7 @@ import { QuantifyDialog } from "./QuantifyDialog";
 import { DifferentialExpressionDialog } from "./DifferentialExpressionDialog";
 import { VariantDialog } from "./VariantDialog";
 import { PhaseDialog } from "./PhaseDialog";
+import { FilterLongReadsDialog } from "./FilterLongReadsDialog";
 import { QcReport } from "./QcReport";
 import { TaxonomyFacts } from "./TaxonomyFacts";
 import { TrimReport } from "./TrimReport";
@@ -477,6 +478,7 @@ function ObjectDetail({ id }: { id: string }) {
   const [completenessOpen, setCompletenessOpen] = useState(false);
   const [polishLongOpen, setPolishLongOpen] = useState(false);
   const [classifyReadsOpen, setClassifyReadsOpen] = useState(false);
+  const [filterLongReadsOpen, setFilterLongReadsOpen] = useState(false);
   const [scaffoldOpen, setScaffoldOpen] = useState(false);
   const [deOpen, setDeOpen] = useState(false);
   const [phaseOpen, setPhaseOpen] = useState(false);
@@ -562,6 +564,9 @@ function ObjectDetail({ id }: { id: string }) {
         break;
       case "phase":
         setPhaseOpen(true);
+        break;
+      case "filter_long_reads":
+        setFilterLongReadsOpen(true);
         break;
       default:
         setPrefill(null);
@@ -1176,6 +1181,16 @@ function ObjectDetail({ id }: { id: string }) {
           prefill={prefill}
           onClose={() => {
             setClassifyReadsOpen(false);
+            setPrefill(null);
+          }}
+        />
+      )}
+      {filterLongReadsOpen && (
+        <FilterLongReadsDialog
+          object={obj}
+          prefill={prefill}
+          onClose={() => {
+            setFilterLongReadsOpen(false);
             setPrefill(null);
           }}
         />

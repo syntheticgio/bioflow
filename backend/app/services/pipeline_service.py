@@ -52,6 +52,7 @@ from app.pipelines import (
     de_runner,
     delly_runner,
     fastp_runner,
+    filtlong_runner,
     lineage_inference,
     modkit_runner,
     pairing,
@@ -120,6 +121,7 @@ _TRIM_PARAM_TYPES = {
     "fastp": fastp_runner.TrimParams,
     "cutadapt": cutadapt_runner.CutadaptParams,
     "trimmomatic": trimmomatic_runner.TrimmomaticParams,
+    "filtlong": filtlong_runner.FiltlongParams,
 }
 
 # Tools whose *default* length/quality filters were tuned for Illumina reads
@@ -165,6 +167,7 @@ def _trim_tool(tool: str):
         "fastp": tools.fastp,
         "cutadapt": tools.cutadapt,
         "trimmomatic": tools.trimmomatic,
+        "filtlong": tools.filtlong,
     }[tool]()
 
 
@@ -239,6 +242,106 @@ def _check_fastq_ready(obj: DataObject, *, verb: str = "trim") -> None:
             f"{obj.name!r} is {obj.format.kind.value}, not FASTQ reads",
             details={"object_id": str(obj.id), "kind": obj.format.kind.value},
         )
+
+
+async def launch_filter_long_reads(
+    *,
+    object_id: PydanticObjectId,
+    owner: str,
+    mate_object_id: PydanticObjectId | None = None,
+    params: dict | None = None,
+):
+    """Queue a Filtlong long-read filter run.
+
+    A single tool for a single node type -- no `tool` dispatch, unlike trim.
+    The optional mate is a short-read set used for quality weighting via
+    Filtlong's --short_read1/2 flags, not a second stream to filter.
+
+    Owner gates the input lookup, not merely labels the output, for the same
+    read-leak reason launch_trim enforces it.
+    """
+    from app.queue import queue
+    from app.services import object_service
+
+    tools.require(tools.filtlong())
+
+    obj = await object_service.get_object(object_id, owner=owner)
+    _check_fastq_ready(obj)
+
+    mate: DataObject | None = None
+    if mate_object_id is not None:
+        mate = await object_service.get_object(mate_object_id, owner=owner)
+        _check_fastq_ready(mate)
+
+    r1_digest, r1_path = await _resolve_readable(obj)
+    params_cls = filtlong_runner.FiltlongParams
+    merged_params = params_cls.from_dict(
+        {"threads": settings.pipeline_default_threads, **(params or {})}
+    ).as_dict()
+
+    payload: dict = {
+        "object_id": str(obj.id),
+        "project_id": str(obj.project_id),
+        "r1_name": obj.name,
+        "tool": "filtlong",
+        "params": merged_params,
+    }
+    if r1_digest:
+        payload["r1_sha256"] = r1_digest
+    if r1_path:
+        payload["r1_path"] = r1_path
+    if mate is not None:
+        r2_digest, r2_path = await _resolve_readable(mate)
+        payload["mate_object_id"] = str(mate.id)
+        payload["r2_name"] = mate.name
+        if r2_digest:
+            payload["r2_sha256"] = r2_digest
+        if r2_path:
+            payload["r2_path"] = r2_path
+
+    dedup_key = "filter_long_reads:" + ":".join(
+        [str(obj.id), str(mate.id) if mate else "-", _params_fingerprint(payload["params"])]
+    )
+
+    job = await queue.enqueue(
+        "filter_long_reads",
+        owner=owner,
+        payload=payload,
+        job_class=JobClass.COMPUTE,
+        resources=JobResources(
+            cpu=merged_params["threads"], mem_mb=2048, io=IoClass.HEAVY
+        ),
+        max_attempts=2,
+        dedup_key=dedup_key,
+        project_id=obj.project_id,
+        object_id=obj.id,
+    )
+    if job is None:
+        raise ConflictError(
+            "An identical filter-long-reads run is already queued or running",
+            details={"object_id": str(obj.id)},
+        )
+
+    run = await run_service.create_run(
+        kind=RunKind.FILTER_LONG_READS,
+        project_id=obj.project_id,
+        label=f"Filter {obj.name}",
+        inputs=_trim_inputs(obj, mate),
+        params=payload["params"],
+        owner=owner,
+        tool="filtlong",
+    )
+    await run_service.link_job(run.id, job.id, RunJobRole.FILTER_LONG_READS)
+
+    log.info(
+        "filter_long_reads_launched",
+        job_id=str(job.id),
+        run_id=str(run.id),
+        object_id=str(obj.id),
+        mate_id=str(mate.id) if mate else None,
+        threads=payload["params"]["threads"],
+    )
+    return job
 
 
 async def launch_trim(

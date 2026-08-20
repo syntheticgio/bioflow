@@ -26,6 +26,7 @@ from app.services.suggestion_service import (
     build_classify_reads_card,
     build_coverage_card,
     build_feature_coverage_card,
+    build_filter_long_reads_card,
     build_gc_bias_card,
     build_merge_structural_variants_card,
     build_methylation_card,
@@ -218,6 +219,66 @@ class TestPreprocessCard:
             )
         assert card.status is CardStatus.AVAILABLE
         assert card.description == "Adapter trim and length filter."
+
+
+class TestFilterLongReadsCard:
+    def test_not_offered_for_a_bam(self):
+        assert build_filter_long_reads_card(_fake_obj(kind=FormatKind.BAM)) is None
+
+    def test_not_offered_for_short_read_chemistry(self):
+        """Short reads have no adapters to trim but also no length/quality
+        distribution wide enough for Filtlong to be meaningful -- the card
+        stays out of the short-read path entirely."""
+        assert build_filter_long_reads_card(_fake_obj()) is None
+
+    def test_not_offered_for_unrecognised_chemistry(self):
+        assert (
+            build_filter_long_reads_card(
+                _fake_obj(facts={"qc_read_chemistry": "martian_reads"})
+            )
+            is None
+        )
+
+    def test_available_for_ont_long_reads(self):
+        with patch("app.services.suggestion_service.tools.filtlong",
+                   return_value=_FakeTool(True)):
+            card = build_filter_long_reads_card(
+                _fake_obj(facts={"qc_read_chemistry": "ont_simplex"})
+            )
+        assert card.status is CardStatus.AVAILABLE
+        assert card.launch["endpoint"] == "/pipelines/filter-long-reads"
+        assert card.launch["body"]["object_id"] == "abc123"
+        assert "params" in card.launch["body"]
+
+    def test_available_for_hifi_long_reads(self):
+        with patch("app.services.suggestion_service.tools.filtlong",
+                   return_value=_FakeTool(True)):
+            card = build_filter_long_reads_card(
+                _fake_obj(facts={"qc_read_chemistry": "hifi"})
+            )
+        assert card.status is CardStatus.AVAILABLE
+        assert card.launch["endpoint"] == "/pipelines/filter-long-reads"
+
+    def test_unavailable_when_filtlong_is_not_installed(self):
+        with patch("app.services.suggestion_service.tools.filtlong",
+                   return_value=_FakeTool(False)):
+            card = build_filter_long_reads_card(
+                _fake_obj(facts={"qc_read_chemistry": "ont_simplex"})
+            )
+        assert card.status is CardStatus.UNAVAILABLE
+        assert card.launch is None
+        assert "Filtlong" in card.reason
+
+    def test_unavailable_card_still_describes_what_it_would_do(self):
+        with patch("app.services.suggestion_service.tools.filtlong",
+                   return_value=_FakeTool(False)):
+            card = build_filter_long_reads_card(
+                _fake_obj(facts={"qc_read_chemistry": "ont_simplex"})
+            )
+        assert card.status is CardStatus.UNAVAILABLE
+        assert "Filtlong" in card.title
+        assert card.description == "Length and quality filtering for long reads."
+        assert card.launch is None
 
 
 def _ref(object_id: str, name: str):
@@ -3409,6 +3470,7 @@ class TestCardBuilderRegistry:
             "completeness",
             "polish_long",
             "classify_reads",
+            "filter_long_reads",
             "phase",
         }
 

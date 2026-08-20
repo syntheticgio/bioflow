@@ -324,6 +324,7 @@ class TestSerialization:
             # result's provenance, and the panel is where a user reads it.
             "pydeseq2",
             "snpeff",
+            "filtlong",
         }
 
 
@@ -404,6 +405,30 @@ class TestCraqProbe:
     def test_craq_is_documented_and_probeable(self):
         assert "craq" in tools.TOOL_META
         meta = tools.TOOL_META["craq"]
+        assert meta.homepage
+        assert meta.citation
+        assert meta.license
+        assert meta.usage
+
+
+class TestFiltlongProbe:
+    def test_filtlong_probes(self):
+        tool = tools.filtlong()
+        assert tool.name == "filtlong"
+        assert isinstance(tool.available, bool)
+
+    def test_filtlong_is_a_trim_tool(self):
+        assert tools.PipelineType.TRIM in tools.TOOL_META["filtlong"].pipelines
+
+    def test_filtlong_is_runnable(self):
+        assert tools.TOOL_META["filtlong"].runnable
+
+    def test_filtlong_is_in_all_tools(self):
+        assert "filtlong" in {t.name for t in tools.all_tools()}
+
+    def test_filtlong_is_documented_and_probeable(self):
+        assert "filtlong" in tools.TOOL_META
+        meta = tools.TOOL_META["filtlong"]
         assert meta.homepage
         assert meta.citation
         assert meta.license

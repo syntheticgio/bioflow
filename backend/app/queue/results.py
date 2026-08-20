@@ -3793,8 +3793,8 @@ async def _apply_gc_bias(result: dict, *, owner: str) -> None:
 
 _APPLIERS = {
     "ingest_headers": _apply_ingest_headers,
-    "trim_reads": _apply_trim_reads,
     "filter_long_reads": _apply_filter_long_reads,
+    "trim_reads": _apply_trim_reads,
     "run_qc": _apply_run_qc,
     "summarize_object": _apply_summarize_object,
     "summarize_de_results": _apply_summarize_de_results,

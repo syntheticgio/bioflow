@@ -227,6 +227,54 @@ def build_preprocess_card(obj) -> SuggestionCard | None:
         },
     )
 
+
+def build_filter_long_reads_card(obj) -> SuggestionCard | None:
+    """Length and quality filtering for long reads via Filtlong.
+
+    Shown only for long-read chemistry (Nanopore, PacBio). Short reads have
+    nothing to filter -- fastp's trim card already handles them -- so this card
+    stays completely out of the short-read path. Filtlong is the only tool for
+    this card: the /pipelines/filter-long-reads endpoint dispatches only to
+    Filtlong, so a fastp fallback here would show an available button that
+    fails to launch.
+    """
+    if obj.format.kind is not FormatKind.FASTQ:
+        return None
+
+    chemistry = pipeline_service.read_chemistry(obj)
+    if not _is_long_read(chemistry):
+        return None
+
+    filtlong = tools.filtlong()
+
+    if not filtlong.available:
+        return SuggestionCard(
+            kind="filter_long_reads",
+            category="PREPROCESS",
+            title="Filter long reads -- Filtlong",
+            description="Length and quality filtering for long reads.",
+            status=CardStatus.UNAVAILABLE,
+            reason="Filtlong is not installed.",
+        )
+
+    return SuggestionCard(
+        kind="filter_long_reads",
+        category="PREPROCESS",
+        title="Filter long reads -- Filtlong",
+        description="Length and quality filtering for long reads.",
+        why="Long reads carry no short-read adapters to trim; length and "
+        "quality filtering is the primary curation step.",
+        status=CardStatus.AVAILABLE,
+        launch={
+            "endpoint": "/pipelines/filter-long-reads",
+            "body": {
+                "object_id": str(obj.id),
+                "params": pipeline_service.default_params("filtlong"),
+            },
+        },
+    )
+
+
 @dataclass(frozen=True)
 class ReferenceChoice:
     """Which reference the align card would use, or why it cannot."""
@@ -2980,6 +3028,7 @@ class _Prefetched:
 # request-shape knowledge `PipelineSuggestions` is deliberately kept without.
 _CONFIGURE_DIALOGS: dict[str, str] = {
     "preprocess": "trim",
+    "filter_long_reads": "filter_long_reads",
     "align": "align",
     "variants": "variant",
     "annotate": "annotation",
@@ -2999,6 +3048,7 @@ _CONFIGURE_DIALOGS: dict[str, str] = {
 
 CARD_BUILDERS: tuple[tuple[str, object], ...] = (
     ("preprocess", lambda obj, ctx: build_preprocess_card(obj)),
+    ("filter_long_reads", lambda obj, ctx: build_filter_long_reads_card(obj)),
     ("align", lambda obj, ctx: build_align_card(obj, ctx.references)),
     ("variants", lambda obj, ctx: build_variants_card(obj, ctx.chemistry)),
     (

@@ -24,6 +24,13 @@ from app.models.base import TimestampedDocument
 class RunKind(StrEnum):
     ALIGNMENT = "alignment"
     TRIM = "trim"
+    # Long-read length/quality filtering. Separate from TRIM because RunKind is a
+    # display and grouping vocabulary, and "filtered long reads" reads
+    # differently from "trimmed short reads" in an activity view -- the two
+    # are conceptually distinct operations (quality/length curation vs
+    # adapter removal), and conflating them would mislabel one node type as
+    # the other.
+    FILTER_LONG_READS = "filter_long_reads"
     SRA_DOWNLOAD = "sra_download"
     VARIANT_CALLING = "variant_calling"
     # Structural variants. Separate from VARIANT_CALLING because RunKind is a
@@ -203,6 +210,11 @@ class RunJobRole(StrEnum):
     INDEX = "index"
     ALIGN = "align"
     TRIM = "trim"
+    # Links to RunKind.FILTER_LONG_READS. Separate from TRIM because Filtlong
+    # filters by length/quality on long-read data, a conceptually distinct
+    # operation from adapter trimming -- the result file has role
+    # FILTERED_READS, not TRIMMED_READS.
+    FILTER_LONG_READS = "filter_long_reads"
     INDEX_BAM = "index_bam"
     INGEST = "ingest"
     DOWNLOAD = "download"

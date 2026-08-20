@@ -124,6 +124,12 @@ class ObjectRole(StrEnum):
     # trimmed output is FASTQ exactly like its input, and feeding raw reads to
     # an aligner when you meant to feed trimmed ones is a silent error.
     TRIMMED_READS = "trimmed_reads"
+    # Reads that a pipeline has already filtered by length/quality. Format
+    # alone cannot say this: filtered output is FASTQ exactly like its input,
+    # and feeding raw long reads to an assembler when you meant to feed
+    # filtered ones is a silent error -- the same hazard TRIMMED_READS exists
+    # for, just on the short-read side.
+    FILTERED_READS = "filtered_reads"
     # A BAM this pipeline produced. Format alone cannot carry it either: a BAM
     # from an alignment run and a BAM someone uploaded are the same format and
     # differ only in whether their provenance is known.

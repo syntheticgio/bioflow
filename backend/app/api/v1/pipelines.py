@@ -59,6 +59,14 @@ class TrimRequest(BaseModel):
     tool: str = "fastp"
 
 
+class FilterLongReadsRequest(BaseModel):
+    object_id: PydanticObjectId
+    # A short-read set used by Filtlong for quality weighting, not a second
+    # stream to filter.
+    mate_object_id: PydanticObjectId | None = None
+    params: dict = Field(default_factory=dict)
+
+
 class MateSuggestion(BaseModel):
     object_id: str
     name: str
@@ -187,6 +195,24 @@ async def launch_trim(body: TrimRequest, owner: OwnerDep) -> JobOut:
         params=body.params,
         paired=body.paired,
         tool=body.tool,
+    )
+    return JobOut.of(job)
+
+
+@router.post(
+    "/filter-long-reads",
+    response_model=JobOut,
+    status_code=status.HTTP_201_CREATED,
+)
+async def launch_filter_long_reads(
+    body: FilterLongReadsRequest, owner: OwnerDep
+) -> JobOut:
+    """Queue a Filtlong long-read length/quality filter run."""
+    job = await pipeline_service.launch_filter_long_reads(
+        object_id=body.object_id,
+        owner=owner,
+        mate_object_id=body.mate_object_id,
+        params=body.params,
     )
     return JobOut.of(job)
 

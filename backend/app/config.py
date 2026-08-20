@@ -148,12 +148,14 @@ class Settings(BaseSettings):
     bcftools_path: str = "bcftools"
     clair3_path: str = "run_clair3.sh"
     sniffles_path: str = "sniffles"
-    sniffles_path: str = "sniffles"
     delly_path: str = "delly"
     # Read-based variant phasing (whatshap phase / polyphase). Emits a phased
     # VCF carrying PS tags, surfaced in the variant table as phase_set. See
     # docs/superpowers/specs/2026-08-20-whatshap-variant-phasing-design.md.
     whatshap_path: str = "whatshap"
+    # Long-read length/quality filter. A single self-contained C++ binary with
+    # no dependencies, distributed as a GitHub release tarball.
+    filtlong_path: str = "filtlong"
     # From the `tabix` package. Compresses FASTQ/FASTA/VCF at ingest -- see
     # docs/superpowers/specs/2026-08-05-object-compression-design.md. Not a
     # user-selectable pipeline step, so it has no PipelineType card; the

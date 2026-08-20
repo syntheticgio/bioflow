@@ -475,6 +475,7 @@ ROLE_FIELDS: dict[ObjectRole, tuple[FieldDef, ...]] = {
 FORMAT_DERIVED_ROLES: frozenset[ObjectRole] = frozenset(
     {
         ObjectRole.TRIMMED_READS,
+        ObjectRole.FILTERED_READS,
         ObjectRole.ALIGNMENT,
         ObjectRole.VARIANTS,
         ObjectRole.ANNOTATION,

@@ -20,6 +20,7 @@ from app.pipelines import (
     contamination_stats,
     cutadapt_runner,
     fastp_runner,
+    filtlong_runner,
     nanoplot_raw,
     qc_stats,
     tile_scanner,
@@ -84,6 +85,32 @@ def trim_reads(ctx: JobContext) -> dict:
         raise PermanentError(f"trim_reads has no code path for tool {tool!r}")
 
     return run(ctx, object_id)
+
+
+@handler(
+    "filter_long_reads",
+    mode=HandlerMode.SUBPROCESS,
+    job_class=JobClass.COMPUTE,
+    resources=JobResources(cpu=4, mem_mb=2048, io=IoClass.HEAVY),
+    max_attempts=2,
+)
+def filter_long_reads(ctx: JobContext) -> dict:
+    """Filter long reads by length and quality using Filtlong.
+
+    Runs off the event loop in a worker thread, so it cannot touch the
+    database: it resolves its inputs from the payload and returns a plain dict
+    for `results._apply_filter_long_reads` to persist.
+
+    Idempotent by construction. Delivery is at-least-once, and a drain during
+    shutdown requeues a running job, so a second attempt must converge rather
+    than collide with the first. Each attempt gets its own scratch directory,
+    which is removed on entry.
+    """
+    object_id = ctx.payload.get("object_id")
+    if not object_id:
+        raise PermanentError("filter_long_reads requires an 'object_id'")
+
+    return _run_filtlong_trim(ctx, object_id)
 
 
 # The real filenames the Debian `trimmomatic` package installs under
@@ -375,6 +402,89 @@ def _run_trimmomatic_trim(ctx: JobContext, object_id: str) -> dict:
         "report": report,
         "params": params.as_dict(),
         "tool": "trimmomatic",
+        "tool_version": tool.version,
+        "html_path": None,
+        "workdir": str(work),
+    }
+
+
+def _run_filtlong_trim(ctx: JobContext, object_id: str) -> dict:
+    """Filtlong filter for long reads.
+
+    Single tool, single read stream: the payload's `tool` is always
+    "filtlong" (no dispatch needed). If a mate is given, it is used as a
+    short-read reference for quality weighting via Filtlong's
+    --short_read1/2 flags, not as a second read stream to filter.
+
+    Filtlong streams its summary to stdout. The handler redirects stdout to a
+    file which filtlong_runner.parse_report reads for the before/after stats.
+    """
+    tool = tools.require(tools.filtlong())
+
+    work = _prepare_workdir(ctx, kind="filter")
+    r1_in, r2_in, paired = _resolve_trim_inputs(ctx, work)
+
+    out_dir = work / "out"
+    out_dir.mkdir(exist_ok=True)
+
+    r1_name = filtlong_runner.output_name(
+        ctx.payload.get("r1_name") or r1_in.name
+    )
+    r1_out = out_dir / r1_name
+
+    params = filtlong_runner.FiltlongParams.from_dict(ctx.payload.get("params"))
+    report_out = work / "filtlong_report.txt"
+
+    cmd = filtlong_runner.build_command(
+        filtlong_path=tool.path,
+        r1_in=r1_in,
+        r1_out=r1_out,
+        params=params,
+        r2_in=r2_in if paired else None,
+    )
+
+    log_path = settings.logs_dir / f"{ctx.job_id}.log"
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+
+    ctx.progress(phase="starting", pct=0.0, message="starting Filtlong")
+    log.info(
+        "filter_started", job_id=ctx.job_id, tool="filtlong", paired=paired, cmd=" ".join(cmd)
+    )
+
+    # Filtlong writes its summary to stdout, which run_subprocess merges into
+    # the log file. We additionally tee stdout lines into a separate report
+    # file for filtlong_runner.parse_report -- run_subprocess cannot capture to
+    # a second file itself, so on_line gives us each decoded line.
+    report_lines: list[str] = []
+    code = run_subprocess(
+        ctx, cmd,
+        log_path=str(log_path),
+        on_line=report_lines.append,
+    )
+    report_out.write_text("\n".join(report_lines))
+    if code != 0:
+        raise _failure(code, log_path, tool="filtlong")
+
+    if not r1_out.exists() or r1_out.stat().st_size == 0:
+        raise RetryableError(f"Filtlong produced no output at {r1_out.name}")
+
+    ctx.progress(phase="reporting", pct=0.95, message="reading report")
+    report = filtlong_runner.parse_report(report_out)
+
+    outputs = [{"tmp_path": str(r1_out), "name": r1_name, "mate": "R1"}]
+
+    ctx.progress(phase="done", pct=1.0, message="filtering complete")
+    log.info("filter_finished", job_id=ctx.job_id, tool="filtlong", outputs=len(outputs))
+
+    return {
+        "object_id": object_id,
+        "mate_object_id": ctx.payload.get("mate_object_id"),
+        "project_id": ctx.payload.get("project_id"),
+        "job_id": ctx.job_id,
+        "outputs": outputs,
+        "report": report,
+        "params": params.as_dict(),
+        "tool": "filtlong",
         "tool_version": tool.version,
         "html_path": None,
         "workdir": str(work),

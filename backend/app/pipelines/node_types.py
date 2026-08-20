@@ -118,6 +118,15 @@ async def _launch_trim(*, inputs: dict, params: dict, owner: str):
     )
 
 
+async def _launch_filter_long_reads(*, inputs: dict, params: dict, owner: str):
+    return await pipeline_service.launch_filter_long_reads(
+        object_id=inputs["reads"],
+        owner=owner,
+        mate_object_id=inputs.get("mate"),
+        params=params,
+    )
+
+
 async def _launch_align(*, inputs: dict, params: dict, owner: str):
     # `reads` is a multi port, so it arrives as a list. The launcher itself
     # takes one object_id: the extra files are additional read sets, which is
@@ -501,6 +510,23 @@ NODE_TYPES: dict[str, NodeTypeSpec] = {
             PortSpec(
                 "trimmed",
                 PortType(format=FormatKind.FASTQ, role=ObjectRole.TRIMMED_READS),
+            ),
+        ),
+    ),
+    "filter_long_reads": NodeTypeSpec(
+        label="Filter long reads",
+        launch_name="pipeline_service.launch_filter_long_reads",
+        launch=_launch_filter_long_reads,
+        run_kind=RunKind.FILTER_LONG_READS,
+        # No tool_choice: Filtlong is the only tool for this node type.
+        inputs=(
+            PortSpec("reads", PortType(format=FormatKind.FASTQ)),
+            PortSpec("mate", PortType(format=FormatKind.FASTQ), required=False),
+        ),
+        outputs=(
+            PortSpec(
+                "filtered",
+                PortType(format=FormatKind.FASTQ, role=ObjectRole.FILTERED_READS),
             ),
         ),
     ),
