@@ -559,8 +559,13 @@ class TestSweepHandler:
         assert "reclaimable_bytes" in result
 
     async def test_handler_is_registered_with_the_queue(self):
-        from app.queue.registry import get_handler
+        from app.queue.registry import get_handler, load_handlers
 
+        # `_HANDLERS` only populates when `app.queue.handlers` is imported.
+        # Under xdist this test can land in a worker that never imported it,
+        # so the registry is empty and the assertion flakes. Load explicitly,
+        # the same way test_provenance_verbs.py and test_running_now.py do.
+        load_handlers()
         assert get_handler("sweep_storage_drift") is not None
 
     async def test_schedule_and_resources_are_seeded(self):
