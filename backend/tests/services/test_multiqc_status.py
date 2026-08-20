@@ -79,6 +79,26 @@ class TestNewestQcOutputAt:
 
         assert multiqc_handlers.newest_qc_output_at([a, b]) == 2_000_000
 
+    def test_finds_a_retained_quast_report_tsv(self, dirs):
+        """Confirms the #702 entries in RETAINED_FACT_FILES feed staleness
+        too -- generically, since newest_qc_output_at iterates that same
+        tuple. Re-running QUAST after a report was generated must make it
+        stale, the same way re-running QC does."""
+        obj = _obj(facts={"assembly_misassembly_data": "quast/report.tsv"})
+        d = dirs.qc / str(obj.id) / "quast"
+        d.mkdir(parents=True)
+        (d / "report.tsv").write_text("Assembly\tassembly\n")
+
+        assert multiqc_handlers.newest_qc_output_at([obj]) is not None
+
+    def test_finds_retained_samtools_stats(self, dirs):
+        obj = _obj(facts={"bam_stats_data": "samtools/stats.txt"})
+        d = dirs.qc / str(obj.id) / "samtools"
+        d.mkdir(parents=True)
+        (d / "stats.txt").write_text("# samtools stats\n")
+
+        assert multiqc_handlers.newest_qc_output_at([obj]) is not None
+
 
 class TestStatusShape:
     """The dataclass's own contract -- the flag combinations the panel

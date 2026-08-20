@@ -35,7 +35,13 @@ from app.pipelines import (
 )
 from app.queue.executor import run_subprocess
 from app.queue.lineage_handlers import lineage_present
-from app.queue.pipeline_handlers import _failure, _named_link, _prepare_workdir, _resolve_input
+from app.queue.pipeline_handlers import (
+    _failure,
+    _named_link,
+    _prepare_workdir,
+    _resolve_input,
+    _retain_multiqc_input,
+)
 from app.queue.registry import HandlerMode, JobContext, handler
 
 log = get_logger(__name__)
@@ -290,9 +296,11 @@ def assess_misassemblies(ctx: JobContext) -> dict:
     facts["assembly_reference_id"] = ctx.payload.get("reference_object_id")
     facts["assembly_reference_name"] = ctx.payload.get("reference_name")
 
-    report_fact = _copy_report(ctx, out_dir)
+    report_fact, tsv_retained = _copy_report(ctx, out_dir)
     if report_fact:
         facts["assembly_misassembly_report"] = report_fact
+    if tsv_retained:
+        facts["assembly_misassembly_data"] = "quast/report.tsv"
 
     ctx.progress(phase="done", pct=1.0, message="misassembly QC complete")
     log.info(
@@ -310,7 +318,7 @@ def assess_misassemblies(ctx: JobContext) -> dict:
     }
 
 
-def _copy_report(ctx: JobContext, out_dir: Path) -> str | None:
+def _copy_report(ctx: JobContext, out_dir: Path) -> tuple[str | None, bool]:
     """Copy QUAST's HTML report tree into `qc_reports/<object_id>/quast/`,
     where `get_qc_report` serves it -- same storage shape `run_qc` uses for
     fastp's and FastQC's reports.
@@ -329,15 +337,28 @@ def _copy_report(ctx: JobContext, out_dir: Path) -> str | None:
     and `qc_reports/<object_id>/` is already the place this application
     keeps a run's human-readable artifacts.
 
-    Returns None, logging a warning, rather than raising: a QUAST run that
-    produced real facts must not fail the job over a report copy failing --
-    the same posture the rest of this handler takes on parse failures.
+    `report.tsv` is retained too, through `_retain_multiqc_input` rather than
+    the raw `shutil.copyfile` calls above -- it is not part of the HTML
+    report at all, it is MultiQC's own input (see #624/#702): MultiQC parses
+    raw tool output, not rendered pages, and `report.tsv` is the file its
+    QUAST module reads. Kept as a second return value rather than folded
+    into the report-path string, since a caller needs to know independently
+    whether *this* file landed to decide whether to set the MultiQC-facing
+    fact.
+
+    Returns `(report_path, tsv_retained)`. `report_path` is None, logging a
+    warning, rather than raising: a QUAST run that produced real facts must
+    not fail the job over a report copy failing -- the same posture the rest
+    of this handler takes on parse failures. `tsv_retained` follows the same
+    best-effort rule independently, since report.tsv already exists earlier
+    in this function's caller (parsed into facts) and a copy failure here
+    must not touch anything already computed.
     """
     object_id = ctx.payload.get("object_id")
     report_html = out_dir / "report.html"
     if not object_id or not report_html.exists():
         log.warning("misassembly_report_missing", job_id=ctx.job_id)
-        return None
+        return None, False
 
     report_dir = settings.qc_reports_dir / str(object_id) / "quast"
     try:
@@ -364,13 +385,17 @@ def _copy_report(ctx: JobContext, out_dir: Path) -> str | None:
         # recoverable by re-running; lost facts from a job that already ran
         # for real are not.
         log.warning("misassembly_report_copy_failed", job_id=ctx.job_id, error=str(e))
-        return None
+        return None, False
+
+    tsv_retained = _retain_multiqc_input(
+        out_dir / "report.tsv", settings.qc_reports_dir / str(object_id), "quast/report.tsv"
+    )
 
     # Relative to report_dir, which is already qc_reports_dir/<object_id> --
     # get_qc_report's `root` includes the object_id once, so a fact that
     # repeats it names a path nothing was ever written to. Matches the
     # `qc_fastp_report`/`qc_fastqc_report` convention in pipeline_handlers.py.
-    return "quast/report.html"
+    return "quast/report.html", tsv_retained
 
 
 # A single minimap2 whole-genome alignment, no separate report-generation

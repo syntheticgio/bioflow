@@ -77,7 +77,14 @@ class TestMisassembliesReportPathIsNotLabelSuffixed:
 class TestCopyReport:
     """`_copy_report` -- selective, not a directory copy, since QUAST's
     `out_dir` also holds report.tex/report.pdf/transposed_report* and
-    per-tool stdout/stderr logs this application has no reader for."""
+    per-tool stdout/stderr logs this application has no reader for.
+
+    Returns `(report_path, tsv_retained)` since #702: `report.tsv` is
+    retained as a second, independent thing alongside the HTML copy --
+    it is not part of the report page, it is MultiQC's own input (see
+    RETAINED_FACT_FILES in multiqc_handlers.py), so a caller needs to know
+    on its own whether *that* file landed.
+    """
 
     def _ctx(self, tmp_path, object_id="obj1"):
         from app.queue.registry import JobContext
@@ -98,6 +105,7 @@ class TestCopyReport:
         (out_dir / "contigs_reports").mkdir(parents=True)
         (out_dir / "icarus_viewers").mkdir(parents=True)
         (out_dir / "report.html").write_text("<html>report</html>")
+        (out_dir / "report.tsv").write_text("Assembly\tassembly\n")
         (out_dir / "icarus.html").write_text("<html>icarus</html>")
         (out_dir / "icarus_viewers" / "alignment_viewer.html").write_text(
             "<html>alignment viewer</html>"
@@ -121,7 +129,7 @@ class TestCopyReport:
         out_dir = self._real_quast_output(tmp_path)
         ctx = self._ctx(tmp_path)
 
-        result = handlers._copy_report(ctx, out_dir)
+        result, tsv_retained = handlers._copy_report(ctx, out_dir)
 
         report_dir = settings.qc_reports_dir / "obj1" / "quast"
         assert result == "quast/report.html"
@@ -158,7 +166,7 @@ class TestCopyReport:
         empty_out_dir.mkdir()
         ctx = self._ctx(tmp_path)
 
-        assert handlers._copy_report(ctx, empty_out_dir) is None
+        assert handlers._copy_report(ctx, empty_out_dir) == (None, False)
 
     def test_missing_icarus_and_gff_are_not_fatal(self, tmp_path, monkeypatch):
         """report.html alone is enough to succeed -- icarus.html and the
@@ -171,9 +179,10 @@ class TestCopyReport:
         (out_dir / "report.html").write_text("<html>report only</html>")
         ctx = self._ctx(tmp_path)
 
-        result = handlers._copy_report(ctx, out_dir)
+        result, tsv_retained = handlers._copy_report(ctx, out_dir)
 
         assert result == "quast/report.html"
+        assert tsv_retained is False
 
     def test_no_object_id_returns_none(self, tmp_path, monkeypatch):
         from app.config import settings
@@ -183,7 +192,41 @@ class TestCopyReport:
         ctx = self._ctx(tmp_path, object_id=None)
         ctx.payload["object_id"] = None
 
-        assert handlers._copy_report(ctx, out_dir) is None
+        assert handlers._copy_report(ctx, out_dir) == (None, False)
+
+    def test_retains_report_tsv_for_multiqc(self, tmp_path, monkeypatch):
+        """report.tsv is not part of the HTML report at all -- MultiQC's
+        QUAST module is what actually reads it (#624/#702). Verified
+        end-to-end during the #624 spike: MultiQC reported
+        `quast | Found 1 reports` once this file was staged."""
+        from app.config import settings
+
+        monkeypatch.setattr(settings, "bioinfo_home", tmp_path / "home")
+        out_dir = self._real_quast_output(tmp_path)
+        ctx = self._ctx(tmp_path)
+
+        result, tsv_retained = handlers._copy_report(ctx, out_dir)
+
+        report_dir = settings.qc_reports_dir / "obj1"
+        assert tsv_retained is True
+        assert (report_dir / "quast" / "report.tsv").read_text() == "Assembly\tassembly\n"
+
+    def test_missing_report_tsv_is_not_fatal(self, tmp_path, monkeypatch):
+        """The .html copy and the .tsv retention are independent -- a QUAST
+        version that stopped writing report.tsv must not break the report
+        page, which is the half of this a user can see directly."""
+        from app.config import settings
+
+        monkeypatch.setattr(settings, "bioinfo_home", tmp_path / "home")
+        out_dir = tmp_path / "out"
+        out_dir.mkdir()
+        (out_dir / "report.html").write_text("<html>report only</html>")
+        ctx = self._ctx(tmp_path)
+
+        result, tsv_retained = handlers._copy_report(ctx, out_dir)
+
+        assert result == "quast/report.html"
+        assert tsv_retained is False
 
 
 class TestAssessAssemblyQV:
