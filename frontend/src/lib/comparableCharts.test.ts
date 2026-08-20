@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  COMPARABLE_CHARTS,
   comparableCharts,
   hasChartFacts,
   type ChartAvailability,
@@ -63,6 +64,28 @@ describe("comparableCharts", () => {
     const row = nxRow(comparableCharts(NX_FACTS, b, "a", "b"))!;
     expect(row.available).toBe(true);
     expect(row.missing).toEqual([]);
+  });
+});
+
+describe("COMPARABLE_CHARTS registry", () => {
+  // Hand-maintained, keyed by the chartId ComparisonView switches on. A
+  // dropped row silently makes that chart unreachable from the UI with no
+  // test failing -- so this guards the exact set (AGENTS.md: hand-maintained
+  // registries keyed by an enum).
+  it("contains exactly the chart ids the comparison view can render", () => {
+    expect(COMPARABLE_CHARTS.map((c) => c.chartId).sort()).toEqual([
+      "busco",
+      "depth",
+      "nx",
+      "qc",
+    ]);
+  });
+
+  it("gives every chart a label and at least one required fact", () => {
+    for (const chart of COMPARABLE_CHARTS) {
+      expect(chart.label.length).toBeGreaterThan(0);
+      expect(chart.requiredFacts.length).toBeGreaterThan(0);
+    }
   });
 });
 

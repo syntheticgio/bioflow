@@ -6,7 +6,11 @@ import {
   comparableCharts,
   type ChartAvailability,
 } from "../lib/comparableCharts";
-import { NxChart, type CompareNxSeries } from "./NxChart";
+import { extractSeries, type ComparisonSeries } from "../lib/comparisonSeries";
+import { NxChart } from "./NxChart";
+import { BuscoCompareChart } from "./BuscoCompareChart";
+import { DepthCompareChart } from "./DepthCompareChart";
+import { QualityCompareChart } from "./QualityCompareChart";
 
 /**
  * Two objects' charts overlaid on shared axes.
@@ -18,10 +22,11 @@ import { NxChart, type CompareNxSeries } from "./NxChart";
  * comparable chart" (R4).
  *
  * Comparability is computed per chart from the objects' facts (C3); each
- * chart's props are derived from the facts by the same reading the
- * single-object panel uses (`sequence_nx_curve`, `total_bases`,
- * `assembly_genome_size`), so this view and `AssemblyFacts` cannot drift on
- * what a chart needs.
+ * chart's series is derived from the facts by the same reading the
+ * single-object panel uses (`extractSeries` mirrors each panel), so this view
+ * and the panels cannot drift on what a chart needs. Dispatching is a switch
+ * on `chart.chartId` (R7): one table row in `comparableCharts.ts` plus one
+ * branch here per chart.
  */
 
 interface Props {
@@ -31,34 +36,90 @@ interface Props {
   idB: string;
 }
 
-/** Map an object's facts to an NxChart series, mirroring `AssemblyFacts`. */
-function nxSeries(
-  name: string,
-  facts: Record<string, unknown>,
-): CompareNxSeries | null {
-  const curve = facts.sequence_nx_curve as [number, number][] | undefined;
-  const totalBases = facts.total_bases as number | undefined;
-  if (!Array.isArray(curve) || typeof totalBases !== "number") return null;
-  return {
-    curve,
-    totalBases,
-    genomeSize: facts.assembly_genome_size as number | undefined,
-    label: name,
-  };
-}
-
-/** Render one chart. Stage 1 has a single renderer; stage 2 adds branches
- *  here keyed on `chart.chartId` (R7) -- the table gates, this draws. */
+/** Render one chart from the two objects' series for it. Each branch mirrors
+ *  its single-object panel's reading via `extractSeries`. */
 function renderChart(
-  availability: ChartAvailability,
-  seriesA: CompareNxSeries | null,
-  seriesB: CompareNxSeries | null,
+  chartId: string,
+  seriesA: ComparisonSeries | null,
+  seriesB: ComparisonSeries | null,
 ) {
-  switch (availability.chart.chartId) {
-    case "nx":
-      return seriesA && seriesB ? (
-        <NxChart {...seriesA} compare={seriesB} />
-      ) : null;
+  switch (chartId) {
+    case "nx": {
+      if (
+        seriesA?.chartId !== "nx" ||
+        seriesB?.chartId !== "nx"
+      ) {
+        return null;
+      }
+      return (
+        <NxChart
+          curve={seriesA.curve}
+          totalBases={seriesA.totalBases}
+          genomeSize={seriesA.genomeSize}
+          label={seriesA.name}
+          compare={{
+            curve: seriesB.curve,
+            totalBases: seriesB.totalBases,
+            genomeSize: seriesB.genomeSize,
+            label: seriesB.name,
+          }}
+        />
+      );
+    }
+    case "busco": {
+      if (
+        seriesA?.chartId !== "busco" ||
+        seriesB?.chartId !== "busco"
+      ) {
+        return null;
+      }
+      return (
+        <BuscoCompareChart
+          a={{
+            name: seriesA.name,
+            singlePct: seriesA.singlePct,
+            duplicatedPct: seriesA.duplicatedPct,
+            fragmentedPct: seriesA.fragmentedPct,
+            missingPct: seriesA.missingPct,
+          }}
+          b={{
+            name: seriesB.name,
+            singlePct: seriesB.singlePct,
+            duplicatedPct: seriesB.duplicatedPct,
+            fragmentedPct: seriesB.fragmentedPct,
+            missingPct: seriesB.missingPct,
+          }}
+        />
+      );
+    }
+    case "qc": {
+      if (seriesA?.chartId !== "qc" || seriesB?.chartId !== "qc") return null;
+      return (
+        <QualityCompareChart
+          a={{ name: seriesA.name, curve: seriesA.curve }}
+          b={{ name: seriesB.name, curve: seriesB.curve }}
+        />
+      );
+    }
+    case "depth": {
+      if (seriesA?.chartId !== "depth" || seriesB?.chartId !== "depth") {
+        return null;
+      }
+      return (
+        <DepthCompareChart
+          a={{
+            name: seriesA.name,
+            buckets: seriesA.buckets,
+            bucketWidth: seriesA.bucketWidth,
+          }}
+          b={{
+            name: seriesB.name,
+            buckets: seriesB.buckets,
+            bucketWidth: seriesB.bucketWidth,
+          }}
+        />
+      );
+    }
     default:
       return null;
   }
@@ -71,14 +132,14 @@ function ChartBlock({
   seriesB,
 }: {
   availability: ChartAvailability;
-  seriesA: CompareNxSeries | null;
-  seriesB: CompareNxSeries | null;
+  seriesA: ComparisonSeries | null;
+  seriesB: ComparisonSeries | null;
 }) {
   const { chart, available, missing } = availability;
   return (
     <div className="compare-chart">
       <div className="section-title">{chart.label}</div>
-      {available && renderChart(availability, seriesA, seriesB)}
+      {available && renderChart(chart.chartId, seriesA, seriesB)}
       {!available && (
         <div className="compare-unavailable">
           {missing.map((m) => (
@@ -143,8 +204,6 @@ export function ComparisonView({ idA, idB }: Props) {
     );
   }
 
-  const seriesA = nxSeries(objA.name, objA.facts);
-  const seriesB = nxSeries(objB.name, objB.facts);
   const rows = comparableCharts(objA.facts, objB.facts, objA.name, objB.name);
   const anyComparable = rows.some((r) => r.available);
 
@@ -166,8 +225,8 @@ export function ComparisonView({ idA, idB }: Props) {
             <ChartBlock
               key={r.chart.chartId}
               availability={r}
-              seriesA={seriesA}
-              seriesB={seriesB}
+              seriesA={extractSeries(r.chart.chartId, objA.name, objA.facts)}
+              seriesB={extractSeries(r.chart.chartId, objB.name, objB.facts)}
             />
           ))
         ) : (

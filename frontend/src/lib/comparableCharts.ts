@@ -34,6 +34,26 @@ export const COMPARABLE_CHARTS: ComparableChart[] = [
     label: "Nx contiguity",
     requiredFacts: ["sequence_nx_curve", "total_bases"],
   },
+  {
+    chartId: "busco",
+    label: "BUSCO completeness",
+    requiredFacts: [
+      "assembly_completeness_single_pct",
+      "assembly_completeness_duplicated_pct",
+      "assembly_completeness_fragmented_pct",
+      "assembly_completeness_missing_pct",
+    ],
+  },
+  {
+    chartId: "qc",
+    label: "Per-base quality",
+    requiredFacts: ["quality_per_position"],
+  },
+  {
+    chartId: "depth",
+    label: "Sequencing depth",
+    requiredFacts: ["bam_stats_depth_histogram", "bam_stats_depth_bucket_width"],
+  },
 ];
 
 export interface ChartAvailability {
