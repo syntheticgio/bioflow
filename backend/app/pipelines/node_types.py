@@ -172,6 +172,7 @@ async def _launch_coverage(*, inputs: dict, params: dict, owner: str):
     return await pipeline_service.launch_coverage(
         bam_id=inputs["alignment"],
         owner=owner,
+        regions_id=inputs.get("regions"),
     )
 
 
@@ -569,7 +570,17 @@ NODE_TYPES: dict[str, NodeTypeSpec] = {
             ),
             # No annotation port, unlike feature_coverage above: the windows
             # are tiled from the reference's own contig lengths, so there is
-            # nothing for the canvas to wire and nothing to resolve.
+            # nothing to resolve.
+            #
+            # The optional regions port is BED only, and unlike
+            # feature_coverage's annotation port it has no server-side
+            # fallback: leaving it unwired selects windowed mode rather than
+            # asking the launcher to guess which BED was meant.
+            PortSpec(
+                "regions",
+                PortType(format=FormatKind.BED),
+                required=False,
+            ),
         ),
         outputs=(),
     ),

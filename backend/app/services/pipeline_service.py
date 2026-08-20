@@ -4771,6 +4771,7 @@ async def launch_coverage(
     *,
     bam_id: PydanticObjectId,
     owner: str,
+    regions_id: PydanticObjectId | None = None,
     resource_override: bool = False,
 ) -> Job:
     """Queue per-window read-depth analysis for one BAM.
@@ -4778,7 +4779,7 @@ async def launch_coverage(
     Read-only, like bam_stats and feature_coverage: no derived object, just a
     report plus summary facts merged onto the BAM.
 
-    Takes no annotation, which is the whole difference from
+    Needs no annotation, which is the whole difference from
     launch_feature_coverage: the windows are derived from the reference's own
     contig lengths, so this is available for any completed alignment rather
     than only for a project that has an annotation to measure against. It
@@ -4786,6 +4787,13 @@ async def launch_coverage(
     and the reference's `.fai` for the contig lengths the windows are tiled
     from -- and refuses with the same actionable message as
     launch_feature_coverage rather than building either on the fly.
+
+    `regions_id` switches to per-region mode against an uploaded target BED
+    (a panel, a gene set) instead of uniform windows. Optional and with no
+    fallback resolution, unlike feature coverage's annotation: a project has
+    at most one obvious annotation, but "the target regions" is a choice only
+    the caller can make, so an unspecified regions_id means windowed mode
+    rather than a guess at which BED was meant.
     """
     from app.queue import queue
     from app.services import object_service
@@ -4819,6 +4827,19 @@ async def launch_coverage(
             details={"reference_id": str(reference.id), "needs": "build_index"},
         )
 
+    regions = None
+    if regions_id is not None:
+        regions = await object_service.get_object(regions_id, owner=owner)
+        if regions.format.kind is not FormatKind.BED:
+            raise ValidationError(
+                f"{regions.name!r} is {regions.format.kind.value}, which "
+                f"coverage cannot use as a target region set -- it reads BED.",
+                details={
+                    "object_id": str(regions.id),
+                    "kind": regions.format.kind.value,
+                },
+            )
+
     payload: dict = {
         "bam_id": str(bam.id),
         "bam_name": bam.name,
@@ -4827,7 +4848,12 @@ async def launch_coverage(
     # `bai` is in this loop where launch_feature_coverage omits it: bedtools
     # reads the BAM as a stream, but mosdepth seeks through the index and
     # exits with "index not found" without it.
-    for key, obj in (("bam", bam), ("bai", bai), ("fai", fai)):
+    inputs = [("bam", bam), ("bai", bai), ("fai", fai)]
+    if regions is not None:
+        payload["regions_id"] = str(regions.id)
+        payload["regions_name"] = regions.name
+        inputs.append(("regions", regions))
+    for key, obj in inputs:
         digest, path = await _resolve_readable(obj)
         if digest:
             payload[f"{key}_sha256"] = digest
@@ -4841,9 +4867,14 @@ async def launch_coverage(
         job_class=JobClass.COMPUTE,
         resources=JobResources(cpu=1, mem_mb=COVERAGE_MEM_MB, io=IoClass.HEAVY),
         max_attempts=2,
-        # Keyed on the BAM alone -- unlike feature_coverage, there is no
-        # second input whose change would produce a different result.
-        dedup_key=f"coverage:{bam.blob_sha256}",
+        # The region set is part of the key, not just the BAM: a windowed run
+        # and a run against a target BED produce different results from the
+        # same alignment, so keying on the BAM alone would let the first of
+        # the two silently absorb the second.
+        dedup_key=(
+            f"coverage:{bam.blob_sha256}"
+            + (f":{regions.blob_sha256}" if regions is not None else "")
+        ),
         project_id=bam.project_id,
         object_id=bam.id,
         resource_override=resource_override,
