@@ -2454,6 +2454,92 @@ def build_salmon_quantify_card(obj, transcriptomes) -> SuggestionCard | None:
     )
 
 
+# Spelled from the registry rather than as string literals so an aligner
+# rename cannot silently unhook this gate -- the failure would be a card that
+# quietly stops appearing, which nothing else would catch.
+_SPLICE_AWARE_ALIGNERS = frozenset({Aligner.HISAT2.value, Aligner.STAR.value})
+
+
+def build_transcript_assembly_card(obj, annotations) -> SuggestionCard | None:
+    """Assemble transcript models from a spliced alignment.
+
+    Gated on `facts.aligned_by` rather than offered on any BAM, which is the
+    opposite of `build_quantify_card` immediately above -- deliberately. That
+    card offers on every BAM because "whether an alignment is RNA-seq is not
+    knowable from the file". Here it *is* knowable: the alignment run records
+    which aligner produced the BAM, and assembling transcripts from a
+    bwa-mem2 alignment is not a worse answer, it is a meaningless one.
+
+    A BAM with no `aligned_by` -- registered in place, or predating the field
+    -- gets no card. That is a deliberate false negative on uploaded HISAT2
+    BAMs, taken for the same reason `_group_gci_candidates_by_aligner` refuses
+    to merge "unknown" into a named aligner: an unknown-provenance BAM may
+    well be DNA-seq.
+
+    `annotations` is a parameter rather than looked up here, for the same
+    reason it is on `build_quantify_card`: the lookup is async and these
+    builders are uniformly synchronous and pure. It arrives already filtered
+    by `pipeline_service._is_annotation`, which is format-first -- a rule
+    written against `ObjectRole.ANNOTATION` would match nothing on a real
+    library.
+    """
+    if obj.format.kind is not FormatKind.BAM:
+        return None
+
+    aligned_by = str((obj.facts or {}).get("aligned_by") or "")
+    if aligned_by not in _SPLICE_AWARE_ALIGNERS:
+        return None
+
+    title = "Assemble transcripts -- StringTie"
+    description = (
+        "Reconstruct the transcripts present in this sample, including "
+        "isoforms the annotation does not list."
+    )
+
+    tool = tools.stringtie()
+    if not tool.available:
+        return SuggestionCard(
+            kind="transcript_assembly",
+            category="EXPRESSION",
+            title=title,
+            description=description,
+            status=CardStatus.UNAVAILABLE,
+            reason=f"{tool.name} is not installed.",
+        )
+
+    if not annotations:
+        return SuggestionCard(
+            kind="transcript_assembly",
+            category="EXPRESSION",
+            title=title,
+            description=description,
+            status=CardStatus.UNAVAILABLE,
+            reason=(
+                "This project has no gene annotation. Download a GFF or GTF "
+                "with the assembly, or upload one."
+            ),
+        )
+
+    return SuggestionCard(
+        kind="transcript_assembly",
+        category="EXPRESSION",
+        title=title,
+        description=description,
+        why=(
+            f"This alignment came from {aligned_by}, which preserves splice "
+            "structure, so the transcripts in it can be reassembled. Counting "
+            "and transcriptome quantification can only measure transcripts "
+            "the annotation already lists; this is what proposes new ones."
+        ),
+        status=CardStatus.AVAILABLE,
+        launch={
+            "endpoint": "/pipelines/transcript-assembly",
+            # annotation_id omitted: the server resolves it, same as quantify.
+            "body": {"bam_id": str(obj.id), "params": {}},
+        },
+    )
+
+
 @dataclass(frozen=True)
 class _Prefetched:
     """The async lookups `suggestions_for` does once, before any builder runs.
@@ -2575,6 +2661,10 @@ CARD_BUILDERS: tuple[tuple[str, object], ...] = (
     (
         "salmon_quantify",
         lambda obj, ctx: build_salmon_quantify_card(obj, ctx.transcriptomes),
+    ),
+    (
+        "transcript_assembly",
+        lambda obj, ctx: build_transcript_assembly_card(obj, ctx.annotations),
     ),
 )
 

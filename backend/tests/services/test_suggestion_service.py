@@ -6,9 +6,11 @@ in pinning each branch, especially the ones whose ordering is load-bearing.
 
 import dataclasses
 from contextlib import contextmanager
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
+from beanie import PydanticObjectId
 
 from app.models import FormatKind, ObjectRole, ObjectStatus, SidecarRole
 from app.pipelines import align_runner, aligner_registry, assembler_registry, tools
@@ -29,6 +31,7 @@ from app.services.suggestion_service import (
     build_quantify_card,
     build_salmon_quantify_card,
     build_structural_variants_card,
+    build_transcript_assembly_card,
     build_variants_card,
     is_eukaryotic,
     resolve_reference,
@@ -3385,3 +3388,87 @@ class TestMergeStructuralVariantsCard:
             )
         assert card.status is CardStatus.AVAILABLE
         assert card.launch["body"]["snf_object_ids"] == ids
+
+
+def _transcript_assembly_bam(aligned_by, **facts):
+    # Named distinctly from the module-level `_bam` above (which takes
+    # `chemistry_facts`/`obj_id`) to avoid shadowing it -- this helper's
+    # signature is specific to the aligner-gate tests below.
+    return SimpleNamespace(
+        id=PydanticObjectId(),
+        status=ObjectStatus.READY,
+        format=SimpleNamespace(kind=FormatKind.BAM),
+        role=None,
+        facts={"aligned_by": aligned_by, **facts} if aligned_by else dict(facts),
+        metadata={},
+    )
+
+
+class TestTranscriptAssemblyCard:
+    @pytest.mark.parametrize("aligner", ["hisat2", "star"])
+    def test_transcript_assembly_card_offered_for_splice_aware_alignments(
+        self, aligner
+    ):
+        card = build_transcript_assembly_card(
+            _transcript_assembly_bam(aligner),
+            annotations=[SimpleNamespace(id=PydanticObjectId())],
+        )
+        assert card is not None
+        assert card.kind == "transcript_assembly"
+
+    @pytest.mark.parametrize(
+        "aligner", ["bwa-mem2", "minimap2", "bowtie2", "winnowmap"]
+    )
+    def test_no_card_at_all_for_dna_aligners(self, aligner):
+        """Not UNAVAILABLE -- absent.
+
+        The capability can never apply to a DNA-seq alignment, and a card
+        advertising something impossible is worse than silence. UNAVAILABLE
+        is reserved for the two states a user can act on: tool missing,
+        annotation missing.
+        """
+        assert build_transcript_assembly_card(
+            _transcript_assembly_bam(aligner),
+            annotations=[SimpleNamespace(id=PydanticObjectId())],
+        ) is None
+
+    def test_no_card_when_the_bam_does_not_say_which_aligner_made_it(self):
+        """A deliberate false negative.
+
+        An uploaded or register-in-place BAM has no aligned_by, and may well
+        be DNA-seq. This mirrors _group_gci_candidates_by_aligner's refusal
+        to merge "unknown" into a named aligner.
+        """
+        assert build_transcript_assembly_card(
+            _transcript_assembly_bam(None),
+            annotations=[SimpleNamespace(id=PydanticObjectId())],
+        ) is None
+
+    def test_card_unavailable_when_stringtie_is_not_installed(self, monkeypatch):
+        """The direction that fails when the seam breaks.
+
+        The image ships StringTie installed, so asserting the card is
+        *available* would pass whether or not the patch worked. Patching
+        the probe off is what actually exercises the gate.
+        """
+        monkeypatch.setattr(
+            tools,
+            "stringtie",
+            lambda: SimpleNamespace(
+                name="stringtie", available=False, path="", error="not installed"
+            ),
+        )
+
+        card = build_transcript_assembly_card(
+            _transcript_assembly_bam("hisat2"),
+            annotations=[SimpleNamespace(id=PydanticObjectId())],
+        )
+        assert card is not None
+        assert card.status is CardStatus.UNAVAILABLE
+
+    def test_card_unavailable_when_the_project_has_no_annotation(self):
+        card = build_transcript_assembly_card(
+            _transcript_assembly_bam("hisat2"), annotations=[]
+        )
+        assert card is not None
+        assert card.status is CardStatus.UNAVAILABLE
