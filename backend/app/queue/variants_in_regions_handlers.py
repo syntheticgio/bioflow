@@ -78,18 +78,41 @@ def run_variants_in_regions(ctx: JobContext) -> dict:
     if code != 0:
         raise _failure(code, sort_log_path, "bedtools sort")
 
+    # `-sorted` applies to BOTH inputs, so the VCF needs the same treatment
+    # as the annotation. Without this, a VCF whose records are not already in
+    # the .fai's contig order fails the whole job with bedtools' "out of
+    # order record" error -- and callers do not all emit reference order.
+    ctx.progress(phase="sorting", pct=0.35, message="sorting variants to reference order")
+    sorted_vcf = work / f"{vcf.stem}.sorted{vcf.suffix}"
+    vcf_sort_log_path = work / "sort_vcf.log"
+    vcf_sort_cmd = ["bedtools", "sort", "-faidx", str(fai), "-header", "-i", str(vcf)]
+    code = _run_sort_with_clean_stdout(
+        ctx, vcf_sort_cmd, stdout_path=str(sorted_vcf), log_path=str(vcf_sort_log_path)
+    )
+    if code != 0:
+        raise _failure(code, vcf_sort_log_path, "bedtools sort (VCF)")
+
     ctx.progress(phase="intersecting", pct=0.5, message="intersecting variants with features")
     intersect_out = work / "intersect.tsv"
     cmd = variants_in_regions_runner.build_command(
-        vcf=vcf, annotation=sorted_annotation, genome_file=genome_file
+        vcf=sorted_vcf, annotation=sorted_annotation, genome_file=genome_file
     )
     code = run_subprocess(ctx, cmd, log_path=str(intersect_out))
     if code != 0:
         raise _failure(code, intersect_out, "bedtools intersect")
 
     ctx.progress(phase="report", pct=0.9, message="parsing variants in regions results")
+    # Measured from the sorted annotation rather than assumed: -wao gives no
+    # delimiter between the A and B records, and both widths vary.
+    parse_kwargs = (
+        {"bed_columns": variants_in_regions_runner.bed_column_count(sorted_annotation)}
+        if annotation_format == "bed"
+        else {}
+    )
     report = variants_in_regions_runner.parse_output(
-        stdout_path=intersect_out, annotation_format=annotation_format
+        stdout_path=intersect_out,
+        annotation_format=annotation_format,
+        **parse_kwargs,
     )
 
     report_dir = settings.variants_in_regions_dir / str(vcf_id)
