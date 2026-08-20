@@ -30,7 +30,7 @@ REPORT_PAYLOAD = {
 
 
 @pytest.fixture
-def client(tmp_path, monkeypatch):
+def client(tmp_path, monkeypatch, beanie_models):
     monkeypatch.setattr(settings, "bioinfo_home", tmp_path)
 
     reports = tmp_path / "feature_coverage"
