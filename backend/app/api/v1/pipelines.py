@@ -852,6 +852,53 @@ async def get_coverage_report(object_id: PydanticObjectId, owner: OwnerDep) -> d
     return json.loads(target.read_text())
 
 
+class MethylationRequest(BaseModel):
+    bam_id: PydanticObjectId
+    resource_override: bool = False
+
+
+@router.post(
+    "/methylation", response_model=JobOut, status_code=status.HTTP_201_CREATED
+)
+async def launch_methylation(body: MethylationRequest, owner: OwnerDep) -> JobOut:
+    """Queue per-site base-modification (methylation) calling for a BAM.
+
+    Produces a bedMethyl DataObject derived from the BAM plus summary facts
+    merged onto it. `launch_methylation` repeats the K1 modification-tag
+    check itself -- see its own docstring -- so this route need not, and a
+    BAM with no modification tags in the sampled prefix is refused here with
+    the same message the suggestion card shows.
+    """
+    job = await pipeline_service.launch_methylation(
+        bam_id=body.bam_id,
+        owner=owner,
+        resource_override=body.resource_override,
+    )
+    return JobOut.of(job)
+
+
+@router.get("/methylation/{object_id}/report")
+async def get_methylation_report(object_id: PydanticObjectId, owner: OwnerDep) -> dict:
+    """Serve the per-site methylation summary report for a BAM.
+
+    `OwnerDep`, not `LinkableOwnerDep`: this is fetched by the app's own code
+    with the profile header attached, never opened as a bare link.
+
+    The object read is discarded -- it is there to make the 404 happen.
+    Report directories are named by object id and nothing else, so without it
+    any caller holding an id could read any profile's report.
+    """
+    await object_service.get_object(object_id, owner=owner)
+
+    root = (settings.methylation_dir / str(object_id)).resolve()
+    target = (root / "methylation.json").resolve()
+
+    if not target.is_relative_to(root) or not target.is_file():
+        raise NotFoundError(f"No methylation report for object {object_id}")
+
+    return json.loads(target.read_text())
+
+
 class VcfStatsRequest(BaseModel):
     object_id: PydanticObjectId
 

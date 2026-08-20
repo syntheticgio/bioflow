@@ -39,6 +39,7 @@ from app.services import (
     reference_assembly,
     running_now,
 )
+from app.storage.paths import blob_path
 
 log = get_logger(__name__)
 
@@ -2573,6 +2574,80 @@ def build_coverage_card(obj) -> SuggestionCard | None:
         },
     )
 
+
+def build_methylation_card(obj) -> SuggestionCard | None:
+    """Per-site base-modification (methylation) calling from MM/ML tags.
+
+    Per decision K2 of docs/superpowers/specs/
+    2026-08-20-modkit-methylation-design.md: this card is anchored on a
+    completed BAM, like build_coverage_card, but adds a third UNAVAILABLE
+    cause neither coverage nor feature_coverage has -- no modification tags
+    found in a bounded prefix scan (K1) of the BAM itself. That third
+    message is the deliverable of criterion 3 of #631: it has to say *why*
+    the data cannot be produced now, or a user reasonably concludes the app
+    is broken rather than that the information was never in the file.
+
+    `has_modification_tags` reads the actual file, unlike every other check
+    a card in this module runs, so this is not free -- but it is a bounded
+    prefix scan (kilobytes, not gigabytes), the same cost the launch path
+    pays again anyway (K1's own launch-repeats-the-check rule).
+    """
+    if obj.format.kind is not FormatKind.BAM:
+        return None
+
+    title = "Methylation"
+    description = (
+        "Summarize per-site base-modification calls (5mC, 5hmC, 6mA) from "
+        "this alignment's MM/ML tags into a bedMethyl track."
+    )
+
+    tool = tools.modkit()
+    if not tool.available:
+        return SuggestionCard(
+            kind="methylation",
+            category="ASSEMBLY_QC",
+            title=title,
+            description=description,
+            status=CardStatus.UNAVAILABLE,
+            reason=f"{tool.name} is not installed.",
+        )
+
+    from app.pipelines import modkit_runner
+
+    probe = modkit_runner.has_modification_tags(blob_path(obj.blob_sha256))
+    if not probe.found:
+        return SuggestionCard(
+            kind="methylation",
+            category="ASSEMBLY_QC",
+            title=title,
+            description=description,
+            status=CardStatus.UNAVAILABLE,
+            reason=(
+                f"No base-modification tags found in the first "
+                f"{probe.records_scanned} reads of this alignment. "
+                f"Modified-base calling has to be enabled at basecalling "
+                f"time (Dorado with a modified-base model); it cannot be "
+                f"added afterwards."
+            ),
+        )
+
+    return SuggestionCard(
+        kind="methylation",
+        category="ASSEMBLY_QC",
+        title=title,
+        description=description,
+        why=(
+            "Answers an epigenetic question directly from this alignment, "
+            "with no new sequencing and no bisulfite prep."
+        ),
+        status=CardStatus.AVAILABLE,
+        launch={
+            "endpoint": "/pipelines/methylation",
+            "body": {"bam_id": str(obj.id)},
+        },
+    )
+
+
 def build_salmon_quantify_card(obj, transcriptomes) -> SuggestionCard | None:
     """Alignment-free transcript quantification for RNA-seq reads.
 
@@ -2844,6 +2919,7 @@ CARD_BUILDERS: tuple[tuple[str, object], ...] = (
         lambda obj, ctx: build_feature_coverage_card(obj, ctx.annotations),
     ),
     ("coverage", lambda obj, ctx: build_coverage_card(obj)),
+    ("methylation", lambda obj, ctx: build_methylation_card(obj)),
     ("annotate", lambda obj, ctx: build_annotate_card(obj, ctx.annotation_inputs)),
     ("phase", lambda obj, ctx: build_phase_card(obj, ctx.phase_inputs)),
     ("annotate_genome", lambda obj, ctx: build_annotate_genome_card(obj)),

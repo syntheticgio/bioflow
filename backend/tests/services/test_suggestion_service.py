@@ -27,6 +27,7 @@ from app.services.suggestion_service import (
     build_coverage_card,
     build_feature_coverage_card,
     build_merge_structural_variants_card,
+    build_methylation_card,
     build_multiqc_card,
     build_preprocess_card,
     build_quantify_card,
@@ -133,6 +134,7 @@ def _fake_obj(
     status=ObjectStatus.READY,
     project_id="proj1",
     role=None,
+    blob_sha256=None,
 ):
     """A stand-in for DataObject carrying only what the rules read.
 
@@ -162,6 +164,10 @@ def _fake_obj(
         # Read by build_preprocess_card to flag already-trimmed reads as
         # unavailable for re-trimming; None means "not a trim output".
         role=role,
+        # Read by build_methylation_card's K1 prefix scan to locate the
+        # BAM's bytes on disk. None for every other card's fixtures, which
+        # never read the file itself.
+        blob_sha256=blob_sha256,
     )
 
 
@@ -602,8 +608,10 @@ def all_callers_installed():
         yield
 
 
-def _bam(chemistry_facts=None, obj_id="bam456"):
-    return _fake_obj(kind=FormatKind.BAM, facts=chemistry_facts, obj_id=obj_id)
+def _bam(chemistry_facts=None, obj_id="bam456", blob_sha256=None):
+    return _fake_obj(
+        kind=FormatKind.BAM, facts=chemistry_facts, obj_id=obj_id, blob_sha256=blob_sha256
+    )
 
 
 @pytest.mark.usefixtures("all_callers_installed")
@@ -2100,6 +2108,110 @@ class TestCoverageCard:
         """A builder absent from CARD_BUILDERS is never called, so the card
         exists in tests and nowhere in the app."""
         assert "coverage" in [kind for kind, _ in CARD_BUILDERS]
+
+
+@contextmanager
+def installed_modkit(available=True):
+    """Pin the modkit probe the methylation card reads.
+
+    Same seam as `installed_mosdepth` above: a plain `@lru_cache`d function
+    read fresh at call time by `build_methylation_card`.
+    """
+    with patch(
+        "app.services.suggestion_service.tools.modkit",
+        return_value=_FakeTool(available, name="modkit"),
+    ) as probe:
+        yield probe
+
+
+def _write_bam_with_tags(path, *, mm_tag_positions=(), n_reads=5):
+    """Build a small synthetic BAM for build_methylation_card's K1 prefix
+    scan. Mirrors tests/storage/test_parsers.py's fixture-building pattern.
+    """
+    pysam = pytest.importorskip("pysam")
+    header = {
+        "HD": {"VN": "1.6", "SO": "coordinate"},
+        "SQ": [{"SN": "chr1", "LN": 100000}],
+    }
+    with pysam.AlignmentFile(str(path), "wb", header=header) as out:
+        for i in range(n_reads):
+            a = pysam.AlignedSegment()
+            a.query_name = f"read{i}"
+            a.query_sequence = "ACGT" * 25
+            a.flag = 0
+            a.reference_id = 0
+            a.reference_start = i * 10
+            a.mapping_quality = 60
+            a.cigar = [(0, 100)]
+            a.query_qualities = pysam.qualitystring_to_array("I" * 100)
+            if i in mm_tag_positions:
+                import array
+
+                a.set_tag("MM", "C+m,0;", value_type="Z")
+                a.set_tag("ML", array.array("B", [255]))
+            out.write(a)
+
+
+@contextmanager
+def _bam_blob(tmp_path, *, mm_tag_positions=()):
+    """Write a real BAM under `tmp_path` and point `blob_path` at it, so
+    `build_methylation_card`'s K1 scan reads a genuine file rather than
+    needing the whole blob-storage stack in a unit test.
+    """
+    bam_path = tmp_path / "methylation_card_fixture.bam"
+    _write_bam_with_tags(bam_path, mm_tag_positions=mm_tag_positions)
+    with patch(
+        "app.services.suggestion_service.blob_path", return_value=bam_path
+    ):
+        yield "fake-digest"
+
+
+class TestMethylationCard:
+    def test_the_probe_patch_actually_takes_effect(self, tmp_path):
+        """Guards every test below it, for the reason CLAUDE.md spells out:
+        the image ships modkit *installed*, so an available-card assertion
+        passes whether or not the patch worked. Only the unavailable
+        direction can tell a working seam from an escaped one."""
+        with installed_modkit(False):
+            card = build_methylation_card(_bam(blob_sha256="digest"))
+        assert card.status is CardStatus.UNAVAILABLE
+        assert "not installed" in card.reason
+
+    def test_a_bam_with_no_mm_tags_is_unavailable_and_explains_why(self, tmp_path):
+        """Criterion 3 of #631: the message must say *why* modification
+        calling cannot happen now, not just that it is unavailable. Asserted
+        on the actual explanation text -- a bare "unavailable" with no
+        explanation would pass a status-only test but fail the issue's
+        success criterion."""
+        with installed_modkit(True), _bam_blob(tmp_path, mm_tag_positions=()) as digest:
+            card = build_methylation_card(_bam(blob_sha256=digest))
+        assert card.status is CardStatus.UNAVAILABLE
+        assert "basecalling" in card.reason
+        assert "Dorado" in card.reason
+        assert "cannot be added afterwards" in card.reason
+
+    def test_a_non_bam_gets_no_card_at_all(self):
+        with installed_modkit(True):
+            assert build_methylation_card(_fake_obj(kind=FormatKind.FASTQ)) is None
+
+    def test_a_vcf_gets_no_card_at_all(self):
+        with installed_modkit(True):
+            assert build_methylation_card(_vcf()) is None
+
+    def test_a_bam_with_mm_tags_is_available(self, tmp_path):
+        with installed_modkit(True), _bam_blob(tmp_path, mm_tag_positions={0}) as digest:
+            card = build_methylation_card(_bam(obj_id="xyz", blob_sha256=digest))
+        assert card.status is CardStatus.AVAILABLE
+        assert card.kind == "methylation"
+        assert card.launch == {
+            "endpoint": "/pipelines/methylation",
+            "body": {"bam_id": "xyz"},
+        }
+
+    def test_is_registered_in_card_builders(self):
+        """A builder absent from CARD_BUILDERS is never called, so the card
+        exists in tests and nowhere in the app."""
+        assert "methylation" in [kind for kind, _ in CARD_BUILDERS]
 
 
 def _transcriptome_object(obj_id="cds1", blob_sha256="digest-cds1"):
