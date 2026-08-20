@@ -7,7 +7,7 @@ import { InfoMarker } from "./InfoMarker";
 import { NodeSelector } from "./NodeSelector";
 import { OnDemandCompute } from "./OnDemandCompute";
 import { Stat } from "./Stat";
-import { DistributionChart, VariantDensityChart } from "./VariantCharts";
+import { DistributionChart, IndelLengthChart, VariantDensityChart } from "./VariantCharts";
 import { VariantTable } from "./VariantTable";
 
 /**
@@ -146,6 +146,15 @@ export function VariantResults({ obj }: { obj: ObjectDetailData }) {
                         label="depth"
                         format={(v) => `${v.toFixed(0)}×`}
                       />
+                    </div>
+                  )}
+                  {f.vcf_stats_indel_lengths && f.vcf_stats_indel_lengths.length > 0 && (
+                    <div className="qc-chart">
+                      <div className="section-title">
+                        Indel length
+                        <InfoMarker metric="ui.chart_indel_lengths" />
+                      </div>
+                      <IndelLengthChart lengths={f.vcf_stats_indel_lengths} />
                     </div>
                   )}
                 </div>
