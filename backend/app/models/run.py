@@ -49,6 +49,14 @@ class RunKind(StrEnum):
     UNIPROT_DOWNLOAD = "uniprot_download"
     # Counting reads per gene for one sample.
     QUANTIFY = "quantify"
+    # Assembling transcript models from a spliced alignment. Separate from
+    # QUANTIFY for the same display-and-grouping reason DIFFERENTIAL_EXPRESSION
+    # is: "assembled transcripts" and "counted one sample" are not the same
+    # line in an activity view. Keeping it distinct also means this node needs
+    # no `run_tool` discriminator to stay unique -- see the comment on
+    # node_types.py's salmon_quantify, which must claim run_tool="salmon"
+    # precisely because it shares QUANTIFY with featureCounts.
+    TRANSCRIPT_ASSEMBLY = "transcript_assembly"
     # The test across samples. Separate from QUANTIFY for the same reason
     # ASSEMBLY_DOWNLOAD is separate from SRA_DOWNLOAD -- this is a display and
     # grouping vocabulary, and "counted one sample" and "compared twelve of
