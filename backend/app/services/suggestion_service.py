@@ -1228,24 +1228,40 @@ def build_transfer_annotation_card(obj, reference_annotations) -> SuggestionCard
 
 
 def build_classify_reads_card(obj) -> SuggestionCard | None:
-    """Taxonomic classification: what species these reads actually contain.
+    """Taxonomic classification: what species these reads or contigs contain.
 
-    Deliberately positioned against the read-quality QC card: that one
-    reports adapter and duplication levels, this one answers identity --
-    verifying the labeled organism and catching cross-species
-    contamination (spec K2-S1). Availability tracks the binary probe
-    only; the database's absence changes the launch dialog's copy, never
-    the card state (spec K2-S2).
+    For FASTQ: answers sample composition and detects cross-species contamination.
+    For FASTA (metagenome bins/contigs): answers organism identity and evaluates
+    bin purity (spec L2/R4).
+    Availability tracks the binary probe only; the database's absence changes the
+    launch dialog's copy, never the card state (spec K2-S2).
     """
-    if obj.format.kind is not FormatKind.FASTQ:
+    if obj.format.kind not in (FormatKind.FASTQ, FormatKind.FASTA):
+        return None
+    if (
+        obj.format.kind is FormatKind.FASTA
+        and obj.role in pipeline_service.COMPLETENESS_EXCLUDED_ROLES
+    ):
         return None
 
-    title = "Identify organisms"
-    description = (
-        "Classify reads by species with Kraken2 to verify the sample's "
-        "organism and detect cross-species contamination -- a different "
-        "question from read-quality QC's adapter and duplication checks."
-    )
+    if obj.format.kind is FormatKind.FASTA:
+        title = "Identify this bin"
+        description = (
+            "Classify contigs with Kraken2 to identify the dominant organism "
+            "and evaluate bin purity."
+        )
+        why = (
+            "A clean bin classifies overwhelmingly to one taxon; a spread across "
+            "distant taxa indicates a mixed bin."
+        )
+    else:
+        title = "Identify organisms"
+        description = (
+            "Classify reads by species with Kraken2 to verify the sample's "
+            "organism and detect cross-species contamination -- a different "
+            "question from read-quality QC's adapter and duplication checks."
+        )
+        why = None
 
     kraken_tool = tools.kraken2()
     if not kraken_tool.available:
@@ -1254,6 +1270,7 @@ def build_classify_reads_card(obj) -> SuggestionCard | None:
             category="CLASSIFY_READS",
             title=title,
             description=description,
+            why=why,
             status=CardStatus.UNAVAILABLE,
             reason=kraken_tool.error or "Kraken2 is unavailable.",
         )
@@ -1263,6 +1280,7 @@ def build_classify_reads_card(obj) -> SuggestionCard | None:
         category="CLASSIFY_READS",
         title=title,
         description=description,
+        why=why,
         status=CardStatus.AVAILABLE,
         launch={
             "endpoint": "/pipelines/classify-reads",

@@ -111,7 +111,9 @@ export function ClassifyReadsDialog({
     <div className="modal-backdrop" onClick={onClose}>
       <div className="modal trim-modal" onClick={(e) => e.stopPropagation()}>
         <h2>
-          Identify organisms
+          {object.format.kind === "fasta"
+            ? "Identify this bin"
+            : "Identify organisms"}
           <span className="dialog-tool-subtitle"> — Kraken2</span>
         </h2>
 

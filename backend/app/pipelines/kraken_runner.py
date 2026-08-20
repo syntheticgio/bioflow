@@ -176,6 +176,54 @@ def top_taxa(kraken_rows: list[dict], bracken_rows: list[dict]) -> dict:
     return {"taxa": taxa, "unclassified_pct": unclassified, "bracken_used": used}
 
 
+def derive_bin_taxonomy(
+    kraken_rows: list[dict], *, min_dominance_pct: float = 50.0
+) -> dict:
+    """Derive dominant taxon and fractions for bin identification (spec L2/R2/R3).
+
+    Returns a dict with:
+    - bin_taxon_label: dominant species name if >= min_dominance_pct,
+      "mixed" if leading species < min_dominance_pct, or "unclassified" if none.
+    - bin_taxon_fraction: float fraction (0.0..1.0) of leading species (or 0.0).
+    - bin_unclassified_fraction: float fraction (0.0..1.0) of unclassified sequences.
+    """
+    unclassified_pct = next(
+        (r["pct"] for r in kraken_rows if r["rank"] == "U"), 0.0
+    )
+    unclassified_fraction = round(unclassified_pct / 100.0, 4)
+
+    species = [
+        r for r in kraken_rows
+        if r["rank"] == "S"
+    ]
+    species.sort(key=lambda r: r["pct"], reverse=True)
+
+    if not species:
+        label = (
+            "unclassified"
+            if unclassified_pct >= min_dominance_pct or not kraken_rows
+            else "mixed"
+        )
+        return {
+            "bin_taxon_label": label,
+            "bin_taxon_fraction": 0.0,
+            "bin_unclassified_fraction": unclassified_fraction,
+        }
+
+    top = species[0]
+    fraction = round(top["pct"] / 100.0, 4)
+    if top["pct"] >= min_dominance_pct:
+        label = top["name"]
+    else:
+        label = "mixed"
+
+    return {
+        "bin_taxon_label": label,
+        "bin_taxon_fraction": fraction,
+        "bin_unclassified_fraction": unclassified_fraction,
+    }
+
+
 def organism_mismatch(
     metadata_organism: str | None, kraken_rows: list[dict]
 ) -> dict | None:
@@ -205,3 +253,4 @@ def organism_mismatch(
         "claimed": metadata_organism.strip(),
         "dominant": [{"name": r["name"], "pct": r["pct"]} for r in dominant],
     }
+

@@ -881,6 +881,29 @@ export const METRIC_INFO: Record<string, MetricInfo> = {
     computed:
       "Ten bands with edges at 100, 250, 500 bp and so on up to 100 kb, plus an overflow band above that. Length is the feature's own span, so a gene row's introns are included in it.",
   },
+
+  // ---- Bin taxonomy (Kraken2) -------------------------------------------
+  bin_taxon_label: {
+    term: "Taxonomic label",
+    description:
+      "The dominant organism identified in this metagenome bin. Labels are relative to the loaded Kraken2 database; novel organisms without close database relatives may be unclassified or assigned to nearby taxa.",
+    computed:
+      "Assigned to the highest-abundance species if supported by at least 50% of classified sequences, or reported as mixed when no single taxon dominates.",
+  },
+  bin_taxon_fraction: {
+    term: "Taxonomic fraction",
+    description:
+      "The proportion of sequences in this bin assigned to the dominant taxon. High dominance indicates a clean single-organism bin, while lower values suggest a mixed or chimeric bin.",
+    computed:
+      "The fraction of total sequences classified to the leading taxon in the Kraken2 report.",
+  },
+  bin_unclassified_fraction: {
+    term: "Unclassified fraction",
+    description:
+      "The fraction of sequences in this bin that could not be assigned to any taxon in the database. High unclassified fractions are expected for novel isolates or when using a narrow database.",
+    computed:
+      "The percentage of sequences assigned to NCBI taxid 0 (unclassified) divided by 100.",
+  },
 };
 
 /**

@@ -2618,12 +2618,13 @@ async def _apply_annotate_genome(result: dict, *, owner: str) -> None:
 
 
 async def _apply_classify_reads(result: dict, *, owner: str) -> None:
-    """Record classification facts on the reads object they describe.
+    """Record classification facts on the object they describe.
 
     Near-copy of ``_apply_annotate_genome``: read-only, no files to
     ingest.  A prior ``taxonomy_mismatch`` is cleared when the new run has
     none -- reclassifying against a better database must be able to
-    retract the accusation, not merely restate it.
+    retract the accusation, not merely restate it. Facts are merged by
+    per-key `facts.<key>` path (#606).
     """
     object_id = result.get("object_id")
     facts = result.get("facts") or {}
@@ -2635,21 +2636,22 @@ async def _apply_classify_reads(result: dict, *, owner: str) -> None:
         log.warning("classification_object_missing", object_id=object_id)
         return
 
-    merged = {**obj.facts, **facts}
-    if "taxonomy_mismatch" not in facts:
-        merged.pop("taxonomy_mismatch", None)
+    update: dict = {
+        DataObject.updated_at: datetime.now(UTC),
+        **{f"facts.{key}": value for key, value in facts.items()},
+    }
+    await obj.set(update)
+    if "taxonomy_mismatch" not in facts and "taxonomy_mismatch" in obj.facts:
+        await DataObject.find_one(DataObject.id == obj.id).update(
+            {"$unset": {"facts.taxonomy_mismatch": ""}}
+        )
 
-    await obj.set(
-        {
-            DataObject.facts: merged,
-            DataObject.updated_at: datetime.now(UTC),
-        }
-    )
     log.info(
         "classification_applied",
         object_id=object_id,
         taxa=len((facts.get("taxonomy") or {}).get("taxa") or []),
         mismatch="taxonomy_mismatch" in facts,
+        bin_label=facts.get("bin_taxon_label"),
     )
 
 

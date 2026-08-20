@@ -86,6 +86,9 @@ export const LABELS: Record<string, string> = {
   mapq_scale: "MAPQ scale",
   mapped_percent: "Mapped",
   duplicate_percent: "Duplicates",
+  bin_taxon_label: "Taxonomic label",
+  bin_taxon_fraction: "Taxonomic fraction",
+  bin_unclassified_fraction: "Unclassified fraction",
 };
 
 // Rendered as annotations on other rows, or in their own panel — not as rows
@@ -262,6 +265,16 @@ const GROUPS: FactGroup[] = [
     note: "Written by the index step.",
     keys: ["index_status", "index_built_by", "index_tool_version"],
     match: (k) => k.startsWith("index_"),
+  },
+  {
+    title: "Taxonomy",
+    note: "Derived from Kraken2 classification against the reference database.",
+    keys: [
+      "bin_taxon_label",
+      "bin_taxon_fraction",
+      "bin_unclassified_fraction",
+    ],
+    match: (k) => k.startsWith("bin_taxon_") || k.startsWith("bin_unclassified_"),
   },
 ];
 
@@ -468,6 +481,17 @@ function renderValue(
   // The label no longer carries "percent", so the value has to.
   if (key.endsWith("_percent") && typeof value === "number") {
     return `${formatNumber(value)}%`;
+  }
+
+  if (
+    (key === "bin_taxon_fraction" || key === "bin_unclassified_fraction") &&
+    typeof value === "number"
+  ) {
+    return `${formatNumber(value * 100)}%`;
+  }
+
+  if (key === "bin_taxon_label" && typeof value === "string") {
+    return value === "mixed" || value === "unclassified" ? value : <em>{value}</em>;
   }
 
   if (typeof value === "number") return formatNumber(value);
