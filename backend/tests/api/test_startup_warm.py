@@ -35,6 +35,16 @@ def stub_startup(monkeypatch):
     # tests below replace this with their own stub where the invalidation
     # task itself is what is under test.
     monkeypatch.setattr(main.tool_cache, "listen_for_invalidations", _noop)
+    # Same treatment, and for the same reason -- but this one was missing, and
+    # its absence cost more than the listener's would have. The two
+    # TestStartupInvalidationSubscriber tests replace `listen_for_invalidations`
+    # and nothing else, so they left the *real* warm running: a live probe of
+    # every binary in `all_tools()` (~4.4s cold), started as a background task
+    # and awaited by lifespan's own `warm_task.cancel()` on the way out. It
+    # showed up as ~11s of pure teardown for a file whose tests do 0.19s of
+    # work. Tests that are actually about the warm task still override this
+    # with their own stub, which is what makes overriding it here safe.
+    monkeypatch.setattr(main.tool_cache, "warm", _noop)
 
 
 class TestStartupWarm:
