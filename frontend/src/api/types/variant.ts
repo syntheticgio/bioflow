@@ -161,7 +161,9 @@ export interface SvRecord {
   svlen: number | null;
   qual: number | null;
   filter: string;
-  /** Read support for the call. Null when Sniffles2 did not report SUPPORT. */
+  /** Read support for the call. Null when the caller reported no support
+   *  data for this record (Sniffles2's SUPPORT key, or neither of Delly's
+   *  PE/SR keys). */
   support: number | null;
   gt: string;
   /** The paired breakend's ID, for a BND record. Null otherwise. */

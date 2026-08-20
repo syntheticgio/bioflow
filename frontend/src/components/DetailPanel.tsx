@@ -81,6 +81,10 @@ import { SraPanel } from "./SraPanel";
 import { TabPanel, Tabs, type TabDef } from "./Tabs";
 import { TruncatedValue } from "./TruncatedValue";
 
+// Keep in sync with SvCaller in backend/app/pipelines/sv_caller.py.
+// No exhaustiveness test can enforce this across the language boundary.
+const SV_CALLERS: Set<unknown> = new Set(["sniffles2", "delly"]);
+
 /** The right panel: details of whatever is selected in the left panel. */
 export function DetailPanel() {
   const [params] = useSearchParams();
@@ -968,7 +972,7 @@ function ObjectDetail({ id }: { id: string }) {
               obj.format.kind === "bed" ||
               obj.format.kind === "genbank" ? (
               <AnnotationResults obj={obj} />
-            ) : obj.facts.variants_called_by === "sniffles2" ? (
+            ) : SV_CALLERS.has(obj.facts.variants_called_by) ? (
               // A structural variant VCF is still role "variants" like an
               // ordinary called VCF (see sv_provenance in results.py), so
               // the caller fact is what tells the two apart -- SvResults

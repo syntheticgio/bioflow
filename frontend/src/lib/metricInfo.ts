@@ -753,7 +753,7 @@ export const METRIC_INFO: Record<string, MetricInfo> = {
       "SNPs and indels here are classified by site the same way bcftools classifies them, so these columns sum to the headline row above rather than drifting from it on files with multiallelic sites. A site whose alleles are all the same length but longer than one base is an MNP and appears only in the total.",
   },
 
-  // ---- Results tab: structural variants (Sniffles2) -----------------------
+  // ---- Results tab: structural variants (Sniffles2, Delly) ----------------
   "ui.sv_total": {
     term: "Structural variants",
     description:
@@ -762,7 +762,7 @@ export const METRIC_INFO: Record<string, MetricInfo> = {
   "ui.sv_type_count": {
     term: "SV type breakdown",
     description:
-      "How many calls Sniffles2 assigned to each structural variant type — deletion, insertion, duplication, inversion, or breakend. A callset dominated by one type against a distant reference is more often an alignment artifact than biology.",
+      "How many calls the structural variant caller assigned to each type — deletion, insertion, duplication, inversion, or breakend. A callset dominated by one type against a distant reference is more often an alignment artifact than biology.",
   },
   "ui.chart_sv_length": {
     term: "SV length distribution",
