@@ -20,9 +20,10 @@
 # can still be edited (`git commit --amend`, or a reword during rebase).
 #
 # Deliberately its own workflow rather than a job in build-check.yml: that
-# one carries `paths-ignore: '**/*.md'`, so a docs-only PR skips it entirely
-# -- and a docs-only PR is exactly where an off-hand subject like "Linting
-# issues" tends to appear.
+# workflow's jobs early-exit on a docs-only PR (#732) rather than skip via
+# a path filter, but this check should run at full strength regardless --
+# a docs-only PR is exactly where an off-hand subject like "Linting issues"
+# tends to appear.
 name: Commit check
 
 on:
