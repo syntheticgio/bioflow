@@ -779,8 +779,16 @@ def build_structural_variants_card(obj, chemistry) -> SuggestionCard | None:
     )
 
 
-def build_merge_structural_variants_card(obj, ctx=None) -> SuggestionCard | None:
-    """Offer SV merging when an SNF sidecar has sibling SNF sidecars in the project."""
+def build_merge_structural_variants_card(obj, sibling_snf_ids) -> SuggestionCard | None:
+    """Offer SV merging when an SNF sidecar has sibling SNF sidecars in the project.
+
+    `sibling_snf_ids` is the sorted list of SNF object IDs (as strings) in the
+    same project and on the same reference as `obj`, looked up once in
+    `suggestions_for` via `pipeline_service.sibling_snf_callsets`. It is
+    `None` when that lookup failed -- which the card reports as unavailable
+    rather than guessing. The body is `None` when `obj` is not an SNF, in
+    which case the card does not apply at all.
+    """
     if getattr(obj, "sidecar_role", None) != SidecarRole.SNF:
         return None
 
@@ -798,6 +806,30 @@ def build_merge_structural_variants_card(obj, ctx=None) -> SuggestionCard | None
             reason=f"{tool.name} is not installed.",
         )
 
+    if sibling_snf_ids is None:
+        return SuggestionCard(
+            kind="merge_structural_variants",
+            category="VARIANTS",
+            title=title,
+            description=description,
+            status=CardStatus.UNAVAILABLE,
+            reason="Sister callsets could not be looked up.",
+        )
+
+    if len(sibling_snf_ids) < 2:
+        return SuggestionCard(
+            kind="merge_structural_variants",
+            category="VARIANTS",
+            title=title,
+            description=description,
+            status=CardStatus.UNAVAILABLE,
+            reason=(
+                "No sibling SV callsets share this reference. "
+                "Merge needs two or more .snf files called against "
+                "the same assembly."
+            ),
+        )
+
     return SuggestionCard(
         kind="merge_structural_variants",
         category="VARIANTS",
@@ -807,7 +839,7 @@ def build_merge_structural_variants_card(obj, ctx=None) -> SuggestionCard | None
         status=CardStatus.AVAILABLE,
         launch={
             "endpoint": "/pipelines/merge_structural_variants",
-            "body": {"snf_object_ids": [str(obj.id)]},
+            "body": {"snf_object_ids": sibling_snf_ids},
         },
     )
 
@@ -2388,6 +2420,7 @@ class _Prefetched:
     assembly_alignments: object | None
     continuity_candidates: object | None
     transcriptomes: list[DataObject]
+    sibling_snf_ids: list[str] | None = None
 
 
 # Fixed order, and the order is behaviour: it is the order cards appear in the
@@ -2445,7 +2478,7 @@ CARD_BUILDERS: tuple[tuple[str, object], ...] = (
     ),
     (
         "merge_structural_variants",
-        lambda obj, ctx: build_merge_structural_variants_card(obj, ctx),
+        lambda obj, ctx: build_merge_structural_variants_card(obj, ctx.sibling_snf_ids),
     ),
     ("quantify", lambda obj, ctx: build_quantify_card(obj, ctx.annotations)),
     (
@@ -2700,6 +2733,13 @@ async def suggestions_for(obj) -> list[dict]:
         except Exception:  # noqa: BLE001 - a listing failure loses one card, not the grid
             continuity_candidates = None
 
+    sibling_snf_ids: list[str] | None = None
+    if getattr(obj, "sidecar_role", None) is SidecarRole.SNF:
+        try:
+            sibling_snf_ids = await pipeline_service.sibling_snf_callsets(obj)
+        except Exception:  # noqa: BLE001 - a listing failure loses one card, not the grid
+            sibling_snf_ids = None
+
     ctx = _Prefetched(
         references=references,
         annotations=annotations,
@@ -2713,6 +2753,7 @@ async def suggestions_for(obj) -> list[dict]:
         assembly_alignments=assembly_alignments,
         continuity_candidates=continuity_candidates,
         transcriptomes=transcriptomes,
+        sibling_snf_ids=sibling_snf_ids,
     )
 
     cards: list[dict] = []

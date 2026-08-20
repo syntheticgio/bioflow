@@ -3805,6 +3805,63 @@ def _sv_merge_dedup_key(*, snf_ids: list[PydanticObjectId]) -> str:
     return f"merge_structural_variants:{','.join(sorted_ids)}"
 
 
+async def _resolve_snf_reference(snf: DataObject) -> DataObject | None:
+    """The REFERENCE object an SNF's parent VCF was called against.
+
+    Walks SNF -> VCF (via sidecar_of) -> REFERENCE (via the VCF's derived_from),
+    returning None when the chain is broken. Single source of truth for that
+    resolution, shared by the merge suggestion card and the launch path so they
+    cannot disagree about which callsets belong together.
+    """
+    if snf.sidecar_of is None:
+        return None
+    parent_vcf = await DataObject.get(snf.sidecar_of)
+    if parent_vcf is None:
+        return None
+    if not parent_vcf.derived_from:
+        return None
+    for p_id in parent_vcf.derived_from:
+        p = await DataObject.get(p_id)
+        if p and p.role == ObjectRole.REFERENCE:
+            return p
+    return None
+
+
+async def sibling_snf_callsets(snf: DataObject) -> list[str]:
+    """All SNF sidecars in the same project sharing the same reference.
+
+    Used by the merge card to decide whether to offer merging (needs two or
+    more) and to fill the launch body with every relevant callset, not just the
+    single one the card was clicked on. Returns sorted SNF IDs including the
+    current one, or an empty list when the reference cannot be resolved.
+    """
+    from app.services import object_service
+
+    ref = await _resolve_snf_reference(snf)
+    if ref is None:
+        return []
+
+    project_objects = await object_service.list_objects(
+        snf.project_id, owner=snf.owner, limit=500
+    )
+    sibling_vcfs = [
+        o
+        for o in project_objects
+        if o.role is ObjectRole.VARIANTS
+        and o.format.kind in (FormatKind.VCF, FormatKind.BCF)
+        and ref.id in (o.derived_from or [])
+    ]
+
+    snf_ids: list[str] = []
+    for vcf in sibling_vcfs:
+        sidecars = await object_service.list_sidecars(vcf.id, owner=snf.owner)
+        for s in sidecars:
+            if s.sidecar_role == SidecarRole.SNF:
+                snf_ids.append(str(s.id))
+
+    return sorted(set(snf_ids))
+
+
 async def launch_merge_structural_variants(
     *,
     snf_object_ids: list[PydanticObjectId],
@@ -3839,14 +3896,7 @@ async def launch_merge_structural_variants(
 
     references: dict[str, tuple[str, PydanticObjectId]] = {}
     for obj in snf_objects:
-        parent_vcf = await DataObject.get(obj.sidecar_of) if obj.sidecar_of else None
-        ref_obj = None
-        if parent_vcf and parent_vcf.derived_from:
-            for p_id in parent_vcf.derived_from:
-                p = await DataObject.get(p_id)
-                if p and p.role == ObjectRole.REFERENCE:
-                    ref_obj = p
-                    break
+        ref_obj = await _resolve_snf_reference(obj)
         if ref_obj is not None:
             references[obj.name] = (ref_obj.name, ref_obj.id)
 
