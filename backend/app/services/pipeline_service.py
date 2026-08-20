@@ -6746,6 +6746,21 @@ async def default_assembly_params(obj: DataObject) -> dict:
     return params
 
 
+def _is_meta_assembly(parsed) -> bool:
+    """Whether these params describe a mixed-community assembly.
+
+    One question, two spellings: `FlyeParams.meta` is a checkbox orthogonal to
+    Flye's accuracy mode, while SPAdes carries `meta` as a `mode` value because
+    the tool rejects `--meta --isolate` and `--meta --careful`. Callers asking
+    "is this a community assembly?" should not have to know which.
+    """
+    if isinstance(parsed, assembly_params_module.FlyeParams):
+        return parsed.meta
+    if isinstance(parsed, assembly_params_module.SpadesParams):
+        return parsed.mode == "meta"
+    return False
+
+
 async def launch_assembly(
     *,
     object_id: PydanticObjectId,
@@ -6790,6 +6805,28 @@ async def launch_assembly(
             explicit = await object_service.get_object(mate_object_id, owner=owner)
         mate = await resolve_assembly_mate(reads, candidate=explicit)
 
+    # metaSPAdes refuses single-end input -- "current version of metaSPAdes can
+    # work either with single library (paired-end only) or in hybrid ... mode",
+    # verified against the installed 4.3.0. It refuses *after* read error
+    # correction, so without this the user waits minutes for a failure that was
+    # knowable at launch.
+    #
+    # SPAdes-specific rather than a `_is_meta_assembly` check on purpose: it is
+    # metaSPAdes that refuses single-end, not metagenome mode at large (Flye
+    # assembles single-end reads under `--meta` perfectly well), and the other
+    # three SPAdes modes assemble single-end fine.
+    if (
+        isinstance(parsed, assembly_params_module.SpadesParams)
+        and parsed.mode == "meta"
+        and mate is None
+    ):
+        raise ValidationError(
+            f"metaSPAdes needs paired reads, and no mate was found for "
+            f"{reads.name!r}. Assemble a paired read set in metagenome mode, "
+            "or choose another mode for these reads.",
+            details={"object_id": str(reads.id), "mode": "meta"},
+        )
+
     # Bases, approximated from file size. FASTQ carries ~2 bytes per base
     # (sequence plus quality) before compression, and both mates contribute.
     # Only consumed by a model with a non-zero read coefficient, so this is
@@ -6806,9 +6843,13 @@ async def launch_assembly(
         genome_bases=parsed.genome_size,
         threads=parsed.threads,
         read_bases=read_bases,
-        # Only FlyeParams declares `meta`; every other assembler has no meta
-        # mode and therefore no meta_memory_model for this to select.
-        meta=isinstance(parsed, assembly_params_module.FlyeParams) and parsed.meta,
+        # The two assemblers with a metagenome mode spell it differently --
+        # Flye as a boolean orthogonal to its accuracy mode, SPAdes as the mode
+        # itself, because SPAdes rejects `--meta` combined with its others.
+        # `estimate_assembly_mb` falls back to the standard model for any
+        # assembler without a `meta_memory_model`, so this stays a question
+        # about the params rather than about which specs have one.
+        meta=_is_meta_assembly(parsed),
     )
     resolved = await memory_estimate.resolve(
         job_type=JOB_TYPE_ASSEMBLE,

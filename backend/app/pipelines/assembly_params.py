@@ -195,10 +195,19 @@ class AbyssParams(BaseAssemblyParams):
 
 # SPAdes' running modes, as BioFlow offers them. `standard` is not a SPAdes
 # flag: it is this dialog's name for passing neither `--isolate` nor
-# `--careful`, which upstream documents as mutually incompatible. Modelled as
-# one select rather than two checkboxes so the UI cannot express the invalid
+# `--careful`, which upstream documents as mutually incompatible. `meta`
+# (metaSPAdes) is likewise incompatible with both. Modelled as one select
+# rather than three checkboxes so the UI cannot express an invalid
 # combination.
-SPADES_MODES = frozenset({"isolate", "careful", "standard"})
+#
+# Read off the registry rather than restated here, as FlyeParams already does:
+# a second hand-maintained list of the same modes is a pair of structures that
+# drift apart silently, and the drift shows up as a mode the dialog offers and
+# validation rejects.
+def _spades_modes() -> frozenset[str]:
+    from app.pipelines import assembler_registry
+
+    return assembler_registry.modes_for(Assembler.SPADES)
 
 
 @dataclass
@@ -222,10 +231,11 @@ class SpadesParams(BaseAssemblyParams):
     @classmethod
     def from_dict(cls, data: dict) -> "SpadesParams":
         mode = data.get("mode") or "isolate"
-        if mode not in SPADES_MODES:
+        valid = _spades_modes()
+        if mode not in valid:
             raise ValidationError(
                 f"Unknown SPAdes mode {mode!r}",
-                details={"valid": sorted(SPADES_MODES)},
+                details={"valid": sorted(valid)},
             )
         return cls(assembler=Assembler.SPADES, mode=mode, **cls._shared(data))
 

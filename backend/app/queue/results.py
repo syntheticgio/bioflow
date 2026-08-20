@@ -1630,6 +1630,15 @@ def assembly_provenance(result: dict) -> dict:
     }
     if params.get("mode"):
         provenance["assembly_mode"] = params["mode"]
+    # Whether this is a community assembly, as one key regardless of which
+    # assembler produced it. The two spell it differently -- Flye carries a
+    # `meta` boolean orthogonal to its accuracy mode, SPAdes carries `meta` as
+    # the mode itself -- and a consumer asking "can this be binned?" should not
+    # have to know which assembler ran. Recorded only when true: an
+    # `assembly_meta_mode: false` on every single-genome assembly ever made is
+    # noise in a facts table that renders what it holds.
+    if params.get("meta") or params.get("mode") == "meta":
+        provenance["assembly_meta_mode"] = True
     if params.get("genome_size"):
         provenance["assembly_genome_size"] = params["genome_size"]
         # Kept beside the number rather than dropped: a size BioFlow guessed

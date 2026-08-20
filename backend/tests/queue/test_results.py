@@ -201,3 +201,47 @@ async def test_apply_merge_transcripts_ingests_annotation_role_from_all_inputs(
     assert merged.facts["merged_by"] == "stringtie"
     assert merged.facts["input_count"] == 3
     assert merged.facts["novel_transcript_count"] == 7
+
+
+class TestAssemblyProvenanceMetaMode:
+    """`assembly_meta_mode` as one key across two spellings.
+
+    Flye carries `meta` as a boolean orthogonal to its accuracy mode; SPAdes
+    carries it as the mode itself, because the tool rejects `--meta` combined
+    with `--isolate` or `--careful`. A consumer asking "can this be binned?"
+    should not have to know which assembler ran.
+    """
+
+    def test_flye_meta_boolean_sets_the_fact(self):
+        prov = results.assembly_provenance(
+            {"assembler": "flye", "params": {"mode": "nano-hq", "meta": True}}
+        )
+        assert prov["assembly_meta_mode"] is True
+        # The accuracy mode is still recorded: meta does not replace it.
+        assert prov["assembly_mode"] == "nano-hq"
+
+    def test_spades_meta_mode_sets_the_fact(self):
+        prov = results.assembly_provenance(
+            {"assembler": "spades", "params": {"mode": "meta"}}
+        )
+        assert prov["assembly_meta_mode"] is True
+        assert prov["assembly_mode"] == "meta"
+
+    @pytest.mark.parametrize(
+        "params",
+        [
+            {"mode": "isolate"},
+            {"mode": "careful"},
+            {"mode": "standard"},
+            {"mode": "nano-hq", "meta": False},
+            {},
+        ],
+    )
+    def test_single_genome_assemblies_carry_no_meta_fact(self, params):
+        """Absent rather than False.
+
+        The facts table renders what it holds, so an `assembly_meta_mode:
+        false` on every single-genome assembly ever made is noise.
+        """
+        prov = results.assembly_provenance({"assembler": "flye", "params": params})
+        assert "assembly_meta_mode" not in prov

@@ -318,6 +318,163 @@ class TestLaunchReachesTheQueue:
         assert job.id == "job1"
         assert enqueued["payload"]["params"]["meta"] is True
 
+    @staticmethod
+    def _short_reads_object():
+        """Short reads, so `spec_for_chemistry` routes to a paired assembler."""
+        return SimpleNamespace(
+            id=PydanticObjectId(),
+            name="SRR1_1.fastq",
+            format=SimpleNamespace(kind=FormatKind.FASTQ),
+            role=None,
+            metadata={},
+            facts={"qc_read_chemistry": "short"},
+            status=ObjectStatus.READY,
+            project_id=PydanticObjectId(),
+            owner="local",
+            blob_sha256="a" * 64,
+            size=1_000_000,
+        )
+
+    @staticmethod
+    def _fixed_estimate():
+        """A resolved estimate, so these tests need no `job_timings`.
+
+        What they assert is about mode and pairing, not memory; letting
+        `memory_estimate.resolve` reach the real collection would make them
+        fail on an unrelated schema instead.
+        """
+        from app.services import memory_estimate
+
+        return patch(
+            "app.services.memory_estimate.resolve",
+            AsyncMock(
+                return_value=memory_estimate.MemoryEstimate(
+                    mb=1024,
+                    source=memory_estimate.EstimateSource.HEURISTIC,
+                    detail="from published tool coefficients",
+                )
+            ),
+        )
+
+    @staticmethod
+    def _spades_for_chemistry():
+        """Route these reads to SPAdes, available.
+
+        Two patches rather than one: `spec_for_chemistry` decides which
+        assembler short reads get (ABySS, which this image may not ship), and
+        `available()` probes the host. Patching the spec object is the seam
+        `assembler_registry.spec_for` documents -- the frozen dataclass
+        captured `tools.spades` at import, so patching the module attribute
+        would not be seen.
+        """
+        from app.pipelines import assembler_registry
+        from app.pipelines.assemblers import Assembler
+
+        spec = assembler_registry.spec_for(Assembler.SPADES)
+        return patch(
+            "app.pipelines.assembler_registry.spec_for_chemistry",
+            lambda chemistry: SimpleNamespace(
+                assembler=spec.assembler,
+                layout=spec.layout,
+                fields=spec.fields,
+                memory_model=spec.memory_model,
+                meta_memory_model=spec.meta_memory_model,
+                outputs=spec.outputs,
+                unavailable_reason=spec.unavailable_reason,
+                available=lambda: True,
+            ),
+        )
+
+    async def test_metaspades_without_a_mate_is_refused_at_launch(self):
+        """metaSPAdes rejects single-end input -- and does so only after read
+        error correction, minutes into the run. Verified against the installed
+        4.3.0: "current version of metaSPAdes can work either with single
+        library (paired-end only) or in hybrid ... mode".
+
+        So the refusal has to be here. A job that was always going to fail is
+        worse than one that never started: it burns the wait, and a failed run
+        still lands in `job_timings`.
+        """
+        reads = self._short_reads_object()
+
+        with (
+            self._spades_for_chemistry(),
+            self._fixed_estimate(),
+            patch(
+                "app.services.object_service.get_object",
+                AsyncMock(return_value=reads),
+            ),
+            patch(
+                "app.services.pipeline_service.resolve_assembly_mate",
+                AsyncMock(return_value=None),
+            ),
+            patch(
+                "app.services.object_service.list_objects", AsyncMock(return_value=[])
+            ),
+            patch(
+                "app.services.pipeline_service.current_admission_budget_mb",
+                AsyncMock(return_value=10_000_000),
+            ),
+            patch("app.queue.queue.enqueue", AsyncMock()) as enqueue,
+        ):
+            with pytest.raises(ValidationError) as excinfo:
+                await pipeline_service.launch_assembly(
+                    object_id=reads.id,
+                    owner="local",
+                    params={"assembler": "spades", "mode": "meta"},
+                )
+
+        assert "paired" in str(excinfo.value).lower()
+        # Nothing was queued: the whole point is that no run starts.
+        enqueue.assert_not_awaited()
+
+    async def test_the_other_spades_modes_still_run_single_end(self):
+        """The refusal is metaSPAdes-specific, not SPAdes-wide -- isolate,
+        careful and standard all assemble single-end input fine, and refusing
+        those would remove a capability that works."""
+        reads = self._short_reads_object()
+
+        async def _create_run(**kwargs):
+            return SimpleNamespace(id="run1", owner="local")
+
+        for mode in ("isolate", "careful", "standard"):
+            with (
+                self._spades_for_chemistry(),
+                self._fixed_estimate(),
+                patch(
+                    "app.services.object_service.get_object",
+                    AsyncMock(return_value=reads),
+                ),
+                patch(
+                    "app.services.pipeline_service.resolve_assembly_mate",
+                    AsyncMock(return_value=None),
+                ),
+                patch(
+                    "app.services.pipeline_service._resolve_readable",
+                    AsyncMock(return_value=("a" * 64, None)),
+                ),
+                patch("app.services.run_service.create_run", _create_run),
+                patch("app.services.run_service.link_job", AsyncMock()),
+                patch(
+                    "app.queue.queue.enqueue",
+                    AsyncMock(return_value=SimpleNamespace(id="job1")),
+                ),
+                patch(
+                    "app.services.object_service.list_objects",
+                    AsyncMock(return_value=[]),
+                ),
+                patch(
+                    "app.services.pipeline_service.current_admission_budget_mb",
+                    AsyncMock(return_value=10_000_000),
+                ),
+            ):
+                job = await pipeline_service.launch_assembly(
+                    object_id=reads.id,
+                    owner="local",
+                    params={"assembler": "spades", "mode": mode},
+                )
+            assert job.id == "job1", mode
+
     async def test_short_reads_no_longer_refused(self):
         """The #490 refusal is gone: short reads now have an installed
         assembler (ABySS), so `launch_assembly` no longer raises a

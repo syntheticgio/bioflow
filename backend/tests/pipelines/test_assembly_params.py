@@ -61,8 +61,8 @@ class TestSpadesParams:
         assert isinstance(params, assembly_params.SpadesParams)
         assert params.mode == "isolate"
 
-    def test_accepts_the_three_declared_modes(self):
-        for mode in ("isolate", "careful", "standard"):
+    def test_accepts_the_four_declared_modes(self):
+        for mode in ("isolate", "careful", "meta", "standard"):
             params = assembly_params.from_dict(
                 {"assembler": "spades", "mode": mode}
             )
@@ -70,7 +70,23 @@ class TestSpadesParams:
 
     def test_rejects_an_unknown_mode(self):
         with pytest.raises(ValidationError):
-            assembly_params.from_dict({"assembler": "spades", "mode": "meta"})
+            assembly_params.from_dict({"assembler": "spades", "mode": "metaviral"})
+
+    def test_valid_modes_come_from_the_registry(self):
+        """Not a second hand-maintained list beside the registry's choices.
+
+        Two structures spelling the same set drift apart silently, and the
+        drift surfaces as a mode the dialog offers and validation rejects.
+        """
+        from app.pipelines import assembler_registry
+
+        for mode in assembler_registry.modes_for(Assembler.SPADES):
+            assert (
+                assembly_params.from_dict(
+                    {"assembler": "spades", "mode": mode}
+                ).mode
+                == mode
+            )
 
     def test_rejects_frugal_which_is_deliberately_not_offered(self):
         """--frugal's own manual says it changes results unpredictably."""
