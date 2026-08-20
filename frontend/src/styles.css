@@ -3073,6 +3073,78 @@ a.btn {
   border-color: var(--accent);
 }
 
+/* --- Project QC summary (MultiQC) --- */
+
+/* Sits in the project panel header, above Project actions. Project-scoped
+   rather than per-file on purpose: the report summarizes every file and
+   belongs to none of them.
+
+   Base tokens throughout rather than the --ink-* scale the mockup used --
+   those are defined only in broadsheet.css, so a panel styled with them
+   loses its colours entirely in the default theme. */
+.project-qc {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding-top: 10px;
+  margin-top: 6px;
+  /* --border, not --color-divider: the latter exists only in broadsheet.css,
+     which aliases --border to it anyway, so this is correct in both themes
+     while the mockup's token would vanish in the default one. */
+  border-top: 1px solid var(--border);
+}
+
+.project-qc-eyebrow {
+  font-size: 11px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+}
+
+.project-qc-eyebrow.is-running {
+  color: var(--accent);
+}
+
+.project-qc-eyebrow.is-failed {
+  color: var(--error);
+}
+
+.project-qc-title {
+  font-weight: 600;
+  font-size: 15px;
+}
+
+/* "No report yet" / "Not available" -- a state, not a thing to open, so it
+   reads quieter than the report link that occupies the same slot. */
+.project-qc-title.is-muted {
+  color: var(--text-dim);
+}
+
+.project-qc-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.project-qc-note {
+  font-size: 11.5px;
+  color: var(--text-dim);
+  line-height: 1.45;
+}
+
+.project-qc-note.is-warn {
+  color: var(--warn);
+}
+
+.project-qc-note.is-error {
+  color: var(--error);
+}
+
+.project-qc-action {
+  align-self: flex-start;
+  padding: 0;
+}
+
 /* --- Project actions accordion --- */
 .panel-actions {
   border-bottom: 1px solid var(--border);
