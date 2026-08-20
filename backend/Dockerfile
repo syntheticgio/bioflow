@@ -339,6 +339,27 @@ RUN set -e \
     && chmod +x /usr/local/bin/datasets \
     && datasets --version
 
+# --- Delly ------------------------------------------------------------------
+#
+# Short-read structural variant calling (#620), the counterpart to Sniffles2
+# for long reads. A single static binary published for both architectures, so
+# this is the NCBI datasets shape above -- only the URL differs. No builder
+# stage and no arm64 skip: upstream ships linux-arm64, unlike Manta, which is
+# archived and x86-64 only.
+#
+# TARGETARCH is already in scope from the bwa-mem2 ARG above.
+ARG DELLY_VERSION=2.6.0
+RUN set -e \
+    && case "$TARGETARCH" in \
+         arm64) DELLY_ARCH=linux-arm64 ;; \
+         *)     DELLY_ARCH=linux-amd64 ;; \
+       esac \
+    && curl -fsSL \
+         "https://github.com/dellytools/delly/releases/download/v${DELLY_VERSION}/delly-v${DELLY_VERSION}-${DELLY_ARCH}" \
+         -o /usr/local/bin/delly \
+    && chmod +x /usr/local/bin/delly \
+    && delly --version
+
 # --- seqkit -------------------------------------------------------------
 #
 # Single static Go binary, same shape as the NCBI datasets CLI above --

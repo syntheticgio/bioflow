@@ -271,6 +271,7 @@ class TestSerialization:
             "bgzip",
             "clair3",
             "sniffles",
+            "delly",
             "deepvariant",
             "flye",
             "abyss",
@@ -1267,3 +1268,23 @@ def test_seqkit_is_not_runnable():
     """No job handler branches on seqkit yet, so it must not read as an
     actionable pipeline step."""
     assert tools.TOOL_META["seqkit"].runnable is False
+
+
+def test_delly_is_probed():
+    """The image ships Delly installed, so this asserts the probe exists and
+    names itself correctly rather than asserting availability -- per
+    CLAUDE.md, the direction that fails when the seam breaks is the flip to
+    unavailable, which the card test in Task 9 covers."""
+    from app.pipelines import tools
+
+    tools.delly.cache_clear()
+    tool = tools.delly()
+    assert tool.name == "delly"
+
+
+def test_delly_is_in_the_tool_list():
+    """A tool absent from _ALL_TOOLS never appears on /help/software."""
+    from app.pipelines import tools
+
+    names = {t.name for t in tools.all_tools()}
+    assert "delly" in names

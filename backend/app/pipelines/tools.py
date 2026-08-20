@@ -449,6 +449,13 @@ def sniffles() -> Tool:
     return _probe("sniffles", settings.sniffles_path, ["--version"])
 
 
+@lru_cache(maxsize=1)
+def delly() -> Tool:
+    # `--version` prints "Delly version: v2.6.0" (plus Boost/HTSlib lines) on
+    # stdout and exits 0, confirmed against a running container -- see Task 6.
+    return _probe("delly", settings.delly_path, ["--version"])
+
+
 def _probe_on_demand_image(name: str, image: str) -> Tool:
     """Whether an ON_DEMAND_IMAGE tool can be run, which is a question about
     Docker rather than about a binary on PATH.
@@ -946,6 +953,7 @@ def all_tools() -> list[Tool]:
         bgzip(),
         clair3(),
         sniffles(),
+        delly(),
         deepvariant(),
         flye(),
         abyss(),
@@ -1686,6 +1694,38 @@ TOOL_META: dict[str, ToolMeta] = {
             "runs Sniffles against the BAM and its reference, producing a "
             "typed VCF of deletions, insertions, duplications, inversions, "
             "and breakends. Small variants go to Clair3 or bcftools instead."
+        ),
+    ),
+    "delly": ToolMeta(
+        pipelines=(PipelineType.STRUCTURAL_VARIANT,),
+        one_liner="Structural variant caller for short reads",
+        summary=(
+            "Structural variant caller for short reads. Detects deletions, "
+            "duplications, inversions, and translocations from paired-end "
+            "and split-read signal -- the short-read counterpart to "
+            "Sniffles2, which needs long reads."
+        ),
+        strengths=(
+            "Detects SVs from Illumina paired-end data",
+            "Integrates paired-end and split-read evidence for each call",
+            "Single static binary on both amd64 and arm64",
+            "Actively maintained, unlike Manta",
+        ),
+        homepage="https://github.com/dellytools/delly",
+        repository="https://github.com/dellytools/delly",
+        citation="Rausch et al., Bioinformatics 2012",
+        citation_url="https://doi.org/10.1093/bioinformatics/bts378",
+        # BSD-3-Clause, per the GitHub API's license field for
+        # dellytools/delly and the repository's own LICENSE file.
+        license="BSD-3-Clause",
+        usage=(
+            "The short-read structural variant caller: an SV job on "
+            "short-read input runs `delly sr` against the BAM and its "
+            "reference, then converts Delly's BCF output to VCF with "
+            "bcftools. Long-read input goes to Sniffles2 instead. Unlike "
+            "Sniffles2, Delly has no minimum call-size setting, so its "
+            "output is reported as Delly produced it -- filter by length in "
+            "the structural variants table instead."
         ),
     ),
     "deepvariant": ToolMeta(
@@ -2898,6 +2938,7 @@ def reset_cache() -> None:
     bgzip.cache_clear()
     clair3.cache_clear()
     sniffles.cache_clear()
+    delly.cache_clear()
     deepvariant.cache_clear()
     flye.cache_clear()
     abyss.cache_clear()
