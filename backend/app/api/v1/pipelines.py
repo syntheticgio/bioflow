@@ -1020,6 +1020,42 @@ async def launch_phase_variants(body: PhaseVariantsRequest, owner: OwnerDep) -> 
     return JobOut.of(job)
 
 
+class HaplotagVariantsRequest(BaseModel):
+    object_id: PydanticObjectId
+    alignment_ids: list[PydanticObjectId]
+    # Sample name for whatsHap haplotag (defaults to the BAM's sample). Unused
+    # unless `ignore_read_groups` is set.
+    sample: str | None = None
+    # Ignore read groups in the BAM; uses the supplied sample name for every read.
+    ignore_read_groups: bool = False
+    params: dict = Field(default_factory=dict)
+    # Carried from the suggestion card's seed body so the dialog can populate
+    # its alignment picker without re-listing the project; not used here.
+    candidate_alignments: list | None = None
+    # "Launch anyway" from the refusal card. Skips the declared-budget refusal.
+    resource_override: bool = False
+
+
+@router.post("/haplotag", response_model=JobOut, status_code=status.HTTP_201_CREATED)
+async def launch_haplotag_route(body: HaplotagVariantsRequest, owner: OwnerDep) -> JobOut:
+    """Queue whatsHap haplotagging of a phased VCF onto one alignment."""
+    job = await pipeline_service.launch_haplotag(
+        object_id=body.object_id,
+        owner=owner,
+        alignment_ids=body.alignment_ids,
+        resource_override=body.resource_override,
+        # sample/ignore_read_groups arrive at the top level of the request body;
+        # fold them into params so the launcher (and the graph-node path, which
+        # carries them inside params) share one shape.
+        params={
+            **(body.params or {}),
+            "sample": body.sample,
+            "ignore_read_groups": body.ignore_read_groups,
+        },
+    )
+    return JobOut.of(job)
+
+
 @router.get("/vcfstats/variants/{object_id}")
 async def get_vcf_stats_variants(
     object_id: PydanticObjectId,

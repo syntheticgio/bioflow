@@ -254,6 +254,17 @@ async def _launch_phase_variants(*, inputs: dict, params: dict, owner: str):
     )
 
 
+async def _launch_haplotag(*, inputs: dict, params: dict, owner: str):
+    # Haplotag tags one alignment at a time: the single BAM wired here is the
+    # reads to carry the phase sets. The card passes the same id through params.
+    return await pipeline_service.launch_haplotag(
+        object_id=inputs["variants"],
+        owner=owner,
+        alignment_ids=[inputs["alignment"].id],
+        params=params,
+    )
+
+
 async def _launch_annotation_export(*, inputs: dict, params: dict, owner: str):
     """Export a filtered subset, holding the export behind the results
     sidecar it depends on.
@@ -1336,6 +1347,32 @@ NODE_TYPES: dict[str, NodeTypeSpec] = {
             PortSpec(
                 "phased",
                 PortType(format=FormatKind.VCF, role=ObjectRole.VARIANTS),
+            ),
+        ),
+    ),
+    "haplotag": NodeTypeSpec(
+        label="Haplotag variants",
+        launch_name="pipeline_service.launch_haplotag",
+        launch=_launch_haplotag,
+        run_kind=RunKind.HAPLOTAG,
+        # Creates a PipelineRun: haplotag is a compute step with a BAM input to
+        # hold accountable as a run input, same as phase_variants beside it.
+        inputs=(
+            PortSpec(
+                "variants",
+                PortType(format=FormatKind.VCF, role=ObjectRole.VARIANTS),
+            ),
+            # One alignment's reads carry the phase sets; haplotag tags a single
+            # BAM, unlike phase_variants which accepts several.
+            PortSpec(
+                "alignment",
+                PortType(format=FormatKind.BAM, role=ObjectRole.ALIGNMENT),
+            ),
+        ),
+        outputs=(
+            PortSpec(
+                "haplotagged",
+                PortType(format=FormatKind.BAM, role=ObjectRole.ALIGNMENT),
             ),
         ),
     ),

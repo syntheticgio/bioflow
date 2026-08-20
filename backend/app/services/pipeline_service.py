@@ -4592,6 +4592,188 @@ async def launch_phase_variants(
     return job
 
 
+# --- Variant haplotag -------------------------------------------------------
+
+
+HAPLOTAG_MEM_MB = 4096
+
+
+def _haplotag_dedup_key(vcf_id, params: dict, bam_id) -> str:
+    """Identity of a haplotag request.
+
+    The VCF, the BAM it tags, and the flag/thread fingerprint together identify
+    the work -- haplotagging the same VCF onto the same BAM the same way again
+    is the same work.
+    """
+    return f"haplotag:{vcf_id}:{bam_id}:{_params_fingerprint(params)}"
+
+
+async def launch_haplotag(
+    *,
+    object_id: PydanticObjectId,
+    alignment_ids: list[PydanticObjectId],
+    owner: str,
+    reference_id: PydanticObjectId | None = None,
+    params: dict | None = None,
+    resource_override: bool = False,
+):
+    """Queue a whatsHap haplotag run over a phased-variant VCF.
+
+    Haplotag reads the phase sets (PS tags) a phased VCF carries and stamps
+    them onto the reads of a single alignment, producing a haplotagged BAM.
+    The reference is inferred from the VCF's provenance when not given, the
+    same as variant calling infers it from the BAM.
+    """
+    from app.pipelines.whatshap_runner import WhatshapParams
+    from app.queue import queue
+    from app.services import object_service
+
+    if not alignment_ids:
+        raise ValidationError(
+            "Haplotag needs an alignment to tag.",
+            details={"object_id": str(object_id), "needs": "alignment_ids"},
+        )
+
+    vcf = await object_service.get_object(object_id, owner=owner)
+    if vcf is None or vcf.format.kind is not FormatKind.VCF:
+        raise ValidationError(
+            f"{vcf.name!r} is not a VCF." if vcf else "Variant object not found.",
+            details={"object_id": str(object_id)},
+        )
+    if vcf.status is not ObjectStatus.READY:
+        raise ValidationError(
+            f"{vcf.name!r} is not ready ({vcf.status.value}).",
+            details={"object_id": str(vcf.id), "status": vcf.status.value},
+        )
+
+    tbi = await _sidecar_of_role(vcf, SidecarRole.TBI)
+    if tbi is None:
+        raise ValidationError(
+            f"{vcf.name!r} has no VCF index (.tbi). Index it first.",
+            details={"object_id": str(vcf.id), "needs": "run_vcf_stats"},
+        )
+
+    reference = await _resolve_variant_reference(vcf, reference_id, owner=owner)
+    fai = await _sidecar_of_role(reference, SidecarRole.FAI)
+    if fai is None:
+        raise ValidationError(
+            f"Reference {reference.name!r} has no FASTA index (.fai). "
+            f"Build its index first.",
+            details={"reference_id": str(reference.id), "needs": "build_index"},
+        )
+
+    whatshap_params = WhatshapParams.from_dict(params)
+    tools.require(tools.whatshap())
+
+    refuse_if_over_budget(
+        declared_mb=HAPLOTAG_MEM_MB,
+        budget_mb=await current_admission_budget_mb(),
+        resource_override=resource_override,
+    )
+
+    # A single alignment: haplotag stamps its reads with the VCF's phase sets.
+    bam_id = alignment_ids[0]
+    bam = await object_service.get_object(bam_id, owner=owner)
+    if bam is None or bam.format.kind is not FormatKind.BAM:
+        raise ValidationError(
+            f"{bam.name!r} is not a BAM." if bam else "Alignment not found.",
+            details={"object_id": str(bam_id)},
+        )
+    if bam.status is not ObjectStatus.READY:
+        raise ValidationError(
+            f"{bam.name!r} is not ready ({bam.status.value}).",
+            details={"object_id": str(bam.id), "status": bam.status.value},
+        )
+    bai = await _sidecar_of_role(bam, SidecarRole.BAI)
+    if bai is None:
+        raise ValidationError(
+            f"{bam.name!r} has no BAM index (.bai). Index it first.",
+            details={"bam_id": str(bam.id), "needs": "index_bam"},
+        )
+
+    payload: dict = {
+        "object_id": str(vcf.id),
+        "project_id": str(vcf.project_id),
+        "vcf_name": vcf.name,
+        "reference_object_id": str(reference.id),
+        "reference_name": reference.name,
+        "threads": whatshap_params.threads,
+        "sample": whatshap_params.sample,
+        "ignore_read_groups": whatshap_params.ignore_read_groups,
+        "bam_count": 1,
+        "alignment_object_ids": [str(bam.id)],
+    }
+    for key, obj in (
+        ("vcf", vcf),
+        ("tbi", tbi),
+        ("reference", reference),
+        ("fai", fai),
+    ):
+        digest, path = await _resolve_readable(obj)
+        if digest:
+            payload[f"{key}_sha256"] = digest
+        if path:
+            payload[f"{key}_path"] = path
+    payload["bam_name_0"] = bam.name
+    payload["sample_0"] = sample_name_for(bam)
+    for key, obj in (("bam", bam), ("bai", bai)):
+        digest, path = await _resolve_readable(obj)
+        if digest:
+            payload[f"{key}_0_sha256"] = digest
+        if path:
+            payload[f"{key}_0_path"] = path
+
+    run = await run_service.create_run(
+        kind=RunKind.HAPLOTAG,
+        project_id=vcf.project_id,
+        label=f"{vcf.name} → haplotagged",
+        inputs=[
+            RunInput(object_id=vcf.id, name=vcf.name, role=RunInputRole.VARIANTS),
+            RunInput(
+                object_id=reference.id,
+                name=reference.name,
+                role=RunInputRole.REFERENCE,
+            ),
+            RunInput(object_id=bam.id, name=bam.name, role=RunInputRole.ALIGNMENT),
+        ],
+        params=whatshap_params.as_dict(),
+        owner=owner,
+        tool="whatshap",
+    )
+
+    job = await queue.enqueue(
+        "haplotag",
+        owner=owner,
+        payload=payload,
+        job_class=JobClass.COMPUTE,
+        resources=JobResources(
+            cpu=whatshap_params.threads,
+            mem_mb=HAPLOTAG_MEM_MB,
+            io=IoClass.HEAVY,
+        ),
+        max_attempts=2,
+        dedup_key=_haplotag_dedup_key(vcf.id, whatshap_params.as_dict(), bam.id),
+        project_id=vcf.project_id,
+        object_id=vcf.id,
+        resource_override=resource_override,
+    )
+    if job is None:
+        await run_service.discard_run(run.id, owner=run.owner)
+        raise ConflictError(
+            "An identical haplotag run is already queued or running",
+            details={"object_id": str(vcf.id), "alignment_id": str(bam.id)},
+        )
+
+    await run_service.link_job(run.id, job.id, RunJobRole.HAPLOTAG)
+    log.info(
+        "haplotag_launched",
+        vcf_id=str(vcf.id),
+        alignment_id=str(bam.id),
+        job_id=str(job.id),
+    )
+    return job
+
+
 # --- Expression: quantification and differential testing --------------------
 
 

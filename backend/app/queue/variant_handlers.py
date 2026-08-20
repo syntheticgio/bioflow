@@ -900,3 +900,105 @@ def phase_variants(ctx: JobContext) -> dict:
         "tool_version": whatshap.version,
         "alignment_object_ids": ctx.payload.get("alignment_object_ids", []),
     }
+
+
+@handler(
+    "haplotag",
+    mode=HandlerMode.SUBPROCESS,
+    job_class=JobClass.COMPUTE,
+    resources=JobResources(cpu=4, mem_mb=4096, io=IoClass.HEAVY),
+    # A whatsHap failure is almost always deterministic, and retrying a
+    # multi-minute haplotag run delays the error without making it less likely.
+    max_attempts=2,
+)
+def haplotag(ctx: JobContext) -> dict:
+    """Haplotag one alignment against a phased VCF with whatsHap.
+
+    Reads the phase sets (PS tags) the phased VCF already carries and stamps
+    them onto the reads of a single alignment, producing a haplotagged BAM.
+    Unlike `phase_variants`, the output is a BAM -- the apply function indexes
+    it -- not a VCF.
+    """
+    object_id = ctx.payload.get("object_id")
+    if not object_id:
+        raise PermanentError("haplotag requires an 'object_id'")
+
+    work = _prepare_workdir(ctx, "haplotag")
+    whatshap = tools.require(tools.whatshap())
+
+    # The phased VCF and its index, read-only (symlinked). whatsHap reads the
+    # PS tags from the VCF; the .tbi sits beside it, as it does for phasing.
+    vcf_name = ctx.payload.get("vcf_name")
+    vcf = _named_link(work, _resolve_blob(ctx.payload, "vcf"), vcf_name)
+    _named_link(
+        work,
+        _resolve_blob(ctx.payload, "tbi"),
+        f"{vcf_name}.tbi",
+    )
+
+    # The reference and its .fai, staged as real siblings -- whatsHap reads the
+    # .fai next to the FASTA, the same convention call_variants uses.
+    ref_name = Path(ctx.payload.get("reference_name") or "reference.fa").name
+    materialized = aligners.materialize(
+        workdir=work / "ref",
+        reference_name=ref_name,
+        reference_blob=_resolve_blob(ctx.payload, "reference"),
+        sidecars={
+            f"{ref_name}{aligners.FAI_SUFFIX}": str(
+                _resolve_blob(ctx.payload, "fai")
+            )
+        },
+    )
+    if materialized.missing_index:
+        raise PermanentError(
+            f"The reference index for {ref_name!r} could not be laid out. Its "
+            f".fai may be recorded against a different reference."
+        )
+    reference = materialized.reference
+
+    # The single alignment whose reads carry the phase sets.
+    bam_name = Path(ctx.payload.get("bam_name_0") or "aligned.bam").name
+    bam = work / bam_name
+    bam.unlink(missing_ok=True)
+    bam.symlink_to(_resolve_blob(ctx.payload, "bam_0"))
+    bai = work / f"{bam_name}{aligners.BAI_SUFFIX}"
+    bai.unlink(missing_ok=True)
+    bai.symlink_to(_resolve_blob(ctx.payload, "bai_0"))
+
+    log_path = settings.logs_dir / f"{ctx.job_id}.log"
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+
+    out = work / "haplotagged.bam"
+    cmd = whatshap_runner.build_whatshap_haplotag_command(
+        whatshap_path=whatshap.path,
+        reference=reference,
+        vcf=vcf,
+        bam=bam,
+        out=out,
+        threads=int(ctx.payload.get("threads", 4)),
+        sample=ctx.payload.get("sample"),
+        ignore_read_groups=bool(ctx.payload.get("ignore_read_groups", False)),
+    )
+    code = run_subprocess(
+        ctx, cmd, log_path=str(log_path), on_line=_whatshap_line_logger(ctx)
+    )
+    if code != 0:
+        raise _failure(code, log_path, "whatshap")
+
+    name = whatshap_runner.haplotag_name(vcf_name or vcf.name)
+    produced = out.parent / name
+    if produced != out:
+        out.rename(produced)
+    ctx.progress(phase="done", pct=1.0, message="haplotag complete")
+    log.info("haplotag_finished", job_id=ctx.job_id, output=produced.name)
+    return {
+        "object_id": object_id,
+        "reference_object_id": ctx.payload.get("reference_object_id"),
+        "project_id": ctx.payload.get("project_id"),
+        "job_id": ctx.job_id,
+        "output": {"tmp_path": str(produced), "name": produced.name},
+        "tool_version": whatshap.version,
+        "alignment_object_ids": ctx.payload.get("alignment_object_ids", []),
+        "sample": ctx.payload.get("sample"),
+        "ignore_read_groups": bool(ctx.payload.get("ignore_read_groups", False)),
+    }
