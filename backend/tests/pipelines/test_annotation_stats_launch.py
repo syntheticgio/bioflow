@@ -66,6 +66,7 @@ def test_genbank_does_not_count_as_a_featurecounts_annotation():
     obj = SimpleNamespace(
         status=ObjectStatus.READY,
         format=SimpleNamespace(kind=FormatKind.GENBANK),
+        role=None,
     )
     assert _is_annotation(obj) is False
 

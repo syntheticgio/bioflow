@@ -237,6 +237,14 @@ class RunJobRole(StrEnum):
     # Genome annotation. The whole point of its run — an annotation run
     # whose annotation failed produced nothing.
     ANNOTATE = "annotate"
+    # StringTie transcript assembly. Not QUANTIFY: that role names
+    # featureCounts/Salmon jobs linked to a RunKind.QUANTIFY run, and this
+    # job is transcript_assembly under RunKind.TRANSCRIPT_ASSEMBLY -- a
+    # different job kind under a different run kind, so it gets its own
+    # name rather than borrowing QUANTIFY's. The whole point of its run,
+    # same reasoning as ASSEMBLE/CONSENSUS/POLISH: a run whose assembly
+    # failed produced nothing.
+    ASSEMBLE_TRANSCRIPTS = "assemble_transcripts"
 
 
 # Roles whose failure does not fail the run. The test is whether the expensive

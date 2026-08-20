@@ -1453,6 +1453,12 @@ SALMON_QUANTIFY_MEM_MB = 8192
 
 DIFFERENTIAL_EXPRESSION_MEM_MB = 4096
 
+# Matches expression_handlers.transcript_assembly's own
+# @handler(resources=JobResources(mem_mb=4096, ...)): StringTie holds the
+# current locus's read bundle plus its splice graph in memory, not the whole
+# BAM, so this tracks locus depth rather than genome size.
+TRANSCRIPT_ASSEMBLY_MEM_MB = 4096
+
 # Matches the handler's own @handler(...) registration (see
 # feature_coverage_handlers.run_feature_coverage): a job cannot need less
 # memory to run than it declares to the scheduler.
@@ -4312,8 +4318,19 @@ def _is_annotation(obj: DataObject) -> bool:
     documents for a different mismatch. Broadening this later needs an
     `attributes_for_format` case and a real featureCounts-readable input, not
     just an enum member here.
+
+    One role does gate here despite the format-first rule above:
+    `ObjectRole.ASSEMBLED_TRANSCRIPTS` is excluded, because a StringTie GTF is
+    one sample's proposed transcript models, not ground truth, and offering
+    it back as a featureCounts reference or StringTie's own `-G` input would
+    treat a hypothesis as the annotation.
     """
     if obj.status is not ObjectStatus.READY:
+        return False
+    # Assembled transcripts are GTF but are not a reference: they are one
+    # sample's proposed models, and feeding them back as -G or as a
+    # featureCounts reference would treat a hypothesis as ground truth.
+    if obj.role is ObjectRole.ASSEMBLED_TRANSCRIPTS:
         return False
     return obj.format.kind in (FormatKind.GFF, FormatKind.GTF)
 
@@ -4665,6 +4682,113 @@ async def launch_quantify(
         bam_id=str(bam.id),
         strandedness=merged.strandedness,
         paired=merged.paired,
+    )
+    return job
+
+
+async def launch_transcript_assembly(
+    *,
+    bam_id: PydanticObjectId,
+    owner: str,
+    annotation_id: PydanticObjectId | None = None,
+    params: dict | None = None,
+    resource_override: bool = False,
+) -> Job:
+    """Queue transcript assembly from one splice-aware alignment.
+
+    Modeled on `launch_quantify`: same BAM-plus-annotation shape, same
+    `resolve_annotation` call for the reference, same per-sample RunInput
+    pair. The differences are the tool (StringTie, not featureCounts) and the
+    RunKind (TRANSCRIPT_ASSEMBLY, not QUANTIFY) -- see the RunKind.
+    TRANSCRIPT_ASSEMBLY comment in app/models/run.py for why those stay
+    distinct. Unlike `launch_quantify`, the annotation is not optional to the
+    tool itself (see stringtie_runner.assemble_command on why -G is
+    required), even though it is still optional on this launcher's own
+    signature and resolved the same way quantify's is.
+    """
+    from app.queue import queue
+    from app.services import object_service
+
+    # Hoisted above the enqueue for the same reason as launch_quantify: a
+    # declaration the budget can never satisfy is unclaimable, and claim.lua
+    # has no starvation escape (#478, #527).
+    refuse_if_over_budget(
+        declared_mb=TRANSCRIPT_ASSEMBLY_MEM_MB,
+        budget_mb=await current_admission_budget_mb(),
+        resource_override=resource_override,
+    )
+
+    bam = await object_service.get_object(bam_id, owner=owner)
+    _check_quantifiable(bam)
+
+    annotation = await resolve_annotation(bam.project_id, annotation_id, owner=owner)
+
+    tools.require(tools.stringtie())
+
+    payload: dict = {
+        "object_id": str(bam.id),
+        "annotation_object_id": str(annotation.id),
+        "project_id": str(bam.project_id),
+        "bam_name": bam.name,
+        "annotation_name": annotation.name,
+        "params": dict(params or {}),
+        "threads": (params or {}).get("threads") or 4,
+    }
+    for key, obj in (("bam", bam), ("annotation", annotation)):
+        digest, path = await _resolve_readable(obj)
+        if digest:
+            payload[f"{key}_sha256"] = digest
+        if path:
+            payload[f"{key}_path"] = path
+
+    run = await run_service.create_run(
+        kind=RunKind.TRANSCRIPT_ASSEMBLY,
+        project_id=bam.project_id,
+        label=f"{bam.name} → transcripts ({annotation.name}, stringtie)",
+        inputs=[
+            RunInput(object_id=bam.id, name=bam.name, role=RunInputRole.ALIGNMENT),
+            RunInput(
+                object_id=annotation.id,
+                name=annotation.name,
+                role=RunInputRole.ANNOTATION,
+            ),
+        ],
+        params=payload["params"],
+        owner=owner,
+        tool="stringtie",
+    )
+
+    job = await queue.enqueue(
+        "transcript_assembly",
+        owner=owner,
+        payload=payload,
+        job_class=JobClass.COMPUTE,
+        resources=JobResources(
+            cpu=4, mem_mb=TRANSCRIPT_ASSEMBLY_MEM_MB, io=IoClass.HEAVY
+        ),
+        max_attempts=2,
+        dedup_key=(
+            f"transcript_assembly:{bam.id}:{annotation.id}:"
+            f"{_params_fingerprint(payload['params'])}"
+        ),
+        project_id=bam.project_id,
+        object_id=bam.id,
+        resource_override=resource_override,
+    )
+    if job is None:
+        await run_service.discard_run(run.id, owner=run.owner)
+        raise ConflictError(
+            "An identical transcript assembly is already queued or running",
+            details={"bam_id": str(bam.id), "annotation_id": str(annotation.id)},
+        )
+
+    await run_service.link_job(run.id, job.id, RunJobRole.ASSEMBLE_TRANSCRIPTS)
+    log.info(
+        "transcript_assembly_launched",
+        job_id=str(job.id),
+        run_id=str(run.id),
+        bam_id=str(bam.id),
+        annotation_id=str(annotation.id),
     )
     return job
 
