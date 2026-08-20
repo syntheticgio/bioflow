@@ -77,11 +77,29 @@ def test_clr_is_allowed_even_though_small_variant_calling_refuses_it():
     assert sniffles_runner.sv_calling_allowed_for(ReadChemistry.CLR) is True
 
 
-@pytest.mark.parametrize(
-    "chemistry", [ReadChemistry.SHORT, ReadChemistry.UNKNOWN]
-)
-def test_short_and_unknown_are_refused(chemistry):
-    assert sniffles_runner.sv_calling_allowed_for(chemistry) is False
+def test_short_reads_are_allowed_now_that_delly_exists():
+    """SHORT used to be refused; #620 added Delly as its SV caller."""
+    assert sniffles_runner.sv_calling_allowed_for(ReadChemistry.SHORT) is True
+
+
+def test_unknown_is_refused():
+    assert sniffles_runner.sv_calling_allowed_for(ReadChemistry.UNKNOWN) is False
+
+
+def test_allowed_for_delegates_to_the_caller_seam():
+    """One mapping, not two that can drift. Patching the seam must change
+    this function's answer -- if it does not, a second copy of the
+    chemistry table survives somewhere."""
+    from unittest.mock import patch
+
+    from app.pipelines import sniffles_runner
+    from app.pipelines.align_runner import ReadChemistry
+
+    with patch(
+        "app.pipelines.sniffles_runner.sv_caller.caller_for_chemistry",
+        return_value=None,
+    ):
+        assert not sniffles_runner.sv_calling_allowed_for(ReadChemistry.HIFI)
 
 
 def test_snf_output_passed_when_set():
