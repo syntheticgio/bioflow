@@ -168,6 +168,13 @@ async def _launch_feature_coverage(*, inputs: dict, params: dict, owner: str):
     )
 
 
+async def _launch_coverage(*, inputs: dict, params: dict, owner: str):
+    return await pipeline_service.launch_coverage(
+        bam_id=inputs["alignment"],
+        owner=owner,
+    )
+
+
 async def _launch_variant_calling(*, inputs: dict, params: dict, owner: str):
     return await pipeline_service.launch_variant_calling(
         bam_id=inputs["alignment"],
@@ -547,6 +554,22 @@ NODE_TYPES: dict[str, NodeTypeSpec] = {
                 PortType(formats=(FormatKind.GFF, FormatKind.GTF)),
                 required=False,
             ),
+        ),
+        outputs=(),
+    ),
+    "coverage": NodeTypeSpec(
+        label="Coverage depth",
+        launch_name="pipeline_service.launch_coverage",
+        run_kind=None,  # Read-only: facts + a report, no PipelineRun.
+        launch=_launch_coverage,
+        inputs=(
+            PortSpec(
+                "alignment",
+                PortType(format=FormatKind.BAM, role=ObjectRole.ALIGNMENT),
+            ),
+            # No annotation port, unlike feature_coverage above: the windows
+            # are tiled from the reference's own contig lengths, so there is
+            # nothing for the canvas to wire and nothing to resolve.
         ),
         outputs=(),
     ),
