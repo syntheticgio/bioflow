@@ -2648,6 +2648,88 @@ def build_methylation_card(obj) -> SuggestionCard | None:
     )
 
 
+def build_gc_bias_card(obj, alignment_target) -> SuggestionCard | None:
+    """GC-vs-coverage bias curve: does depth vary with GC content, and if
+    so, in which direction.
+
+    `alignment_target` is the BAM's resolved reference, pre-resolved the
+    same way `build_consensus_card`'s `reference` is -- an async provenance
+    walk kept out of this synchronous builder. `None` means that walk
+    raised: no recorded target, or an ambiguous one.
+
+    Three distinct refusal reasons rather than one generic "unavailable",
+    matching (independently of, not sharing code with) the three named
+    preconditions `pipeline_service.launch_gc_bias` refuses on: each names
+    the specific missing step so the user knows what to run next, and none
+    of them auto-launches that step -- two multi-minute jobs from one click
+    on a chart card is a surprise no other card in this file springs.
+    """
+    if obj.format.kind is not FormatKind.BAM:
+        return None
+
+    title = "Coverage vs GC bias"
+    description = (
+        "Plot mean read depth against GC content across the reference, to "
+        "show whether this library's coverage is biased by GC -- a dome "
+        "shape is PCR amplification bias, a flat line is not."
+    )
+
+    if alignment_target is None:
+        return SuggestionCard(
+            kind="gc_bias",
+            category="ASSEMBLY_QC",
+            title=title,
+            description=description,
+            status=CardStatus.UNAVAILABLE,
+            reason="This alignment has no recorded alignment target.",
+        )
+
+    gc_tracks_fact = (alignment_target.facts or {}).get("gc_tracks")
+    if not gc_tracks_fact or not gc_tracks_fact.get("contigs"):
+        return SuggestionCard(
+            kind="gc_bias",
+            category="ASSEMBLY_QC",
+            title=title,
+            description=description,
+            status=CardStatus.UNAVAILABLE,
+            reason=(
+                f"{alignment_target.name!r} has no GC tracks computed. "
+                f"Run the Circos GC tracks analysis on it first."
+            ),
+        )
+
+    facts = obj.facts or {}
+    if facts.get("coverage_status") != "ok" or facts.get("coverage_mode") != "windows":
+        return SuggestionCard(
+            kind="gc_bias",
+            category="ASSEMBLY_QC",
+            title=title,
+            description=description,
+            status=CardStatus.UNAVAILABLE,
+            reason=(
+                "This BAM has no windowed coverage computed. Run coverage "
+                "depth analysis on it first (without a target region set)."
+            ),
+        )
+
+    return SuggestionCard(
+        kind="gc_bias",
+        category="ASSEMBLY_QC",
+        title=title,
+        description=description,
+        why=(
+            "A dome peaking at mid-GC is PCR amplification bias, fixable "
+            "at the bench; a flat curve rules that out as the cause of any "
+            "coverage unevenness this run shows."
+        ),
+        status=CardStatus.AVAILABLE,
+        launch={
+            "endpoint": "/pipelines/gc-bias",
+            "body": {"bam_id": str(obj.id)},
+        },
+    )
+
+
 def build_salmon_quantify_card(obj, transcriptomes) -> SuggestionCard | None:
     """Alignment-free transcript quantification for RNA-seq reads.
 
@@ -2920,6 +3002,7 @@ CARD_BUILDERS: tuple[tuple[str, object], ...] = (
     ),
     ("coverage", lambda obj, ctx: build_coverage_card(obj)),
     ("methylation", lambda obj, ctx: build_methylation_card(obj)),
+    ("gc_bias", lambda obj, ctx: build_gc_bias_card(obj, ctx.alignment_target)),
     ("annotate", lambda obj, ctx: build_annotate_card(obj, ctx.annotation_inputs)),
     ("phase", lambda obj, ctx: build_phase_card(obj, ctx.phase_inputs)),
     ("annotate_genome", lambda obj, ctx: build_annotate_genome_card(obj)),
