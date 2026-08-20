@@ -18,6 +18,9 @@ backend/.venv/
 # Superpowers brainstorming scratch (mockups, session state)
 .superpowers/
 skills-lock.json
+
+# Local trend history for ops/test-timing.sh
+ops/.test-timing-history.jsonl
 .obsidian/
 .mcp.json
 
