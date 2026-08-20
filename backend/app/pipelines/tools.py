@@ -885,6 +885,14 @@ def salmon() -> Tool:
 
 
 @lru_cache(maxsize=1)
+def stringtie() -> Tool:
+    # `stringtie --version` exits zero and prints a bare "2.2.1" to stdout,
+    # so none of featureCounts' special-casing applies. Verified against the
+    # Debian trixie binary (2.2.1+ds-3+b2) rather than recalled.
+    return _probe("stringtie", settings.stringtie_path, ["--version"])
+
+
+@lru_cache(maxsize=1)
 def pydeseq2() -> Tool:
     """The differential expression engine.
 
@@ -966,6 +974,7 @@ def all_tools() -> list[Tool]:
         datasets(),
         featurecounts(),
         salmon(),
+        stringtie(),
         pydeseq2(),
         quast(),
         multiqc(),
@@ -2557,6 +2566,50 @@ TOOL_META: dict[str, ToolMeta] = {
             "non-coding transcripts are absent from the estimates."
         ),
     ),
+    "stringtie": ToolMeta(
+        pipelines=(PipelineType.EXPRESSION,),
+        one_liner="Assembles transcripts from spliced RNA-seq alignments",
+        summary=(
+            "Reconstructs the transcripts present in a sample from a "
+            "splice-aware alignment, guided by a reference annotation. "
+            "Unlike counting or transcriptome quantification, which can only "
+            "measure transcripts someone has already annotated, StringTie "
+            "proposes transcript models the annotation does not contain -- "
+            "unannotated isoforms, alternative ends, and genes missing from "
+            "the reference entirely."
+        ),
+        strengths=(
+            "Finds isoforms absent from the reference annotation",
+            "Guided by a reference, so assembled transcripts keep stable gene identity",
+            "Handles the spliced alignments HISAT2 and STAR produce natively",
+            "Fast enough to run per sample rather than on a pooled alignment",
+        ),
+        homepage="https://ccb.jhu.edu/software/stringtie/",
+        repository="https://github.com/gpertea/stringtie",
+        citation=(
+            "Pertea M, Pertea GM, Antonescu CM, Chang TC, Mendell JT, "
+            "Salzberg SL. StringTie enables improved reconstruction of a "
+            "transcriptome from RNA-seq reads. Nature Biotechnology. "
+            "2015;33(3):290-295."
+        ),
+        citation_url="https://doi.org/10.1038/nbt.3122",
+        # Verified 2026-08-20 against the upstream repository via
+        # `gh api repos/gpertea/stringtie`, not recalled.
+        license="MIT",
+        usage=(
+            "Runs reference-guided against one splice-aware alignment at a "
+            "time, producing a GTF of assembled transcripts. A reference "
+            "annotation is required rather than optional: without one the "
+            "assembled transcripts carry generated identifiers that nothing "
+            "downstream can match to a gene. Offered only for alignments "
+            "produced by HISAT2 or STAR -- a DNA-seq alignment from bwa-mem2 "
+            "or minimap2 has no splice structure to assemble. Transcripts "
+            "the reference already contains are reported with their original "
+            "identifiers; the rest are novel models this run proposed, "
+            "counted separately on the result. Abundance-only mode and "
+            "multi-sample merging are not wired up."
+        ),
+    ),
     "pydeseq2": ToolMeta(
         pipelines=(PipelineType.EXPRESSION,),
         one_liner="Differential expression testing on count data",
@@ -2957,6 +3010,7 @@ def reset_cache() -> None:
     datasets.cache_clear()
     featurecounts.cache_clear()
     salmon.cache_clear()
+    stringtie.cache_clear()
     pydeseq2.cache_clear()
     quast.cache_clear()
     multiqc.cache_clear()
