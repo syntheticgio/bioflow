@@ -2845,9 +2845,12 @@ TOOL_META: dict[str, ToolMeta] = {
         citation_url="https://doi.org/10.1093/bioinformatics/btq033",
         license="MIT",
         usage=(
-            "Backs the Feature coverage card: computes per-feature read "
-            "coverage of an alignment against a project annotation. Also "
-            "called internally by the Merqury k-mer QV scripts."
+            "Backs three cards: Feature coverage computes per-feature read "
+            "coverage of an alignment against a project annotation, Variants "
+            "in regions reports where a VCF's variants fall relative to "
+            "annotated features, and Annotation comparison measures how far "
+            "two annotations of one assembly agree. Also called internally "
+            "by the Merqury k-mer QV scripts."
         ),
         # Flipped to True once the Feature coverage card and its
         # launch_feature_coverage handler shipped (#632, stage 1) -- bedtools
@@ -2957,13 +2960,15 @@ TOOL_META: dict[str, ToolMeta] = {
         citation_url="https://doi.org/10.1002/imt2.191",
         license="MIT",
         usage=(
-            "Installed for the planned region/sequence extraction feature; "
-            "nothing dispatches to it yet."
+            "Extracts named sequences and coordinate regions from an assembly "
+            "into a new FASTA, reverse-complementing minus-strand features."
         ),
-        # No job handler branches on seqkit today -- see the `runnable` field
-        # comment above for why this must be set explicitly rather than left
-        # at the default.
-        runnable=False,
+        # run_sequence_extraction (sequence_extraction_handlers.py) branches
+        # on seqkit as of #632 stage 4, so this is no longer False. Left
+        # explicit rather than deleted: the comment it replaces claimed
+        # nothing dispatched to seqkit, which is exactly the stale-metadata
+        # trap the `runnable` field docstring above warns about.
+        runnable=True,
     ),
     "kraken2": ToolMeta(
         pipelines=(PipelineType.QC,),

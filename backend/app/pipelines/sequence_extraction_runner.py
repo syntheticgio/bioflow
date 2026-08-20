@@ -1,6 +1,20 @@
 """Sequence extraction runner: seqkit subseq on assembly FASTA.
 
 Answers: "Give me these regions/sequences from this assembly as a new FASTA."
+
+**Why seqkit rather than samtools faidx**, which is already installed and
+already drives other runners here: for text mode the two are interchangeable
+-- `samtools faidx -r` takes the same `name:start-end` lines and handles bare
+sequence names too. The difference is annotation mode (spec R4-5), which
+extracts features selected from a GFF, and genes sit on both strands.
+`seqkit subseq --bed` reads the strand column per feature and reverse-
+complements only the minus-strand ones; `samtools faidx -i` reverse-
+complements every region in the run or none, so a mixed-strand feature set
+cannot be expressed as one invocation. Verified against seqkit v2.13.0 and
+samtools' own `faidx --help` at implementation time.
+
+Using one tool for both modes also keeps R4-5's promise that annotation mode
+"reuses R4-3's runner path unchanged" literally true.
 """
 
 from pathlib import Path
