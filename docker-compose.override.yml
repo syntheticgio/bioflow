@@ -42,7 +42,10 @@ services:
   worker:
     build:
       context: ./backend
-    command: ["watchfiles", "python -m app.worker_main", "app/"]
+    # Absolute interpreter, same as the base file: the image's PATH starts at
+    # Medaka's venv, so a bare `python` has none of the app's dependencies
+    # and the worker dies on `import pydantic`.
+    command: ["watchfiles", "/usr/local/bin/python3.12 -m app.worker_main", "app/"]
     volumes:
       - ${BIOINFO_HOME:-/Volumes/FastDataExtension/BioinfoHelper}:/data
       - ./backend/app:/srv/app:ro
