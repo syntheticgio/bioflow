@@ -42,9 +42,16 @@ def compute_gc_bias(ctx: JobContext) -> dict:
     joined = gc_coverage.join_windows(gc_contigs, depth_regions)
     curve = gc_coverage.bias_curve(joined)
 
+    # "empty", not "ok", when every window's GC was None (a legitimate
+    # all-N reference case): "ok" with an empty curve is indistinguishable
+    # from "never ran" in BamResults.tsx, which gates the chart on
+    # `gc_bias_status === "ok" && gc_bias_curve` -- an empty array is
+    # truthy, so the render would be attempted and GcBiasChart's own
+    # `if (!curve?.length) return null` would silently produce nothing.
     facts = {
-        "gc_bias_status": "ok",
+        "gc_bias_status": "ok" if curve else "empty",
         "gc_bias_curve": curve,
+        "gc_bias_partial": bool(ctx.payload.get("gc_tracks_partial")),
         "gc_bias_computed_at": datetime.now(UTC).isoformat(),
     }
 

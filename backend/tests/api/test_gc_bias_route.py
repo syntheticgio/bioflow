@@ -55,3 +55,4 @@ class TestLaunchGcBias:
         body = res.json()
         assert body["type"] == "gc_bias"
         assert captured["bam_id"] == OBJECT_ID
+        assert captured["owner"] == "test-owner"

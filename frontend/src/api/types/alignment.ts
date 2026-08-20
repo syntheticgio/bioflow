@@ -303,9 +303,16 @@ export interface BamStatsFacts {
 
   /** Facts produced by the gc_bias job. See GcBiasChart.tsx. Needs both this
    * BAM's windowed coverage and its reference's gc_tracks, so it is a
-   * separate job/fact rather than folded into coverage_* above. */
-  gc_bias_status?: "ok";
+   * separate job/fact rather than folded into coverage_* above.
+   * "empty" means the job ran successfully but every window's GC was None
+   * (an all-N reference) -- distinct from "ok" so BamResults.tsx's render
+   * gate (`=== "ok"`) doesn't attempt to draw an empty chart. */
+  gc_bias_status?: "ok" | "empty";
   gc_bias_curve?: GcBiasBin[];
+  /** True when the reference's gc_tracks fact was truncated to
+   * MAX_STORED_CONTIGS (gc_tracks.py), so this curve covers only that
+   * subset of a fragmented assembly's contigs. */
+  gc_bias_partial?: boolean;
 }
 
 export interface ContigsPage {

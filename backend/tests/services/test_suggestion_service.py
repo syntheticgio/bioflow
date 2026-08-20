@@ -2244,23 +2244,30 @@ class TestGcBiasCard:
         assert card.status is CardStatus.UNAVAILABLE
         assert "gc tracks" in card.reason.lower()
 
-    def test_unavailable_when_no_windowed_coverage(self):
+    def test_unavailable_when_no_coverage_at_all(self):
+        """Minor #3 finding: this refusal must read as 'no coverage
+        computed', distinct from the region-mode case below -- a user who
+        already ran coverage should never see this wording."""
         reference = _reference_object(facts={"gc_tracks": {"contigs": [{}]}})
         obj = _bam({})
         card = build_gc_bias_card(obj, reference)
         assert card.status is CardStatus.UNAVAILABLE
-        assert "coverage" in card.reason.lower()
+        assert "no coverage computed" in card.reason.lower()
+        assert "target region" not in card.reason.lower()
 
     def test_unavailable_when_coverage_mode_is_regions_not_windows(self):
         """The fourth precondition, distinct from "no coverage at all":
         Task 3's launcher refuses a region-mode coverage run separately from
         a missing one, because the two need different next steps -- rerun
-        with no target BED, versus run coverage at all."""
+        with no target BED, versus run coverage at all. Minor #3 finding:
+        this message must say coverage WAS computed, not that it's missing,
+        or a user who ran it correctly reads it as their job being lost."""
         reference = _reference_object(facts={"gc_tracks": {"contigs": [{}]}})
         obj = _bam({"coverage_status": "ok", "coverage_mode": "regions"})
         card = build_gc_bias_card(obj, reference)
         assert card.status is CardStatus.UNAVAILABLE
-        assert "coverage" in card.reason.lower()
+        assert "target region" in card.reason.lower()
+        assert "no coverage computed" not in card.reason.lower()
 
     def test_available_when_all_preconditions_met(self):
         reference = _reference_object(facts={"gc_tracks": {"contigs": [{}]}})

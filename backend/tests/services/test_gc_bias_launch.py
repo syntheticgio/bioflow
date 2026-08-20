@@ -153,7 +153,12 @@ class TestLaunchGcBiasReachesTheQueue:
     async def test_success_reaches_the_queue_with_gc_contigs_and_depth_regions(
         self, tmp_path
     ):
-        gc_contigs = [{"name": "chr1", "gc": [50.0, 55.0]}]
+        gc_contigs = [
+            {
+                "name": "chr1", "length": 1000, "window_bases": 500,
+                "gc": [50.0, 55.0], "skew": [0.1, -0.1],
+            },
+        ]
         reference = _reference(
             facts={"gc_tracks": {"window_count": 500, "contigs": gc_contigs}}
         )
@@ -177,11 +182,101 @@ class TestLaunchGcBiasReachesTheQueue:
         assert job.id == "job1"
         assert enqueued["type"] == "gc_bias"
         assert enqueued["payload"]["bam_id"] == str(bam.id)
-        assert enqueued["payload"]["gc_contigs"] == gc_contigs
+        assert enqueued["payload"]["gc_contigs"] == [
+            {"name": "chr1", "length": 1000, "window_bases": 500, "gc": [50.0, 55.0]},
+        ]
         assert enqueued["payload"]["depth_regions"] == depth_regions
 
+    async def test_payload_contigs_do_not_carry_skew(self, tmp_path):
+        """Minor #3 finding: skew is never read by join_windows/bias_curve
+        and roughly a third of a full reference's contig payload size."""
+        gc_contigs = [
+            {
+                "name": "chr1", "length": 1000, "window_bases": 500,
+                "gc": [50.0, 55.0], "skew": [0.1, -0.1],
+            },
+        ]
+        reference = _reference(
+            facts={"gc_tracks": {"window_count": 500, "contigs": gc_contigs}}
+        )
+        bam = _bam(
+            reference=reference,
+            facts={
+                "coverage_status": "ok",
+                "coverage_mode": "windows",
+                "coverage_report": "coverage.json",
+            },
+        )
+
+        _, enqueued = await _launch(
+            bam=bam,
+            reference=reference,
+            report={"regions": {}},
+            tmp_path=tmp_path,
+        )
+
+        for contig in enqueued["payload"]["gc_contigs"]:
+            assert "skew" not in contig
+
+    async def test_payload_carries_gc_tracks_partial_flag(self, tmp_path):
+        """Important #1 finding: the truncation flag gc_tracks.py sets when
+        it caps at MAX_STORED_CONTIGS must ride along in the gc_bias
+        payload so the handler and eventually the chart can surface it."""
+        gc_contigs = [{"name": "chr1", "length": 1000, "window_bases": 500, "gc": [50.0]}]
+        reference = _reference(
+            facts={
+                "gc_tracks": {
+                    "window_count": 500,
+                    "contigs": gc_contigs,
+                    "gc_tracks_partial": True,
+                }
+            }
+        )
+        bam = _bam(
+            reference=reference,
+            facts={
+                "coverage_status": "ok",
+                "coverage_mode": "windows",
+                "coverage_report": "coverage.json",
+            },
+        )
+
+        _, enqueued = await _launch(
+            bam=bam,
+            reference=reference,
+            report={"regions": {}},
+            tmp_path=tmp_path,
+        )
+
+        assert enqueued["payload"]["gc_tracks_partial"] is True
+
+    async def test_payload_gc_tracks_partial_defaults_false(self, tmp_path):
+        gc_contigs = [{"name": "chr1", "length": 1000, "window_bases": 500, "gc": [50.0]}]
+        reference = _reference(
+            facts={"gc_tracks": {"window_count": 500, "contigs": gc_contigs}}
+        )
+        bam = _bam(
+            reference=reference,
+            facts={
+                "coverage_status": "ok",
+                "coverage_mode": "windows",
+                "coverage_report": "coverage.json",
+            },
+        )
+
+        _, enqueued = await _launch(
+            bam=bam,
+            reference=reference,
+            report={"regions": {}},
+            tmp_path=tmp_path,
+        )
+
+        assert enqueued["payload"]["gc_tracks_partial"] is False
+
     async def test_deduplicated_launch_raises_conflict(self, tmp_path):
-        gc_contigs = [{"name": "chr1", "gc": [50.0]}]
+        gc_contigs = [
+            {"name": "chr1", "length": 1000, "window_bases": 500, "gc": [50.0]},
+        ]
         reference = _reference(
             facts={"gc_tracks": {"window_count": 500, "contigs": gc_contigs}}
         )
