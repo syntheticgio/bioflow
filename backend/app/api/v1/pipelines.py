@@ -825,6 +825,20 @@ async def launch_coverage(body: CoverageRequest, owner: OwnerDep) -> JobOut:
     return JobOut.of(job)
 
 
+class GcBiasRequest(BaseModel):
+    bam_id: PydanticObjectId
+
+
+@router.post("/gc-bias", response_model=JobOut, status_code=status.HTTP_201_CREATED)
+async def launch_gc_bias_route(body: GcBiasRequest, owner: OwnerDep) -> JobOut:
+    """Queue the GC-vs-coverage bias curve for a BAM.
+
+    Read-only, like /coverage and /gc-tracks: no derived object, just a
+    curve of facts merged onto the BAM. See pipeline_service.launch_gc_bias
+    for the three preconditions this can refuse on.
+    """
+    job = await pipeline_service.launch_gc_bias(bam_id=body.bam_id, owner=owner)
+    return JobOut.of(job)
 
 
 @router.get("/coverage/{object_id}/report")
