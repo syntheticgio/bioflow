@@ -5,8 +5,9 @@ import pytest
 from beanie import PydanticObjectId
 
 from app.errors import ValidationError
-from app.pipelines import sniffles_runner
+from app.pipelines import delly_runner, sniffles_runner
 from app.pipelines.align_runner import ReadChemistry
+from app.pipelines.sv_caller import SvCaller
 from app.services import pipeline_service
 
 
@@ -75,6 +76,7 @@ async def test_sv_payload_carries_chemistry():
             bai=bai,
             fai=fai,
             chemistry=ReadChemistry.ONT_SIMPLEX,
+            caller=SvCaller.SNIFFLES2,
             params=params,
         )
 
@@ -101,10 +103,71 @@ async def test_sv_payload_omits_chemistry_when_unresolved():
             bai=bai,
             fai=fai,
             chemistry=None,
+            caller=SvCaller.SNIFFLES2,
             params=params,
         )
 
     assert "chemistry" not in payload
+
+
+@pytest.mark.asyncio
+async def test_sv_payload_output_name_is_delly_for_delly_caller():
+    """The reviewer-flagged bug: `_sv_payload` used to hardcode the
+    `.sniffles.vcf.gz` suffix regardless of caller, so every Delly callset
+    was stored on disk under a Sniffles-looking name. The suffix must match
+    the handler's own per-caller convention (`sv_handlers.py`)."""
+    bam = SimpleNamespace(id=PydanticObjectId(), project_id=PydanticObjectId(), name="r.bam")
+    reference = SimpleNamespace(
+        id=PydanticObjectId(), project_id=bam.project_id, name="ref.fna"
+    )
+    bai = SimpleNamespace(id=PydanticObjectId(), project_id=bam.project_id, name="r.bam.bai")
+    fai = SimpleNamespace(id=PydanticObjectId(), project_id=bam.project_id, name="ref.fna.fai")
+    params = delly_runner.DellyParams()
+
+    with patch(
+        "app.services.pipeline_service._resolve_readable",
+        AsyncMock(return_value=(None, "/data/fake")),
+    ):
+        payload = await pipeline_service._sv_payload(
+            bam=bam,
+            reference=reference,
+            bai=bai,
+            fai=fai,
+            chemistry=ReadChemistry.SHORT,
+            caller=SvCaller.DELLY,
+            params=params,
+        )
+
+    assert payload["output_name"] == "r.delly.vcf.gz"
+
+
+@pytest.mark.asyncio
+async def test_sv_payload_output_name_is_sniffles_for_long_read_caller():
+    """The other side of the same fix: a long-read (Sniffles2) launch must
+    keep producing the `.sniffles.vcf.gz` name it always has."""
+    bam = SimpleNamespace(id=PydanticObjectId(), project_id=PydanticObjectId(), name="r.bam")
+    reference = SimpleNamespace(
+        id=PydanticObjectId(), project_id=bam.project_id, name="ref.fna"
+    )
+    bai = SimpleNamespace(id=PydanticObjectId(), project_id=bam.project_id, name="r.bam.bai")
+    fai = SimpleNamespace(id=PydanticObjectId(), project_id=bam.project_id, name="ref.fna.fai")
+    params = sniffles_runner.SnifflesParams()
+
+    with patch(
+        "app.services.pipeline_service._resolve_readable",
+        AsyncMock(return_value=(None, "/data/fake")),
+    ):
+        payload = await pipeline_service._sv_payload(
+            bam=bam,
+            reference=reference,
+            bai=bai,
+            fai=fai,
+            chemistry=ReadChemistry.ONT_SIMPLEX,
+            caller=SvCaller.SNIFFLES2,
+            params=params,
+        )
+
+    assert payload["output_name"] == "r.sniffles.vcf.gz"
 
 
 class TestCallerDispatch:

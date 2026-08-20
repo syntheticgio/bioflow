@@ -3654,10 +3654,19 @@ async def _sv_payload(
     bai: DataObject,
     fai: DataObject,
     chemistry,
-    params: sniffles_runner.SnifflesParams,
+    caller: SvCaller,
+    params: sniffles_runner.SnifflesParams | delly_runner.DellyParams,
 ) -> dict:
     """The call_structural_variants payload, with every input addressed by
-    digest or path -- mirrors `_variant_payload`."""
+    digest or path -- mirrors `_variant_payload`.
+
+    `output_name`'s suffix is caller-aware to match the stem each caller's
+    own handler uses (`sv_handlers.py`): `.delly.vcf.gz` for Delly,
+    `.sniffles.vcf.gz` otherwise. The launch path always supplies a
+    non-empty `output_name` here, so a hardcoded suffix would silently win
+    over the handler's own per-caller default every time.
+    """
+    suffix = "delly" if caller is SvCaller.DELLY else "sniffles"
     payload: dict = {
         "bam_object_id": str(bam.id),
         "reference_object_id": str(reference.id),
@@ -3665,7 +3674,7 @@ async def _sv_payload(
         "bam_name": bam.name,
         "reference_name": reference.name,
         "params": params.as_dict(),
-        "output_name": f"{Path(bam.name).stem}.sniffles.vcf.gz",
+        "output_name": f"{Path(bam.name).stem}.{suffix}.vcf.gz",
     }
 
     for key, obj in (
@@ -3766,6 +3775,7 @@ async def launch_structural_variant_calling(
         bai=bai,
         fai=fai,
         chemistry=chemistry,
+        caller=caller,
         params=merged,
     )
 
