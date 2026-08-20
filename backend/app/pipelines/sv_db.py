@@ -15,10 +15,12 @@ shape is copied for consistency and because it costs nothing.
 
 import json
 import sqlite3
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
 from app.logging import get_logger
+from app.pipelines.sv_caller import SvCaller
 
 log = get_logger(__name__)
 
@@ -89,7 +91,39 @@ def _info(field: str) -> dict[str, str]:
     return out
 
 
-def parse_sv_record(line: str) -> SvRecord | None:
+def _sniffles_support(info: dict[str, str]) -> int | None:
+    raw = info.get("SUPPORT")
+    return int(raw) if raw and raw.isdigit() else None
+
+
+def _delly_support(info: dict[str, str]) -> int | None:
+    """Delly reports paired-end and split-read support as separate counts,
+    and omits whichever kind did not contribute to a given call.
+
+    Summed rather than surfaced as two columns: the SV table's `support`
+    column means "how many reads support this call", and both kinds do.
+    Splitting it would change the schema and SvResults.tsx for one caller.
+    """
+    total: int | None = None
+    for key in ("PE", "SR"):
+        raw = info.get(key)
+        if raw and raw.isdigit():
+            total = (total or 0) + int(raw)
+    return total
+
+
+# Keyed by SvCaller. Exhaustiveness is enforced by
+# test_every_caller_has_an_extractor -- a member with no entry here would
+# silently blank the support column rather than raise.
+_SUPPORT_EXTRACTORS: dict[SvCaller, "Callable[[dict[str, str]], int | None]"] = {
+    SvCaller.SNIFFLES2: _sniffles_support,
+    SvCaller.DELLY: _delly_support,
+}
+
+
+def parse_sv_record(
+    line: str, caller: SvCaller = SvCaller.SNIFFLES2
+) -> SvRecord | None:
     """One VCF data line into an SV record, or None if it is not one.
 
     None rather than an exception: a malformed line in a large callset should
@@ -129,7 +163,7 @@ def parse_sv_record(line: str) -> SvRecord | None:
         except ValueError:
             end = None
 
-    support = info.get("SUPPORT")
+    support = _SUPPORT_EXTRACTORS[caller](info)
     qual = _num(parts[5])
 
     return SvRecord(
@@ -140,7 +174,7 @@ def parse_sv_record(line: str) -> SvRecord | None:
         svlen=svlen,
         qual=qual,
         filter_value=parts[6],
-        support=int(support) if support and support.isdigit() else None,
+        support=support,
         # Every column after FORMAT is one sample's genotype. Rejoined
         # rather than taking the first alone, which would silently drop
         # samples 2..n -- the trap `variant_db.py`'s own gt comment records.
@@ -149,7 +183,9 @@ def parse_sv_record(line: str) -> SvRecord | None:
     )
 
 
-def build_sv_db(*, rows, db_path: Path) -> int:
+def build_sv_db(
+    *, rows, db_path: Path, caller: SvCaller = SvCaller.SNIFFLES2
+) -> int:
     """Stream VCF data lines into an indexed SQLite database.
 
     Indexes are built after the bulk insert, and journaling is off, for the
@@ -204,7 +240,7 @@ def build_sv_db(*, rows, db_path: Path) -> int:
                 continue
             if line.startswith("#"):
                 continue
-            rec = parse_sv_record(line)
+            rec = parse_sv_record(line, caller)
             if rec is None:
                 skipped += 1
                 continue

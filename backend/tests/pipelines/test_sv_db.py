@@ -167,3 +167,77 @@ def test_sample_names_extracted_from_header(tmp_path: Path):
     sv_db.build_sv_db(rows=iter(rows), db_path=db)
     assert sv_db.sample_names(db) == ["Sample_A", "Sample_B"]
 
+
+
+class TestSupportExtraction:
+    """Sniffles reports SUPPORT; Delly reports PE and SR separately."""
+
+    def _line(self, info: str) -> str:
+        return (
+            "chr1\t1000\tid1\tN\t<DEL>\t60\tPASS\t"
+            f"{info}\tGT\t0/1"
+        )
+
+    def test_sniffles_reads_its_support_key(self):
+        from app.pipelines.sv_caller import SvCaller
+        from app.pipelines.sv_db import parse_sv_record
+
+        rec = parse_sv_record(
+            self._line("SVTYPE=DEL;SVLEN=-4823;END=5823;SUPPORT=17"),
+            SvCaller.SNIFFLES2,
+        )
+        assert rec.support == 17
+
+    def test_delly_sums_paired_end_and_split_read(self):
+        """Both kinds are reads supporting the call, and the column means
+        'how many reads support this'. Requirement SV-620-7."""
+        from app.pipelines.sv_caller import SvCaller
+        from app.pipelines.sv_db import parse_sv_record
+
+        rec = parse_sv_record(
+            self._line("SVTYPE=DEL;SVLEN=-4823;END=5823;PE=9;SR=4"),
+            SvCaller.DELLY,
+        )
+        assert rec.support == 13
+
+    def test_delly_with_only_paired_end_support(self):
+        """Delly omits SR for calls it found by read-pair signal alone."""
+        from app.pipelines.sv_caller import SvCaller
+        from app.pipelines.sv_db import parse_sv_record
+
+        rec = parse_sv_record(
+            self._line("SVTYPE=DEL;SVLEN=-4823;END=5823;PE=9"),
+            SvCaller.DELLY,
+        )
+        assert rec.support == 9
+
+    def test_delly_with_neither_yields_none(self):
+        from app.pipelines.sv_caller import SvCaller
+        from app.pipelines.sv_db import parse_sv_record
+
+        rec = parse_sv_record(
+            self._line("SVTYPE=DEL;SVLEN=-4823;END=5823"), SvCaller.DELLY
+        )
+        assert rec.support is None
+
+    def test_delly_ignores_the_sniffles_key(self):
+        """A SUPPORT key in a Delly record is not Delly's own field; reading
+        it would be the mapping bug in reverse."""
+        from app.pipelines.sv_caller import SvCaller
+        from app.pipelines.sv_db import parse_sv_record
+
+        rec = parse_sv_record(
+            self._line("SVTYPE=DEL;SVLEN=-4823;END=5823;SUPPORT=99"),
+            SvCaller.DELLY,
+        )
+        assert rec.support is None
+
+    def test_every_caller_has_an_extractor(self):
+        """A hand-maintained registry keyed by an enum, which CLAUDE.md names
+        as the shape that skips silently rather than raising. A new SvCaller
+        member with no extractor must fail here, not blank a column in
+        production. Requirement SV-620-8."""
+        from app.pipelines.sv_caller import SvCaller
+        from app.pipelines.sv_db import _SUPPORT_EXTRACTORS
+
+        assert set(SvCaller) == set(_SUPPORT_EXTRACTORS)
