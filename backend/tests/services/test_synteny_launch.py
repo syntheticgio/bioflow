@@ -17,35 +17,12 @@ import pytest
 from beanie import PydanticObjectId
 
 from app.errors import ValidationError
-from app.models import FormatKind, ObjectRole, ObjectStatus
+from app.models import FormatKind, ObjectRole
 from app.pipelines.tools import Tool
 from app.services import pipeline_service
+from tests.services.conftest import _draft, _obj, _reference
 
 _MINIMAP2 = Tool(name="minimap2", path="/usr/local/bin/minimap2", version="2.28")
-
-
-def _obj(*, name, kind, role=None, status=ObjectStatus.READY, project_id=None):
-    return SimpleNamespace(
-        id=PydanticObjectId(),
-        name=name,
-        format=SimpleNamespace(kind=kind),
-        role=role,
-        status=status,
-        facts={},
-        project_id=project_id or PydanticObjectId(),
-        owner="local",
-        blob_sha256="a" * 64,
-    )
-
-
-def _draft(*, project_id=None):
-    return _obj(name="draft.fasta", kind=FormatKind.FASTA, project_id=project_id)
-
-
-def _reference(name, *, project_id):
-    return _obj(
-        name=name, kind=FormatKind.FASTA, role=ObjectRole.REFERENCE, project_id=project_id
-    )
 
 
 async def _run(*, draft, project_objects, reference_object_id=None, divergence=None):
