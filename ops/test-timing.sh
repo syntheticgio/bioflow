@@ -109,7 +109,9 @@ report_pytest_durations() {
     return
   fi
   echo "Top 5 slowest tests:"
-  echo "$lines" | sed 's/^/  /'
+  while IFS= read -r prefix_line; do
+    echo "  $prefix_line"
+  done <<<"$lines"
   {
     echo -n '['
     local first=1
