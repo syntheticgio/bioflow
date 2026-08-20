@@ -469,6 +469,20 @@ class Settings(BaseSettings):
         return self.bioinfo_home / "feature_coverage"
 
     @property
+    def variants_in_regions_dir(self) -> Path:
+        """Generated variants in regions reports (the bedtools intersect JSON),
+        keyed by VCF object id.
+        """
+        return self.bioinfo_home / "variants_in_regions"
+
+    @property
+    def annotation_comparison_dir(self) -> Path:
+        """Generated annotation comparison reports (the bedtools jaccard/intersect JSON),
+        keyed by annotation object id.
+        """
+        return self.bioinfo_home / "annotation_comparison"
+
+    @property
     def coverage_dir(self) -> Path:
         """Generated per-window/per-region depth reports (the mosdepth JSON),
         keyed by BAM object id.

@@ -177,6 +177,30 @@ async def _launch_feature_coverage(*, inputs: dict, params: dict, owner: str):
     )
 
 
+async def _launch_variants_in_regions(*, inputs: dict, params: dict, owner: str):
+    return await pipeline_service.launch_variants_in_regions(
+        vcf_id=inputs["variants"],
+        owner=owner,
+        annotation_id=inputs.get("annotation"),
+    )
+
+
+async def _launch_annotation_comparison(*, inputs: dict, params: dict, owner: str):
+    return await pipeline_service.launch_annotation_comparison(
+        annotation_id=inputs["annotation_a"],
+        other_annotation_id=inputs["annotation_b"],
+        owner=owner,
+    )
+
+
+async def _launch_sequence_extraction(*, inputs: dict, params: dict, owner: str):
+    return await pipeline_service.launch_sequence_extraction(
+        assembly_id=inputs["assembly"],
+        query_text=params.get("query_text"),
+        owner=owner,
+    )
+
+
 async def _launch_coverage(*, inputs: dict, params: dict, owner: str):
     return await pipeline_service.launch_coverage(
         bam_id=inputs["alignment"],
@@ -645,6 +669,59 @@ NODE_TYPES: dict[str, NodeTypeSpec] = {
             ),
         ),
         outputs=(),
+    ),
+    "variants_in_regions": NodeTypeSpec(
+        label="Variants in regions",
+        launch_name="pipeline_service.launch_variants_in_regions",
+        run_kind=None,
+        launch=_launch_variants_in_regions,
+        inputs=(
+            PortSpec(
+                "variants",
+                PortType(format=FormatKind.VCF, role=ObjectRole.VARIANTS),
+            ),
+            PortSpec(
+                "annotation",
+                PortType(formats=(FormatKind.GFF, FormatKind.GTF)),
+                required=False,
+            ),
+        ),
+        outputs=(),
+    ),
+    "annotation_comparison": NodeTypeSpec(
+        label="Annotation comparison",
+        launch_name="pipeline_service.launch_annotation_comparison",
+        run_kind=None,
+        launch=_launch_annotation_comparison,
+        inputs=(
+            PortSpec(
+                "annotation_a",
+                PortType(formats=(FormatKind.GFF, FormatKind.GTF)),
+            ),
+            PortSpec(
+                "annotation_b",
+                PortType(formats=(FormatKind.GFF, FormatKind.GTF)),
+            ),
+        ),
+        outputs=(),
+    ),
+    "sequence_extraction": NodeTypeSpec(
+        label="Extract sequences",
+        launch_name="pipeline_service.launch_sequence_extraction",
+        run_kind=None,
+        launch=_launch_sequence_extraction,
+        inputs=(
+            PortSpec(
+                "assembly",
+                PortType(format=FormatKind.FASTA, role=ObjectRole.REFERENCE),
+            ),
+        ),
+        outputs=(
+            PortSpec(
+                "extracted_sequences",
+                PortType(format=FormatKind.FASTA, role=ObjectRole.REFERENCE),
+            ),
+        ),
     ),
     "coverage": NodeTypeSpec(
         label="Coverage depth",

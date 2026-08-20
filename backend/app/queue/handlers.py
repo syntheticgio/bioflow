@@ -1033,6 +1033,7 @@ async def sweep_storage_drift(ctx: JobContext) -> dict:
 # registry.load_handlers() imports only this one.
 from app.queue import (  # noqa: E402, F401
     align_handlers,
+    annotation_comparison_handlers,
     annotation_handlers,
     assembly_handlers,
     assembly_qc_handlers,
@@ -1050,6 +1051,7 @@ from app.queue import (  # noqa: E402, F401
     pipeline_handlers,
     prediction_handlers,
     reference_assembly_handlers,
+    sequence_extraction_handlers,
     sra_handlers,
     summary_handlers,
     sv_handlers,
@@ -1058,4 +1060,5 @@ from app.queue import (  # noqa: E402, F401
     uniprot_handlers,
     variant_handlers,
     variant_summary_handlers,
+    variants_in_regions_handlers,
 )

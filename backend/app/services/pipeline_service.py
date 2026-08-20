@@ -1575,6 +1575,9 @@ MERGE_TRANSCRIPTS_MEM_MB = 2048
 # feature_coverage_handlers.run_feature_coverage): a job cannot need less
 # memory to run than it declares to the scheduler.
 FEATURE_COVERAGE_MEM_MB = 1024
+VARIANTS_IN_REGIONS_MEM_MB = 1024
+ANNOTATION_COMPARISON_MEM_MB = 1024
+SEQUENCE_EXTRACTION_MEM_MB = 1024
 
 # Likewise matches mosdepth_handlers.run_coverage's own registration.
 COVERAGE_MEM_MB = 1024
@@ -5437,6 +5440,219 @@ async def launch_feature_coverage(
         bam_id=str(bam.id),
         annotation_id=str(annotation.id),
     )
+    return job
+
+
+async def launch_variants_in_regions(
+    *,
+    vcf_id: PydanticObjectId,
+    owner: str,
+    annotation_id: PydanticObjectId | None = None,
+    resource_override: bool = False,
+) -> Job:
+    """Queue variant distribution across annotated features for one VCF against one annotation.
+    """
+    from app.queue import queue
+    from app.services import object_service
+
+    refuse_if_over_budget(
+        declared_mb=VARIANTS_IN_REGIONS_MEM_MB,
+        budget_mb=await current_admission_budget_mb(),
+        resource_override=resource_override,
+    )
+
+    vcf = await object_service.get_object(vcf_id, owner=owner)
+    reference = await _resolve_variant_reference(vcf, None, owner=owner)
+    annotation = await resolve_annotation(vcf.project_id, annotation_id, owner=owner)
+
+    fai = await _sidecar_of_role(reference, SidecarRole.FAI)
+    if fai is None:
+        raise ValidationError(
+            f"Reference {reference.name!r} has no FASTA index (.fai). "
+            f"Build its index first.",
+            details={"reference_id": str(reference.id), "needs": "build_index"},
+        )
+
+    annotation_format = _FEATURE_COVERAGE_ANNOTATION_FORMATS.get(annotation.format.kind, "gff")
+
+    payload: dict = {
+        "vcf_id": str(vcf.id),
+        "vcf_name": vcf.name,
+        "annotation_id": str(annotation.id),
+        "annotation_name": annotation.name,
+        "annotation_format": annotation_format,
+        "project_id": str(vcf.project_id),
+    }
+    for key, obj in (("vcf", vcf), ("annotation", annotation), ("fai", fai)):
+        digest, path = await _resolve_readable(obj)
+        if digest:
+            payload[f"{key}_sha256"] = digest
+        if path:
+            payload[f"{key}_path"] = path
+
+    job = await queue.enqueue(
+        "variants_in_regions",
+        owner=owner,
+        payload=payload,
+        job_class=JobClass.COMPUTE,
+        resources=JobResources(cpu=1, mem_mb=VARIANTS_IN_REGIONS_MEM_MB, io=IoClass.HEAVY),
+        max_attempts=2,
+        dedup_key=f"variants_in_regions:{vcf.blob_sha256}:{annotation.blob_sha256}",
+        project_id=vcf.project_id,
+        object_id=vcf.id,
+        resource_override=resource_override,
+    )
+    if job is None:
+        raise ConflictError(
+            f"Variants in regions for {vcf.name!r} is already queued or running",
+            details={"vcf_id": str(vcf.id)},
+        )
+    return job
+
+
+async def launch_annotation_comparison(
+    *,
+    annotation_id: PydanticObjectId,
+    owner: str,
+    other_annotation_id: PydanticObjectId,
+    resource_override: bool = False,
+) -> Job:
+    """Queue annotation comparison (jaccard & intersect -v) between two annotations.
+    """
+    from app.queue import queue
+    from app.services import object_service
+
+    refuse_if_over_budget(
+        declared_mb=ANNOTATION_COMPARISON_MEM_MB,
+        budget_mb=await current_admission_budget_mb(),
+        resource_override=resource_override,
+    )
+
+    anno_a = await object_service.get_object(annotation_id, owner=owner)
+    anno_b = await object_service.get_object(other_annotation_id, owner=owner)
+
+    if anno_a.project_id != anno_b.project_id:
+        raise ValidationError("Annotations must belong to the same project")
+
+    format_a = _FEATURE_COVERAGE_ANNOTATION_FORMATS.get(anno_a.format.kind, "gff")
+    format_b = _FEATURE_COVERAGE_ANNOTATION_FORMATS.get(anno_b.format.kind, "gff")
+
+    payload: dict = {
+        "annotation_a_id": str(anno_a.id),
+        "name_a": anno_a.name,
+        "format_a": format_a,
+        "annotation_b_id": str(anno_b.id),
+        "name_b": anno_b.name,
+        "format_b": format_b,
+        "project_id": str(anno_a.project_id),
+    }
+    for key, obj in (("annotation_a", anno_a), ("annotation_b", anno_b)):
+        digest, path = await _resolve_readable(obj)
+        if digest:
+            payload[f"{key}_sha256"] = digest
+        if path:
+            payload[f"{key}_path"] = path
+
+    job = await queue.enqueue(
+        "annotation_comparison",
+        owner=owner,
+        payload=payload,
+        job_class=JobClass.COMPUTE,
+        resources=JobResources(cpu=1, mem_mb=ANNOTATION_COMPARISON_MEM_MB, io=IoClass.HEAVY),
+        max_attempts=2,
+        dedup_key=f"annotation_comparison:{anno_a.blob_sha256}:{anno_b.blob_sha256}",
+        project_id=anno_a.project_id,
+        object_id=anno_a.id,
+        resource_override=resource_override,
+    )
+    if job is None:
+        raise ConflictError(
+            f"Annotation comparison for {anno_a.name!r} vs {anno_b.name!r} "
+            f"is already queued or running",
+            details={"annotation_id": str(anno_a.id)},
+        )
+    return job
+
+
+async def launch_sequence_extraction(
+    *,
+    assembly_id: PydanticObjectId,
+    owner: str,
+    query_text: str | None = None,
+    regions: list[tuple[str, int, int]] | None = None,
+    annotation_id: PydanticObjectId | None = None,
+    output_name: str | None = None,
+    resource_override: bool = False,
+) -> Job:
+    """Queue sequence extraction from an assembly FASTA via seqkit subseq.
+    """
+    import hashlib
+    import json
+
+    from app.pipelines import mosdepth_runner, sequence_extraction_runner
+    from app.queue import queue
+    from app.services import object_service
+
+    refuse_if_over_budget(
+        declared_mb=SEQUENCE_EXTRACTION_MEM_MB,
+        budget_mb=await current_admission_budget_mb(),
+        resource_override=resource_override,
+    )
+
+    assembly = await object_service.get_object(assembly_id, owner=owner)
+    fai = await _sidecar_of_role(assembly, SidecarRole.FAI)
+    if fai is None:
+        raise ValidationError(
+            f"Assembly {assembly.name!r} has no FASTA index (.fai). Build its index first.",
+            details={"assembly_id": str(assembly.id), "needs": "build_index"},
+        )
+
+    fai_digest, fai_path = await _resolve_readable(fai)
+    if not fai_path:
+        raise ValidationError("FASTA index file is not readable")
+
+    fai_records = mosdepth_runner.contig_lengths_from_fai(Path(fai_path))
+
+    if regions is None:
+        if not query_text:
+            raise ValidationError("Either query_text or regions must be provided")
+        regions = sequence_extraction_runner.parse_query_lines(query_text, fai_records)
+
+    payload: dict = {
+        "assembly_id": str(assembly.id),
+        "assembly_name": assembly.name,
+        "regions": regions,
+        "output_name": output_name,
+        "annotation_id": str(annotation_id) if annotation_id else None,
+        "query_summary": query_text[:200] if query_text else f"{len(regions)} regions",
+        "project_id": str(assembly.project_id),
+    }
+
+    digest, path = await _resolve_readable(assembly)
+    if digest:
+        payload["assembly_sha256"] = digest
+    if path:
+        payload["assembly_path"] = path
+
+    regions_hash = hashlib.sha256(json.dumps(regions, sort_keys=True).encode()).hexdigest()[:16]
+
+    job = await queue.enqueue(
+        "sequence_extraction",
+        owner=owner,
+        payload=payload,
+        job_class=JobClass.COMPUTE,
+        resources=JobResources(cpu=1, mem_mb=SEQUENCE_EXTRACTION_MEM_MB, io=IoClass.HEAVY),
+        max_attempts=2,
+        dedup_key=f"sequence_extraction:{assembly.blob_sha256}:{regions_hash}",
+        project_id=assembly.project_id,
+        object_id=assembly.id,
+        resource_override=resource_override,
+    )
+    if job is None:
+        raise ConflictError(
+            f"Sequence extraction for {assembly.name!r} is already queued or running",
+            details={"assembly_id": str(assembly.id)},
+        )
     return job
 
 

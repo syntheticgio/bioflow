@@ -22,9 +22,11 @@ from app.services.suggestion_service import (
     SuggestionCard,
     build_align_card,
     build_annotate_card,
+    build_annotation_comparison_card,
     build_assemble_card,
     build_classify_reads_card,
     build_coverage_card,
+    build_extract_sequences_card,
     build_feature_coverage_card,
     build_filter_long_reads_card,
     build_gc_bias_card,
@@ -38,6 +40,7 @@ from app.services.suggestion_service import (
     build_structural_variants_card,
     build_transcript_assembly_card,
     build_variants_card,
+    build_variants_in_regions_card,
     is_eukaryotic,
     resolve_reference,
     suggestions_for,
@@ -1632,16 +1635,27 @@ class TestSuggestionsFor:
         assert "variants" in [c["kind"] for c in cards]
         assert "quantify" in [c["kind"] for c in cards]
 
-    async def test_a_vcf_gets_only_the_annotate_card(self):
+    async def test_a_vcf_gets_annotate_and_variants_in_regions_cards(self):
         inputs = pipeline_service.AnnotationInputs(
             ok=True,
             reference=_ref("aaa", "ref.fna"),
             annotation=_ref("bbb", "annotation.gff3"),
         )
-        with installed_csq(True), stub_db(annotation_inputs=inputs):
+        with (
+            installed_csq(True),
+            installed_bedtools(True),
+            stub_db(annotation_inputs=inputs),
+            patch(
+                "app.services.pipeline_service.annotations_for_project",
+                return_value=[_annotation()],
+            ),
+        ):
             cards = await suggestions_for(_vcf())
-        # The VCF offers both phasing and (unavailable, until phased) haplotag.
-        assert [c["kind"] for c in cards] == ["annotate", "phase", "haplotag"]
+        # The VCF offers phasing, (unavailable, until phased) haplotag,
+        # and the variants-in-regions intersect against the annotation.
+        assert [c["kind"] for c in cards] == [
+            "annotate", "phase", "haplotag", "variants_in_regions",
+        ]
 
     async def test_the_order_does_not_move_with_availability(self):
         """Fixed order, not sorted by availability: a card that changes
@@ -3978,3 +3992,76 @@ class TestHaplotagCard:
         assert card.launch["body"]["object_id"]
         assert card.launch["body"]["alignment_ids"] == ["bam1"]
         assert card.launch["body"]["candidate_alignments"]
+class TestVariantsInRegionsCard:
+    def test_vcf_with_annotation_is_runnable(self):
+        with installed_bedtools(True):
+            card = build_variants_in_regions_card(_vcf(), [_annotation()])
+        assert card is not None
+        assert card.status is CardStatus.AVAILABLE
+        assert card.kind == "variants_in_regions"
+        assert card.category == "VARIANT"
+
+    def test_vcf_without_annotation_is_unavailable(self):
+        with installed_bedtools(True):
+            card = build_variants_in_regions_card(_vcf(), [])
+        assert card is not None
+        assert card.status is CardStatus.UNAVAILABLE
+
+    def test_tool_uninstalled_is_unavailable(self):
+        with installed_bedtools(False):
+            card = build_variants_in_regions_card(_vcf(), [_annotation()])
+        assert card is not None
+        assert card.status is CardStatus.UNAVAILABLE
+        assert "not installed" in card.reason
+
+
+class TestAnnotationComparisonCard:
+    def test_two_annotations_are_runnable(self):
+        anno1 = _annotation(obj_id="a1")
+        anno1.blob_sha256 = "sha1"
+        anno1.name = "Anno1"
+        anno2 = _annotation(obj_id="a2")
+        anno2.blob_sha256 = "sha2"
+        anno2.name = "Anno2"
+        with installed_bedtools(True):
+            card = build_annotation_comparison_card(anno1, [anno1, anno2])
+        assert card is not None
+        assert card.status is CardStatus.AVAILABLE
+        assert card.kind == "annotation_comparison"
+
+    def test_one_annotation_is_unavailable(self):
+        anno1 = _annotation(obj_id="a1")
+        anno1.blob_sha256 = "sha1"
+        with installed_bedtools(True):
+            card = build_annotation_comparison_card(anno1, [anno1])
+        assert card is not None
+        assert card.status is CardStatus.UNAVAILABLE
+
+    def test_tool_uninstalled_is_unavailable(self):
+        anno1 = _annotation(obj_id="a1")
+        anno1.blob_sha256 = "sha1"
+        anno2 = _annotation(obj_id="a2")
+        anno2.blob_sha256 = "sha2"
+        with installed_bedtools(False):
+            card = build_annotation_comparison_card(anno1, [anno1, anno2])
+        assert card is not None
+        assert card.status is CardStatus.UNAVAILABLE
+        assert "not installed" in card.reason
+
+
+class TestExtractSequencesCard:
+    def test_assembly_fasta_is_runnable(self):
+        fake = _FakeTool(True, name="seqkit")
+        with patch("app.services.suggestion_service.tools.seqkit", return_value=fake):
+            card = build_extract_sequences_card(_fake_obj(kind=FormatKind.FASTA, obj_id="a1"))
+        assert card is not None
+        assert card.status is CardStatus.AVAILABLE
+        assert card.kind == "extract_sequences"
+
+    def test_tool_uninstalled_is_unavailable(self):
+        fake = _FakeTool(False, name="seqkit")
+        with patch("app.services.suggestion_service.tools.seqkit", return_value=fake):
+            card = build_extract_sequences_card(_fake_obj(kind=FormatKind.FASTA, obj_id="a1"))
+        assert card is not None
+        assert card.status is CardStatus.UNAVAILABLE
+        assert "not installed" in card.reason
