@@ -10,6 +10,10 @@ from app.pipelines.feature_coverage_runner import _gff_name
 
 MAX_FEATURES_IN_REPORT = 10_000
 
+# BED's mandatory chrom/start/end. Everything past these is optional, which
+# is why a BED record's width has to be measured, not assumed.
+_BED_MIN_COLUMNS = 3
+
 
 def build_command(vcf: Path, annotation: Path, genome_file: Path) -> list[str]:
     """Command builder for bedtools intersect VCF vs Annotation.
@@ -31,8 +35,36 @@ def build_command(vcf: Path, annotation: Path, genome_file: Path) -> list[str]:
     ]
 
 
-def parse_output(stdout_path: Path, annotation_format: str = "gff") -> dict:
+def bed_column_count(bed_path: Path) -> int:
+    """Width of a BED file's records, needed to locate the B record.
+
+    BED is 3-to-12 columns and `-wao` gives no delimiter between the A and B
+    records, so the only way to know where B begins is to measure B itself.
+    The first non-comment, non-track line decides; a malformed file falls
+    back to the 3-column minimum, which is what `parse_output` assumes when
+    nothing is passed.
+    """
+    with bed_path.open() as fh:
+        for line in fh:
+            if not line.strip() or line.startswith(("#", "track", "browser")):
+                continue
+            return max(len(line.rstrip("\n").split("\t")), _BED_MIN_COLUMNS)
+    return _BED_MIN_COLUMNS
+
+
+def parse_output(
+    stdout_path: Path,
+    annotation_format: str = "gff",
+    bed_columns: int = _BED_MIN_COLUMNS,
+) -> dict:
     """Parse bedtools intersect -wao output.
+
+    `bed_columns` is the annotation's own record width, ignored for GFF/GTF
+    (always 9). It has no safe default beyond the BED minimum: both records
+    vary in width independently -- a VCF carrying FORMAT and sample columns
+    is wider than the 8-column minimum, and BED runs 3 to 12 -- so B can be
+    addressed from neither end without knowing one of the two widths. Pass
+    `bed_column_count(annotation)`.
 
     Outputs summary stats:
     - total_variants: total unique VCF variants
@@ -69,7 +101,11 @@ def parse_output(stdout_path: Path, annotation_format: str = "gff") -> dict:
 
             hit_variants.add(variant_key)
 
-            # Extract B feature details from cols
+            # Extract B feature details. `-wao` writes A, then B, then the
+            # overlap, so B is addressed from the END -- the leading columns
+            # are the VCF's. Slicing BED from the start instead read the
+            # variant's own CHROM/REF as the feature, naming every region
+            # after a reference allele.
             if annotation_format in ("gff", "gtf"):
                 # B has 9 columns: cols[-10:-1]
                 b_cols = cols[-10:-1]
@@ -78,8 +114,9 @@ def parse_output(stdout_path: Path, annotation_format: str = "gff") -> dict:
                 attrs = b_cols[8]
                 name = _gff_name(attrs)
             else:
-                # BED format
-                b_cols = cols[:-1]
+                b_cols = cols[-(bed_columns + 1):-1]
+                if len(b_cols) < _BED_MIN_COLUMNS:
+                    continue
                 seq_id = b_cols[0]
                 ftype = "region"
                 name = b_cols[3] if len(b_cols) > 3 else f"{seq_id}:{b_cols[1]}-{b_cols[2]}"
