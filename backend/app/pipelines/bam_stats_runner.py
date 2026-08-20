@@ -74,6 +74,20 @@ def build_depth_command(*, samtools_path: str, bam: Path) -> list[str]:
     return [samtools_path, "depth", "-a", str(bam)]
 
 
+def build_stats_command(*, samtools_path: str, bam: Path) -> list[str]:
+    """`samtools stats`'s full text report, for MultiQC to parse later.
+
+    Not used for anything `run_bam_stats` computes today -- idxstats,
+    coverage and depth above already cover the numbers this application
+    shows on the Results tab, and `samtools stats` reports a heavily
+    overlapping set (insert size, error rate, mismatches per cycle) this
+    application has no reader for. It exists purely as MultiQC input: its
+    samtools module parses this exact report, and nothing else in the
+    pipeline produces it. See #624/#702.
+    """
+    return [samtools_path, "stats", str(bam)]
+
+
 def parse_idxstats(text: str) -> list[dict]:
     """Reads and unmapped counts per contig from `samtools idxstats`.
 

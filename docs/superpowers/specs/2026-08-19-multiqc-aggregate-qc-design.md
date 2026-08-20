@@ -2,13 +2,16 @@
 
 Date: 2026-08-19. Amended 2026-08-20 after an install spike (see
 [Spike findings](#spike-findings-2026-08-20), which corrects MQ-4, MQ-7,
-MQ-9 and the Install section).
+MQ-9 and the Install section). MQ-5/MQ-6 (samtools stats + QUAST retention)
+landed in [#702](https://github.com/syntheticgio/bioflow/issues/702), after
+v1 shipped -- the requirement text below reflects what shipped there.
 
 Closes [#624](https://github.com/syntheticgio/bioflow/issues/624).
 Companion plan: `docs/superpowers/plans/2026-08-19-multiqc-aggregate-qc.md`.
 
-**v1 scope is reads-side only** (FastQC + fastp). samtools-stats and QUAST
-retention are deferred -- see [Non-goals](#non-goals--follow-ups).
+**v1 scope was reads-side only** (FastQC + fastp). samtools-stats and QUAST
+retention were deferred to #702 -- see [Non-goals](#non-goals--follow-ups),
+now landed.
 
 ## Problem
 
@@ -76,8 +79,8 @@ Retained files per tool, matching what each MultiQC module actually parses:
 |---|---|---|---|
 | FastQC | `run_qc` (short read) | `fastqc/*_fastqc.zip` | **Already retained** — no code needed (SF-4) |
 | fastp | `run_qc` (short read) | `fastp/fastp.json` | v1 — the only retention work |
-| samtools stats | `bam_stats` (align family) | `samtools/<sample>.stats` | Deferred (MQ-5); a *new* `samtools stats` call, not a copy |
-| QUAST | assembly-QC | `quast/report.tsv` (HTML already retained) | Deferred (MQ-6) |
+| samtools stats | `run_bam_stats` (align family) | `samtools/stats.txt` | **Landed in #702** — a *new* `samtools stats` call, not a copy; fixed filename, not `<sample>.stats` (see MQ-5) |
+| QUAST | assembly-QC | `quast/report.tsv` (HTML already retained) | **Landed in #702** (MQ-6) |
 
 Corrected 2026-08-20: this table first named `fastqc/fastqc_data.txt` for
 FastQC. That is an entry *inside* the zip FastQC writes, not a file any
@@ -256,13 +259,24 @@ consistent) per `AGENTS.md`. Each ID is permanent.
   directly (SF-4). The earlier form of this requirement named
   `fastqc/fastqc_data.txt`, which is an entry *inside* that zip rather than a
   file any handler writes.
-- **MQ-5** *(deferred, not v1)* — After a `bam_stats` job,
-  `samtools/<sample>.stats` exists under `qc_reports/<object_id>/`. Note this
-  is a *new* `samtools stats` invocation, not a copy: `bam_stats_runner`
-  parses idxstats/coverage and never writes a `stats` file today.
-- **MQ-6** *(deferred, not v1)* — After an assembly-QC (QUAST) job,
+- **MQ-5** — *(#702, landed after v1)* After a `run_bam_stats` job,
+  `samtools/stats.txt` exists under `qc_reports/<object_id>/`. A *new*
+  `samtools stats` invocation, not a copy -- `bam_stats_runner` parses
+  idxstats/coverage/depth and never wrote a `stats` file before this. Fixed
+  filename rather than `samtools/<sample>.stats` as this requirement first
+  said: `RETAINED_FACT_FILES` in `multiqc_handlers.py` maps one fact key to
+  one static relative path, and a per-sample name would have needed either
+  storing the path in the fact's own value or a second lookup mechanism
+  alongside the fixed-path one fastp and QUAST both use. Best-effort and
+  never fails `run_bam_stats` -- the same posture `_run_fastqc` takes on its
+  own optional extra, since idxstats/coverage/depth are the numbers the
+  Results tab actually shows and a `samtools stats` failure must not cost
+  them.
+- **MQ-6** — *(#702, landed after v1)* After an assembly-QC (QUAST) job,
   `quast/report.tsv` exists under `qc_reports/<object_id>/` (alongside the
-  already-retained HTML).
+  already-retained HTML). Verified end-to-end against a real QUAST 5.3.0 run:
+  `_copy_report` returns `(report_path, tsv_retained)`, and MultiQC pointed
+  at the resulting layout reports `quast | Found 1 reports`.
 - **MQ-7** — `pipelines/multiqc_runner.py` exposes
   `build_multiqc_command(*, multiqc_path, input_dir, out_dir)` that invokes
   MultiQC over `input_dir` and writes to `out_dir`. Pure, testable without a
@@ -353,13 +367,17 @@ consistent) per `AGENTS.md`. Each ID is permanent.
 
 - No automatic rollup after QC jobs (MQ-D2).
 - No per-subset report selection in v1 — the aggregate is whole-project.
-- **v1 retention is reads-side only: FastQC (already retained) and fastp.**
-  samtools-stats (MQ-5) and QUAST `report.tsv` (MQ-6) are deferred to a
-  follow-up issue. Scoped this way on 2026-08-20 because the reads-side slice
-  is self-contained -- one `cp` in one handler -- while samtools needs a *new*
-  `samtools stats` invocation in `bam_stats`, which is a behaviour change to
-  the align family rather than a retention tweak. The spike confirmed all four
-  modules parse once staged (SF-5), so the deferral costs no design rework.
+- **v1 retention was reads-side only: FastQC (already retained) and fastp.**
+  samtools-stats (MQ-5) and QUAST `report.tsv` (MQ-6) were deferred to
+  [#702](https://github.com/syntheticgio/bioflow/issues/702). Scoped this way
+  on 2026-08-20 because the reads-side slice was self-contained -- one `cp` in
+  one handler -- while samtools needed a *new* `samtools stats` invocation in
+  `run_bam_stats`, which is a behaviour change to the align family rather than
+  a retention tweak. The spike confirmed all four modules parse once staged
+  (SF-5), so the deferral cost no design rework -- #702 landed both with no
+  changes to `stage_multiqc_inputs`, `object_contributes`, or
+  `newest_qc_output_at`, which already iterate `RETAINED_FACT_FILES`
+  generically.
 - Other MultiQC modules (e.g. featureCounts, BUSCO) are follow-ups once their
   raw outputs are also retained.
 - **No cleanup policy for generated reports.** Regenerating overwrites the

@@ -13,6 +13,7 @@ from app.pipelines.bam_stats_runner import (
     build_coverage_command,
     build_depth_command,
     build_idxstats_command,
+    build_stats_command,
     coerce_tsv_value,
     contigs_from_coverage,
     contigs_tsv,
@@ -45,6 +46,14 @@ class TestCommandConstruction:
             samtools_path="/usr/bin/samtools", bam=Path("/work/a.bam")
         )
         assert cmd == ["/usr/bin/samtools", "depth", "-a", "/work/a.bam"]
+
+    def test_stats_command(self):
+        """Retained purely as MultiQC input (#624/#702) -- nothing in this
+        module parses its output, unlike the three commands above."""
+        cmd = build_stats_command(
+            samtools_path="/usr/bin/samtools", bam=Path("/work/a.bam")
+        )
+        assert cmd == ["/usr/bin/samtools", "stats", "/work/a.bam"]
 
 
 IDXSTATS_OUTPUT = (

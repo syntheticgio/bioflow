@@ -54,6 +54,18 @@ def _write_fastqc(qc_reports, obj, stem="reads_R1"):
     (d / f"{stem}_fastqc.zip").write_bytes(b"PK\x03\x04stub")
 
 
+def _write_quast(qc_reports, obj):
+    d = qc_reports / str(obj.id) / "quast"
+    d.mkdir(parents=True, exist_ok=True)
+    (d / "report.tsv").write_text("Assembly\tassembly\n")
+
+
+def _write_samtools_stats(qc_reports, obj):
+    d = qc_reports / str(obj.id) / "samtools"
+    d.mkdir(parents=True, exist_ok=True)
+    (d / "stats.txt").write_text("# This file was produced by samtools stats\n")
+
+
 class TestStageMultiqcInputs:
     def test_counts_objects_that_contributed(self, tmp_path, qc_reports):
         a = _obj(facts={"qc_fastp_data": "fastp/fastp.json"})
@@ -148,6 +160,48 @@ class TestStageMultiqcInputs:
         stage.mkdir()
 
         assert multiqc_handlers.stage_multiqc_inputs([a, b], stage) == 1
+
+
+class TestRetainedFactFilesCoverage:
+    """Confirms the entries #702 added to RETAINED_FACT_FILES actually
+    stage -- not just that the mechanism works generically (the fastp-only
+    tests above already prove that), but that these specific tool/path
+    pairs are wired correctly. A typo in either half of a
+    (fact_key, rel) tuple would silently stage nothing for that tool."""
+
+    def test_stages_a_retained_quast_report_tsv(self, tmp_path, qc_reports):
+        a = _obj(facts={"assembly_misassembly_data": "quast/report.tsv"})
+        _write_quast(qc_reports, a)
+
+        stage = tmp_path / "stage"
+        stage.mkdir()
+
+        assert multiqc_handlers.stage_multiqc_inputs([a], stage) == 1
+        assert list(stage.rglob("report.tsv"))
+
+    def test_stages_retained_samtools_stats(self, tmp_path, qc_reports):
+        a = _obj(facts={"bam_stats_data": "samtools/stats.txt"})
+        _write_samtools_stats(qc_reports, a)
+
+        stage = tmp_path / "stage"
+        stage.mkdir()
+
+        assert multiqc_handlers.stage_multiqc_inputs([a], stage) == 1
+        assert list(stage.rglob("stats.txt"))
+
+    def test_a_project_with_one_of_each_tool_summarizes(self, tmp_path, qc_reports):
+        """The scenario #702 exists for: a project with an aligned BAM, an
+        assembly QC'd against a reference, and QC'd reads all count toward
+        the same aggregate, even though only one of the three (fastp) was
+        wired before this issue."""
+        reads = _obj(facts={"qc_fastp_data": "fastp/fastp.json"})
+        bam = _obj(facts={"bam_stats_data": "samtools/stats.txt"})
+        assembly = _obj(facts={"assembly_misassembly_data": "quast/report.tsv"})
+        _write_fastp(qc_reports, reads)
+        _write_samtools_stats(qc_reports, bam)
+        _write_quast(qc_reports, assembly)
+
+        assert multiqc_handlers.count_summarizable([reads, bam, assembly]) == 3
 
 
 class TestObjectLabel:

@@ -28,7 +28,7 @@ from app.pipelines import (
 )
 from app.pipelines.aligners import Aligner
 from app.queue.executor import run_subprocess
-from app.queue.pipeline_handlers import _failure, _prepare_workdir
+from app.queue.pipeline_handlers import _failure, _prepare_workdir, _retain_multiqc_input
 from app.queue.registry import HandlerMode, JobContext, handler
 from app.storage.paths import blob_path
 
@@ -919,6 +919,34 @@ def run_bam_stats(ctx: JobContext) -> dict:
     # Capped for facts storage; the full table is the TSV written above.
     top_n = contigs[:50]
 
+    # `samtools stats`'s full-text report, purely for a later MultiQC
+    # aggregate report to parse (see #624/#702) -- nothing in this handler
+    # reads it. Best-effort, matching `_run_fastqc`'s posture on its own
+    # optional extra: idxstats/coverage/depth above are the numbers the
+    # Results tab actually shows, so a failure here must not cost them.
+    # Unlike those three, a non-zero exit is a warning rather than
+    # `_failure`, and there is no retry -- the retained facts this handler
+    # already computed are what a retry exists to protect.
+    ctx.progress(phase="samtools_stats", pct=0.95, message="collecting samtools stats")
+    samtools_stats_retained = False
+    stats_path = work / "samtools_stats.txt"
+    stats_code = run_subprocess(
+        ctx,
+        bam_stats_runner.build_stats_command(samtools_path=samtools.path, bam=bam),
+        log_path=str(stats_path),
+    )
+    if stats_code == 0:
+        # Fixed filename, not derived from bam_name -- matching the
+        # qc_fastp_data / assembly_misassembly_data convention of one
+        # static relative path per fact, which is what lets
+        # multiqc_handlers.RETAINED_FACT_FILES look it up without also
+        # having to store the path in the fact's own value.
+        samtools_stats_retained = _retain_multiqc_input(
+            stats_path, settings.qc_reports_dir / str(object_id), "samtools/stats.txt"
+        )
+    else:
+        log.warning("bam_stats_samtools_stats_failed", job_id=ctx.job_id, code=stats_code)
+
     facts = {
         "bam_stats_status": "ok",
         "bam_stats_tool_version": samtools.version,
@@ -939,6 +967,11 @@ def run_bam_stats(ctx: JobContext) -> dict:
         ),
         "bam_stats_contigs_top": top_n,
         "bam_stats_report": report_name,
+        **(
+            {"bam_stats_data": "samtools/stats.txt"}
+            if samtools_stats_retained
+            else {}
+        ),
     }
 
     ctx.progress(phase="done", pct=1.0, message="results complete")

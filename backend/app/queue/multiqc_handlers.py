@@ -50,6 +50,11 @@ log = get_logger(__name__)
 # work, so presence on disk is the only signal. Hence the glob below.
 RETAINED_FACT_FILES: tuple[tuple[str, str], ...] = (
     ("qc_fastp_data", "fastp/fastp.json"),
+    # QUAST and samtools stats joined in #702 -- the reads-side-only v1
+    # scope from #624 deferred them because samtools stats needed a new
+    # tool invocation, not just a copy of something already computed.
+    ("assembly_misassembly_data", "quast/report.tsv"),
+    ("bam_stats_data", "samtools/stats.txt"),
 )
 
 # FastQC writes `<readname>_fastqc.zip`; the name varies per object, so
