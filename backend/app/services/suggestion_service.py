@@ -1682,9 +1682,7 @@ def build_multiqc_card(obj, qc_summarizable) -> SuggestionCard | None:
 
     title = "Summarize QC across files"
     description = (
-        "Combine the QC already run on this project's files into one "
-        "report, with a row per sample and a section per tool, using "
-        "MultiQC."
+        "Aggregate every QC result in this project into one MultiQC report."
     )
 
     def unavailable(reason: str) -> SuggestionCard:
@@ -1720,7 +1718,7 @@ def build_multiqc_card(obj, qc_summarizable) -> SuggestionCard | None:
         category="QC",
         title=title,
         description=description,
-        why=f"{qc_summarizable} files have QC results to combine.",
+        why=f"{qc_summarizable} files in this project carry parseable QC output.",
         status=CardStatus.AVAILABLE,
         launch={
             "endpoint": "/pipelines/multiqc",
