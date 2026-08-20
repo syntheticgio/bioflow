@@ -522,7 +522,7 @@ RUN pip install --no-cache-dir ragtag==2.1.0
 # here and there is no arm64 build problem. Pinned because a transferred
 # annotation is only comparable to another when the same Liftoff version made
 # both. Networkx and numpy arrive via the PyDESeq2/NanoPlot stack above.
-RUN pip install --no-cache-dir liftoff==1.7.2
+RUN pip install --no-cache-dir liftoff==1.6.3.2
 
 # Sniffles2, the long-read structural variant caller. Its edlib dependency
 # comes from the wheel built in the edlib-build stage above -- see there for
