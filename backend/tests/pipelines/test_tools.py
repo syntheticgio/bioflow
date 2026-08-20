@@ -21,6 +21,28 @@ def clear_cache():
     tools.reset_cache()
 
 
+@pytest.fixture(scope="session")
+def all_tool_names():
+    """The set of names `all_tools()` reports, probed once per session.
+
+    The membership tests below ("is X in the aggregate list?") assert nothing
+    about any tool's version or availability -- only that a registered binary
+    is reachable through `all_tools()` at all. That answer does not change
+    between tests, but `all_tools()` shells out to ~42 binaries to produce it
+    (~4.4s cold), and the autouse `clear_cache` above guarantees it is cold
+    every single time. Nine such tests cost 43.4s of this file's 44.7s; the
+    other 115 run in 1.34s.
+
+    Session-scoped, and deliberately not using the module-level caches: it
+    takes its own snapshot before `clear_cache` can wipe it, so the two do not
+    fight. A test that genuinely needs a cold probe (version parsing, an
+    absent-binary error, a fingerprint change) must keep calling `tools.*()`
+    directly rather than reading this -- those are the tests `clear_cache`
+    exists for.
+    """
+    return {t.name for t in tools.all_tools()}
+
+
 class TestVersionParsing:
     @pytest.mark.parametrize(
         ("raw", "expected"),
@@ -251,11 +273,11 @@ class TestSerialization:
         )
         assert tool.as_dict()["install_state"] == "not_installed"
 
-    def test_all_tools_covers_every_probed_binary(self):
+    def test_all_tools_covers_every_probed_binary(self, all_tool_names):
         """`all_tools` drives the UI's tool-availability panel, so a binary
         missing from it is one whose absence the user discovers as a failed job
         rather than a greyed-out button."""
-        assert {t.name for t in tools.all_tools()} == {
+        assert all_tool_names == {
             "fastp",
             "fastqc",
             "cutadapt",
@@ -338,8 +360,8 @@ class TestIvarProbe:
     def test_ivar_is_runnable(self):
         assert tools.TOOL_META["ivar"].runnable
 
-    def test_ivar_is_in_all_tools(self):
-        assert "ivar" in {t.name for t in tools.all_tools()}
+    def test_ivar_is_in_all_tools(self, all_tool_names):
+        assert "ivar" in all_tool_names
 
 
 class TestCraqProbe:
@@ -376,8 +398,8 @@ class TestCraqProbe:
     def test_craq_is_runnable(self):
         assert tools.TOOL_META["craq"].runnable
 
-    def test_craq_is_in_all_tools(self):
-        assert "craq" in {t.name for t in tools.all_tools()}
+    def test_craq_is_in_all_tools(self, all_tool_names):
+        assert "craq" in all_tool_names
 
     def test_craq_is_documented_and_probeable(self):
         assert "craq" in tools.TOOL_META
@@ -431,8 +453,8 @@ class TestMerylProbe:
     def test_meryl_is_runnable(self):
         assert tools.TOOL_META["meryl"].runnable
 
-    def test_meryl_is_in_all_tools(self):
-        assert "meryl" in {t.name for t in tools.all_tools()}
+    def test_meryl_is_in_all_tools(self, all_tool_names):
+        assert "meryl" in all_tool_names
 
     def test_meryl_is_documented_and_probeable(self):
         assert "meryl" in tools.TOOL_META
@@ -455,8 +477,8 @@ class TestMerquryProbe:
     def test_merqury_is_runnable(self):
         assert tools.TOOL_META["merqury"].runnable
 
-    def test_merqury_is_in_all_tools(self):
-        assert "merqury" in {t.name for t in tools.all_tools()}
+    def test_merqury_is_in_all_tools(self, all_tool_names):
+        assert "merqury" in all_tool_names
 
     def test_merqury_is_documented_and_probeable(self):
         assert "merqury" in tools.TOOL_META
@@ -481,11 +503,11 @@ def test_gci_probe_reports_version(monkeypatch, tmp_path):
 
 
 class TestToolMeta:
-    def test_every_probed_tool_has_a_description(self):
+    def test_every_probed_tool_has_a_description(self, all_tool_names):
         """A tool added to `all_tools` without an entry here would reach the
         selector as a nameless row with an empty summary -- available to pick
         and impossible to choose between. Failing at the table is cheaper."""
-        missing = [t.name for t in tools.all_tools() if t.name not in tools.TOOL_META]
+        missing = [n for n in all_tool_names if n not in tools.TOOL_META]
         assert missing == []
 
     # Tools that deliberately belong to no pipeline, with the reason each
@@ -672,9 +694,8 @@ class TestSalmonProbe:
         assert not tool.available
         assert "SALMON_PATH" in tool.error
 
-    def test_salmon_is_in_the_aggregate_list(self):
-        names = {t.name for t in tools.all_tools()}
-        assert "salmon" in names
+    def test_salmon_is_in_the_aggregate_list(self, all_tool_names):
+        assert "salmon" in all_tool_names
 
 
 class TestNewAlignerProbes:
@@ -689,10 +710,9 @@ class TestNewAlignerProbes:
         t = tools.hisat2()
         assert t.name == "hisat2"
 
-    def test_both_are_in_all_tools(self):
-        names = {t.name for t in tools.all_tools()}
-        assert "bowtie2" in names
-        assert "hisat2" in names
+    def test_both_are_in_all_tools(self, all_tool_names):
+        assert "bowtie2" in all_tool_names
+        assert "hisat2" in all_tool_names
 
     def test_both_have_metadata(self):
         """A tool with no TOOL_META entry defaults to runnable=False and would
@@ -1284,9 +1304,6 @@ def test_delly_is_probed():
     assert tool.name == "delly"
 
 
-def test_delly_is_in_the_tool_list():
+def test_delly_is_in_the_tool_list(all_tool_names):
     """A tool absent from _ALL_TOOLS never appears on /help/software."""
-    from app.pipelines import tools
-
-    names = {t.name for t in tools.all_tools()}
-    assert "delly" in names
+    assert "delly" in all_tool_names
