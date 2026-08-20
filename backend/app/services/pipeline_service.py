@@ -6226,6 +6226,9 @@ async def launch_assembly(
         genome_bases=parsed.genome_size,
         threads=parsed.threads,
         read_bases=read_bases,
+        # Only FlyeParams declares `meta`; every other assembler has no meta
+        # mode and therefore no meta_memory_model for this to select.
+        meta=isinstance(parsed, assembly_params_module.FlyeParams) and parsed.meta,
     )
     resolved = await memory_estimate.resolve(
         job_type=JOB_TYPE_ASSEMBLE,

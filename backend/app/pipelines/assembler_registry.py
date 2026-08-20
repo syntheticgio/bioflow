@@ -67,6 +67,10 @@ class AssemblerSpec:
     # Why this assembler is not usable, when it is not. Rendered by the card,
     # so it says what the user could do about it rather than naming a module.
     unavailable_reason: str = ""
+    # A second model for `--meta` mode, where genome size stops being a
+    # meaningful single number -- see FLYE_SPEC for why this can't just reuse
+    # `memory_model`. None for every assembler without a meta mode.
+    meta_memory_model: AssemblyMemoryModel | None = None
 
     def available(self) -> bool:
         return self.tool is not None and self.tool().available
@@ -135,6 +139,23 @@ FLYE_SPEC = AssemblerSpec(
         bytes_per_genome_base=40.0,
         fixed_overhead_mb=2048,
     ),
+    # `--meta` has no published memory formula -- Flye's own FAQ states peak
+    # memory "grows linearly with genome size and reads coverage" but never
+    # restates that for a mixed community, where "genome size" is not one
+    # number. The only meta-mode data Flye publishes is its own benchmark
+    # table (README, "Flye benchmarks"): four community assemblies ranging
+    # from 7Gb PacBio input at 72GB RAM up to 255Gb HiFi input at 662GB RAM --
+    # roughly 2.6 to 10 GB of peak RAM per Gbp of input reads, with assembled
+    # community complexity confounding the ratio rather than a clean line.
+    # Modelled here as `bytes_per_read_base` against *read* volume rather than
+    # `bytes_per_genome_base` against a genome size that meta mode doesn't
+    # have, at the conservative (high) end of that observed range: wrong in
+    # the low direction is an OOM, wrong in the high direction is a warning.
+    meta_memory_model=AssemblyMemoryModel(
+        bytes_per_genome_base=0.0,
+        bytes_per_read_base=10.0,
+        fixed_overhead_mb=2048,
+    ),
     outputs=(
         Output(kind=OutputKind.CONTIGS, filename="assembly.fasta", required=True),
         Output(kind=OutputKind.GRAPH, filename="assembly_graph.gfa"),
@@ -142,6 +163,20 @@ FLYE_SPEC = AssemblerSpec(
     ),
     fields=(
         *_SHARED_FIELDS,
+        ParamField(
+            key="meta",
+            label="Metagenome mode",
+            kind="bool",
+            default=False,
+            group="biology",
+            help=(
+                "For a mixed-community sample rather than a single organism. "
+                "Makes Flye's graph simplification less aggressive, which "
+                "suits non-uniform coverage across organisms. Genome size is "
+                "ignored for the memory estimate in this mode -- a community "
+                "has no single genome size -- in favour of total read volume."
+            ),
+        ),
         ParamField(
             key="mode",
             label="Input mode",

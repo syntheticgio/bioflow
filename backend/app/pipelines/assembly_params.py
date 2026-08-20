@@ -127,9 +127,18 @@ class FlyeParams(BaseAssemblyParams):
     # declared modes rather than a list here, so adding a mode is one edit.
     mode: str = "nano-raw"
     iterations: int = 1
+    # Mixed-community sample rather than a single organism. See
+    # `assembler_registry.FLYE_SPEC.meta_memory_model` for why this changes
+    # which memory model the launch estimate uses.
+    meta: bool = False
 
     def as_dict(self) -> dict:
-        return {**super().as_dict(), "mode": self.mode, "iterations": self.iterations}
+        return {
+            **super().as_dict(),
+            "mode": self.mode,
+            "iterations": self.iterations,
+            "meta": self.meta,
+        }
 
     @classmethod
     def from_dict(cls, data: dict) -> "FlyeParams":
@@ -153,6 +162,7 @@ class FlyeParams(BaseAssemblyParams):
             assembler=Assembler.FLYE,
             mode=mode,
             iterations=iterations,
+            meta=bool(data.get("meta", False)),
             **cls._shared(data),
         )
 

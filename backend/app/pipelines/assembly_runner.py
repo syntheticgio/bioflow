@@ -89,7 +89,7 @@ def build_assembly_command(
 def _flye_command(
     *, tool_path: str, reads: Path, out_dir: Path, params: FlyeParams
 ) -> list[str]:
-    return [
+    cmd = [
         tool_path,
         f"--{params.mode}",
         str(reads),
@@ -100,6 +100,9 @@ def _flye_command(
         "--iterations",
         str(params.iterations),
     ]
+    if params.meta:
+        cmd.append("--meta")
+    return cmd
 
 
 def _abyss_command(

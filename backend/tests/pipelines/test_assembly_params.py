@@ -39,6 +39,22 @@ def test_spades_params_now_available():
     assert params.assembler is Assembler.SPADES
 
 
+class TestFlyeParams:
+    def test_meta_defaults_to_false(self):
+        params = assembly_params.from_dict({"assembler": "flye"})
+        assert params.meta is False
+
+    def test_accepts_meta_true(self):
+        params = assembly_params.from_dict({"assembler": "flye", "meta": True})
+        assert params.meta is True
+
+    def test_round_trips_through_as_dict(self):
+        params = assembly_params.from_dict({"assembler": "flye", "meta": True})
+        restored = assembly_params.from_dict(params.as_dict())
+        assert restored == params
+        assert restored.meta is True
+
+
 class TestSpadesParams:
     def test_defaults_to_isolate(self):
         params = assembly_params.from_dict({"assembler": "spades"})
