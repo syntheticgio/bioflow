@@ -155,7 +155,7 @@ def download_checkm2_db(ctx: JobContext) -> dict:
     job_class=JobClass.COMPUTE,
     # mem_mb here is the floor; launch_bin_qc overrides it from the registry,
     # which knows the cost a priori rather than fitting it (spec Q1).
-    resources=JobResources(cpu=4, mem_mb=16384, io=IoClass.HEAVY),
+    resources=JobResources(cpu=4, mem_mb=12288, io=IoClass.HEAVY),
     # A deterministic failure (a bin CheckM2 cannot read, a missing database)
     # does not improve with retries.
     max_attempts=1,

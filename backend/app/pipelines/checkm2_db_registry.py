@@ -57,10 +57,15 @@ CHECKM2_DBS: dict[str, CheckM2DbSpec] = {
             "checkm2_database.tar.gz?download=1"
         ),
         download_bytes=1735095710,
-        # Measured, not fitted -- see the module docstring. DIAMOND holds the
-        # reference blocks resident for the duration of the search, and that
-        # residency is a property of the database rather than of the bins.
-        mem_mb=16384,
+        # MEASURED, not fitted and not guessed -- see the module docstring.
+        # A real `checkm2 predict` over three bacterial genomes (~12 MB of
+        # sequence, 4 threads) peaked at 8,347 MB RSS on 2026-08-21, timed
+        # with getrusage(RUSAGE_CHILDREN) so the DIAMOND child is included.
+        # 12 GB is that peak plus headroom: the residency is dominated by
+        # DIAMOND holding reference blocks from the 3.1 GB .dmnd, which is a
+        # property of the database rather than of how many bins are scored,
+        # so it does not grow with N the way a per-bin cost would.
+        mem_mb=12288,
         md5="07c10655620843b517d0df0c160d911f",
         description=(
             "The UniRef100-derived DIAMOND database CheckM2 scores "

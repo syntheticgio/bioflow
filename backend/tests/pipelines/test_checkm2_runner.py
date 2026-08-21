@@ -176,3 +176,65 @@ def test_bin_quality_facts_are_flat_scalars():
 
 def test_quality_report_filename_is_pinned():
     assert checkm2_runner.QUALITY_REPORT == "quality_report.tsv"
+
+
+# The real table from a CheckM2 1.1.0 run on 2026-08-21, over three bacterial
+# genomes: two clean bins and one built by concatenating them. Captured
+# verbatim -- the column set here is the ground truth the hand-written
+# fixtures above are modelled on, including `Translation_Table_Used` and
+# `Average_Gene_Length`, which the docs do not mention.
+REAL_TABLE = (
+    "Name\tCompleteness\tContamination\tCompleteness_Model_Used\t"
+    "Translation_Table_Used\tCoding_Density\tContig_N50\tAverage_Gene_Length\t"
+    "Genome_Size\tGC_Content\tTotal_Coding_Sequences\tTotal_Contigs\t"
+    "Max_Contig_Length\tAdditional_Notes\n"
+    "bin_merged\t100.0\t15.29\tNeural Network (Specific Model)\t11\t0.882\t"
+    "4907118\t310.17673338098643\t5891749\t0.48\t5596\t4\t4907118\tNone\n"
+    "bin_one\t100.0\t0.76\tNeural Network (Specific Model)\t11\t0.874\t"
+    "4907118\t308.70816242821985\t5157999\t0.5\t4876\t3\t4907118\tNone\n"
+    "bin_two\t98.96\t0.21\tNeural Network (Specific Model)\t11\t0.932\t"
+    "733750\t323.62322946175635\t733750\t0.34\t706\t1\t733750\tNone\n"
+)
+
+
+class TestAgainstARealRun:
+    """The captured output of an actual CheckM2 1.1.0 run.
+
+    The hand-written fixtures above pin the shapes this parser must handle;
+    this pins the shape it actually met.
+    """
+
+    def test_every_row_parses(self):
+        rows = parse_quality_report(REAL_TABLE)
+        assert [r.name for r in rows] == ["bin_merged", "bin_one", "bin_two"]
+
+    def test_a_merged_bin_scores_high_contamination(self):
+        """The falsifiable prediction from the plan's real-data check.
+
+        `bin_merged` is `bin_one` and `bin_two` concatenated -- two organisms
+        in one bin. It must score far higher contamination than either
+        component while staying complete, which is the exact signature that
+        distinguishes a merged bin from an incomplete one. Anything that
+        emitted plausible defaults instead of reading the database would not
+        reproduce this ordering.
+        """
+        rows = {r.name: r for r in parse_quality_report(REAL_TABLE)}
+        merged, one, two = rows["bin_merged"], rows["bin_one"], rows["bin_two"]
+
+        assert merged.contamination > 10 * max(one.contamination, two.contamination)
+        # Completeness does not fall -- a merged bin is over-complete, not
+        # under-complete, which is why contamination is the number that
+        # catches it.
+        assert merged.completeness >= one.completeness
+
+    def test_the_tiers_separate_the_merged_bin_from_the_clean_ones(self):
+        rows = {r.name: r for r in parse_quality_report(REAL_TABLE)}
+        assert quality_tier(rows["bin_one"].completeness, rows["bin_one"].contamination) == "high"
+        assert quality_tier(rows["bin_two"].completeness, rows["bin_two"].contamination) == "high"
+        # On contamination alone, despite being 100% complete.
+        assert (
+            quality_tier(
+                rows["bin_merged"].completeness, rows["bin_merged"].contamination
+            )
+            == "low"
+        )
