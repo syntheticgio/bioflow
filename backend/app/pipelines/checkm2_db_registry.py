@@ -6,11 +6,19 @@ and the user has nothing to pick, so the card needs no picker. The registry
 shape is still right -- it is what carries the pin, the checksum and the
 memory cost -- it just holds a single row (spec Q1).
 
-Pinned to Zenodo record 7563512 (version `r202`, published 2023-01-24),
-never the concept record 7563511. That distinction is the whole point: the
-concept DOI is Zenodo's "latest" alias and resolves to whatever the newest
-version happens to be, which is exactly the moving target that makes two
-runs of the same bin incomparable with nothing to say why.
+Pinned to Zenodo record 14897628 -- **DIAMONDDB version 3**, published
+2025-02-20 -- never the concept record 4626518. That distinction is the whole
+point: the concept DOI is Zenodo's "latest" alias and resolves to whatever
+the newest version happens to be, which is exactly the moving target that
+makes two runs of the same bin incomparable with nothing to say why.
+
+Which version is not a free choice. CheckM2 ships
+`version/version_hashes_<ver>.json` listing each database version with an
+`incompatible_below_checkm2ver` floor, and 1.1.0's entry for DIAMONDDB
+version 3 reads `"incompatible_below_checkm2ver": "1.1.0"` -- so 1.1.0
+requires v3 and rejects the older v2 (record 7563512, DOI 10.5281/zenodo.5571251).
+Bumping CHECKM2_VERSION therefore means re-reading that file, not assuming
+this URL still applies.
 
 `mem_mb` is the in-RAM cost of a predict run with the database loaded --
 known a priori from the database, never fitted from the memory model,
@@ -43,17 +51,17 @@ DEFAULT_DB = "uniref100"
 CHECKM2_DBS: dict[str, CheckM2DbSpec] = {
     "uniref100": CheckM2DbSpec(
         key="uniref100",
-        label="CheckM2 r202 (UniRef100)",
+        label="CheckM2 UniRef100/KO (v3)",
         url=(
-            "https://zenodo.org/records/7563512/files/"
-            "r202_database.zb.tar.gz?download=1"
+            "https://zenodo.org/records/14897628/files/"
+            "checkm2_database.tar.gz?download=1"
         ),
-        download_bytes=9322373789,
+        download_bytes=1735095710,
         # Measured, not fitted -- see the module docstring. DIAMOND holds the
         # reference blocks resident for the duration of the search, and that
         # residency is a property of the database rather than of the bins.
         mem_mb=16384,
-        md5="f512b37f35251403763173a001d3a0e7",
+        md5="07c10655620843b517d0df0c160d911f",
         description=(
             "The UniRef100-derived DIAMOND database CheckM2 scores "
             "completeness and contamination against."

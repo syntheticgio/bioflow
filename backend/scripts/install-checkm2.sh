@@ -133,7 +133,7 @@ checkm2 --version
 # runs the real prediction path end to end on bundled genomes, which is the
 # guard that matters.
 #
-# It needs the DIAMOND database, which is 9.3 GB and is NOT baked into the
+# It needs the DIAMOND database, which is 1.7 GB and is NOT baked into the
 # image (it is fetched at runtime by download_checkm2_db, so that the pin,
 # checksum and disk cost live in the registry rather than in a layer). So the
 # strongest check available at build time is that the whole import graph

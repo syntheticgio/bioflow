@@ -4168,7 +4168,7 @@ class TestBinQcCard:
         """Spec Q2: the download is chained, so the card stays AVAILABLE.
 
         There is one database and the user does not choose it, so refusing
-        would be busywork -- but a 9.3 GB fetch should not be a surprise.
+        would be busywork -- but a 1.7 GB fetch should not be a surprise.
         """
         with (
             patch(
@@ -4181,7 +4181,7 @@ class TestBinQcCard:
         ):
             card = build_bin_qc_card(self._assembly())
         assert card.status is CardStatus.AVAILABLE
-        assert "9.3 GB" in card.why
+        assert "1.7 GB" in card.why
 
 
 class TestBinningCard:
