@@ -23,6 +23,7 @@ from app.pipelines.assembly_params import (
     AbyssParams,
     BaseAssemblyParams,
     FlyeParams,
+    MegahitParams,
     SpadesParams,
 )
 
@@ -38,6 +39,27 @@ MIN_BLOOM_MB = 200
 # number, or it inherits that default and dies deep into a run on a
 # workstation rather than never starting.
 MIN_SPADES_MEMORY_GB = 4
+
+# MEGAHIT's `-m` is NOT SPAdes' `-m`, in either units or meaning, and both
+# differences are silent when got wrong:
+#
+#   * Units. `-m/--memory <float>` is "max memory in byte", and a value
+#     between 0 and 1 is read as a *fraction of the machine's total memory*
+#     instead. So `-m 4` -- the shape MIN_SPADES_MEMORY_GB produces -- is a
+#     legal argument meaning four bytes, not four gigabytes.
+#   * Meaning. It is a budget MEGAHIT plans its graph construction to fit,
+#     not a ceiling it terminates on reaching. That difference is why #731
+#     measured MEGAHIT completing under a cap that killed metaSPAdes, which
+#     is the entire reason this assembler is here.
+#
+# Floored at 2 GiB so a run with no estimate still gets a real budget, and
+# expressed in bytes so the number the guard used and the number the tool
+# gets are the same number -- the argument `_abyss_command`'s Bloom budget
+# makes. The 0-1 fraction form is deliberately never emitted: it would make a
+# run's memory depend on the host rather than on the estimate that admitted
+# it, so two runs with identical recorded parameters would behave differently
+# on different machines.
+MIN_MEGAHIT_MEMORY_BYTES = 2 * 1024**3
 
 
 def build_assembly_command(
@@ -74,6 +96,16 @@ def build_assembly_command(
     if assembler is Assembler.SPADES:
         assert isinstance(params, SpadesParams)
         return _spades_command(
+            tool_path=tool_path,
+            reads=reads,
+            out_dir=out_dir,
+            params=params,
+            mate=mate,
+            memory_bytes=memory_bytes,
+        )
+    if assembler is Assembler.MEGAHIT:
+        assert isinstance(params, MegahitParams)
+        return _megahit_command(
             tool_path=tool_path,
             reads=reads,
             out_dir=out_dir,
@@ -177,6 +209,66 @@ def _spades_command(
         cmd += ["-1", str(reads), "-2", str(mate)]
     else:
         cmd += ["-s", str(reads)]
+    return cmd
+
+
+def _megahit_command(
+    *,
+    tool_path: str,
+    reads: Path,
+    out_dir: Path,
+    params: MegahitParams,
+    mate: Path | None,
+    memory_bytes: int | None,
+) -> list[str]:
+    """`megahit` takes conventional flags, like spades.py -- but `-o` and `-m`
+    both behave differently enough to be worth stating.
+
+    **`--force` is load-bearing, not a convenience.** MEGAHIT refuses to start
+    when its output directory already exists:
+
+        if not opt.force_overwrite and not opt.test_mode
+                and os.path.exists(opt.out_dir):
+            raise Usage('Output directory ... already exists, ...')
+
+    (v1.2.9's own wrapper). `assembly_handlers` creates `out_dir` before
+    building any command -- which Flye, ABySS and SPAdes all accept -- so
+    without `--force` every MEGAHIT run here fails instantly, before
+    assembling anything. Overwriting is safe because that directory is a
+    per-job scratch dir the handler just made empty; there is nothing of
+    anyone's in it. The alternative, making the handler skip its mkdir for
+    this one assembler, puts a tool-specific conditional in a path every
+    assembler shares -- which is how the *next* assembler breaks silently.
+
+    `-m` is in **bytes**, not gigabytes, and is a budget rather than a
+    ceiling. See MIN_MEGAHIT_MEMORY_BYTES.
+    """
+    memory = max(MIN_MEGAHIT_MEMORY_BYTES, int(memory_bytes or 0))
+
+    cmd = [
+        tool_path,
+        "-o",
+        str(out_dir),
+        "--force",
+        "-t",
+        str(params.threads),
+        # Formatted as an integer, never in scientific notation: `1e+10` is
+        # not a float MEGAHIT's own `float()` parse would reject, but a value
+        # that rounded into [0, 1] would silently become a *fraction of host
+        # memory*. The floor above is what actually prevents that; this keeps
+        # the recorded command readable as the byte count it is.
+        "-m",
+        str(memory),
+        "--min-contig-len",
+        str(params.min_contig_len),
+    ]
+
+    if mate is not None:
+        cmd += ["-1", str(reads), "-2", str(mate)]
+    else:
+        # MEGAHIT assembles single-end input fine, unlike metaSPAdes -- so
+        # there is no launch-time refusal for unpaired reads here.
+        cmd += ["-r", str(reads)]
     return cmd
 
 

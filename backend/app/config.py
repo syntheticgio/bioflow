@@ -176,6 +176,9 @@ class Settings(BaseSettings):
     # argument it needs.
     abyss_path: str = "abyss-pe"
     spades_path: str = "spades.py"
+    # The short-read metagenome assembler. Installed from bioconda behind a
+    # wrapper, so this is the wrapper's name rather than a path into /opt.
+    megahit_path: str = "megahit"
     # Bacterial genome annotation. On-demand delivery — the database is
     # several GB — so this probe only checks the binary, not the DB.
     bakta_path: str = "bakta"

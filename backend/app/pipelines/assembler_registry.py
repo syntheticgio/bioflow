@@ -377,11 +377,100 @@ ABYSS_SPEC = AssemblerSpec(
 )
 
 
+MEGAHIT_SPEC = AssemblerSpec(
+    assembler=Assembler.MEGAHIT,
+    tool=tools.megahit,
+    # Empty by construction, like ABySS and SPAdes: MEGAHIT has no
+    # read-accuracy mode flag, and `spec_for_chemistry` does not reach it by
+    # chemistry lookup.
+    mode_flags={},
+    layout="paired",
+    # One model, not a pair. Every other assembler here has a single-genome
+    # model and (if it has a meta mode) a second one for communities; MEGAHIT
+    # is *only* ever a metagenome assembler, so its one model is the meta one
+    # and `meta_memory_model` stays None. `bytes_per_genome_base` is 0.0 for
+    # the reason both existing meta models give: a community has no single
+    # genome size, so there is no number to multiply.
+    #
+    # Measured on this hardware rather than taken from published guidance, and
+    # deliberately NOT copied from SPADES_SPEC -- bounded memory is the entire
+    # reason this tool is here, so inheriting SPAdes' 90 (or its meta model's
+    # 16) would model away the thing being modelled. MEGAHIT 1.2.9,
+    # linux-aarch64, 4 threads, peak RSS via GNU time, over synthetic
+    # communities of 5 to 150 genomes on 2026-08-21:
+    #
+    #      2.8 Mbp of reads ->  268 MB
+    #     11.4 Mbp of reads ->  284 MB
+    #     34.1 Mbp of reads ->  325 MB
+    #     85.3 Mbp of reads ->  418 MB
+    #
+    # A near-perfect line: 1.91 bytes per read base on a 263 MB intercept.
+    # Rounded up to 2.5 with a 384 MB floor, so every measured point sits
+    # under the estimate rather than on it -- #727's stated bias, that wrong
+    # in the low direction is an OOM (which also poisons the timing models)
+    # while wrong in the high direction is a warning someone can override.
+    #
+    # Worth knowing before re-measuring: at a FIXED community size, peak RSS
+    # is flat against read depth -- 1.4 Mbp and 80.7 Mbp of reads over the
+    # same five genomes both peaked at ~272 MB -- and flat against `-m`
+    # (500 MB, 2 GB, 8 GB and the default all gave ~266 MB on one community).
+    # MEGAHIT takes what the graph needs up to the budget rather than
+    # pre-allocating it. So what this coefficient really tracks is community
+    # *complexity*, for which read volume is the only proxy available at
+    # launch. A re-measurement that varies depth alone will see a flat line
+    # and wrongly conclude the coefficient should be zero.
+    memory_model=AssemblyMemoryModel(
+        bytes_per_genome_base=0.0,
+        bytes_per_read_base=2.5,
+        fixed_overhead_mb=384,
+    ),
+    outputs=(
+        # `final.contigs.fa` is what the wrapper's `merge_final()` writes --
+        # read off v1.2.9's source rather than the docs, and confirmed against
+        # a real run by install-megahit.sh's smoke assembly.
+        #
+        # No GRAPH output: MEGAHIT writes intermediate per-k contigs under
+        # `intermediate_contigs/`, not an assembly graph anyone opens in
+        # Bandage. Declaring one that never appears would be a permanently
+        # absent optional output.
+        Output(kind=OutputKind.CONTIGS, filename="final.contigs.fa", required=True),
+    ),
+    fields=(
+        # No `mode` field, deliberately: MEGAHIT has no isolate/meta switch to
+        # offer. `modes_for()` therefore returns an empty frozenset for it,
+        # which is correct rather than missing -- there are no modes.
+        #
+        # `genome_size` comes with _SHARED_FIELDS and stays inert here: the
+        # memory model has no genome term to feed, and the field's own help
+        # text already says it is only used for the estimate. Dropping it
+        # would make this the one assembler whose dialog lacks a field the
+        # others share, to remove something that costs nothing.
+        *_SHARED_FIELDS,
+        ParamField(
+            key="min_contig_len",
+            label="Minimum contig length",
+            kind="int",
+            default=200,
+            min=1,
+            max=10000,
+            group="biology",
+            help=(
+                "Contigs shorter than this are not written out. MEGAHIT's own "
+                "default is 200. Raising it trims the short fragments a "
+                "community assembly always produces, at the risk of dropping "
+                "genuinely short sequences."
+            ),
+        ),
+    ),
+    unavailable_reason="MEGAHIT is not installed in this build.",
+)
+
 SPECS: dict[Assembler, AssemblerSpec] = {
     Assembler.FLYE: FLYE_SPEC,
     Assembler.HIFIASM: HIFIASM_SPEC,
     Assembler.SPADES: SPADES_SPEC,
     Assembler.ABYSS: ABYSS_SPEC,
+    Assembler.MEGAHIT: MEGAHIT_SPEC,
 }
 
 

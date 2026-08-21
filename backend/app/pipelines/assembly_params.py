@@ -33,6 +33,13 @@ MAX_ITERATIONS = 10
 MIN_K = 16
 MAX_K = 127
 
+# MEGAHIT's minimum output contig length. Its own default is 200. The ceiling
+# is BioFlow's, not the tool's: MEGAHIT accepts any positive integer, and a
+# value in the tens of thousands would silently discard an entire community
+# assembly rather than fail.
+MIN_CONTIG_LEN = 1
+MAX_CONTIG_LEN = 10_000
+
 
 def parse_genome_size(value) -> int | None:
     """`4.6m` / `3.1g` / `4600000` -> bases. None when unset.
@@ -240,10 +247,51 @@ class SpadesParams(BaseAssemblyParams):
         return cls(assembler=Assembler.SPADES, mode=mode, **cls._shared(data))
 
 
+@dataclass
+class MegahitParams(BaseAssemblyParams):
+    """MEGAHIT parameters.
+
+    No `mode` field, unlike SPAdes: MEGAHIT has no isolate/careful/meta
+    switch, because it is a metagenome assembler throughout. There is nothing
+    for a mode select to offer.
+
+    No `meta` boolean either, unlike Flye -- and that absence is deliberate
+    rather than an omission. An always-true `meta=True` would be a parameter
+    recorded in a run's provenance that no flag corresponds to, which is the
+    same lie `assembly_runner`'s docstring refuses for genome size. What asks
+    "is this a community assembly?" is `pipeline_service._is_meta_assembly`,
+    which answers True for this class directly.
+
+    No `k` field: like SPAdes and unlike ABySS, MEGAHIT sweeps a k-list
+    automatically. Exposing one invites a hand-set value worse than the sweep.
+    """
+
+    assembler: Assembler = Assembler.MEGAHIT
+    min_contig_len: int = 200
+
+    def as_dict(self) -> dict:
+        return {**super().as_dict(), "min_contig_len": self.min_contig_len}
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "MegahitParams":
+        min_contig_len = int(data.get("min_contig_len", 200))
+        if not MIN_CONTIG_LEN <= min_contig_len <= MAX_CONTIG_LEN:
+            raise ValidationError(
+                f"min_contig_len must be between {MIN_CONTIG_LEN} and "
+                f"{MAX_CONTIG_LEN}"
+            )
+        return cls(
+            assembler=Assembler.MEGAHIT,
+            min_contig_len=min_contig_len,
+            **cls._shared(data),
+        )
+
+
 _BY_ASSEMBLER = {
     Assembler.FLYE: FlyeParams,
     Assembler.ABYSS: AbyssParams,
     Assembler.SPADES: SpadesParams,
+    Assembler.MEGAHIT: MegahitParams,
 }
 
 

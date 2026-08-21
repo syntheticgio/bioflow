@@ -7102,15 +7102,24 @@ async def default_assembly_params(obj: DataObject) -> dict:
 def _is_meta_assembly(parsed) -> bool:
     """Whether these params describe a mixed-community assembly.
 
-    One question, two spellings: `FlyeParams.meta` is a checkbox orthogonal to
-    Flye's accuracy mode, while SPAdes carries `meta` as a `mode` value because
-    the tool rejects `--meta --isolate` and `--meta --careful`. Callers asking
-    "is this a community assembly?" should not have to know which.
+    One question, three spellings: `FlyeParams.meta` is a checkbox orthogonal
+    to Flye's accuracy mode; SPAdes carries `meta` as a `mode` value because
+    the tool rejects `--meta --isolate` and `--meta --careful`; and MEGAHIT
+    carries nothing at all, because it is a metagenome assembler throughout
+    and has no other mode to be in. Callers asking "is this a community
+    assembly?" should not have to know which.
+
+    MEGAHIT answering True from its type rather than from a field is the point
+    of `MegahitParams` having no always-true `meta` boolean: a parameter in a
+    run's recorded provenance that no command-line flag corresponds to is a
+    claim about the run that is not true of the command.
     """
     if isinstance(parsed, assembly_params_module.FlyeParams):
         return parsed.meta
     if isinstance(parsed, assembly_params_module.SpadesParams):
         return parsed.mode == "meta"
+    if isinstance(parsed, assembly_params_module.MegahitParams):
+        return True
     return False
 
 
