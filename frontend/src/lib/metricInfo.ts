@@ -897,6 +897,81 @@ export const METRIC_INFO: Record<string, MetricInfo> = {
     computed:
       "The fraction of total sequences classified to the leading taxon in the Kraken2 report.",
   },
+  checkm2_completeness: {
+    term: "Completeness",
+    description:
+      "The estimated percentage of a single organism's genome present in this bin. By the MIMAG convention a high-quality MAG is at least 90% complete with at most 5% contamination, and a medium-quality one at least 50% with at most 10%. A low score is not a failure: a 40%-complete bin is a legitimate result for a low-abundance organism, and it still shows that the organism is present.",
+    computed:
+      "Predicted by CheckM2 from the protein set it annotates in the bin, using machine-learning models trained on reference genomes -- not by counting a lineage-specific marker set, which is what lets it score organisms with no close reference.",
+  },
+  checkm2_contamination: {
+    term: "Contamination",
+    description:
+      "The estimated percentage of this bin that comes from an organism other than the one it mostly represents. Values above 100% are real and are not a display error: they mean the bin holds several copies of the marker set, i.e. several organisms merged together. Under the MIMAG convention, at most 5% is high quality and at most 10% is medium.",
+    computed:
+      "Predicted by CheckM2 from duplicated marker genes in the bin's annotated protein set.",
+  },
+  checkm2_quality_score: {
+    term: "Quality score",
+    description:
+      "A single number combining the two scores, by the common convention completeness minus five times contamination. It ranks bins quickly but hides which of the two problems a bin has, so treat it as a sort key rather than a verdict. It can be negative for a heavily contaminated bin.",
+    computed: "completeness - (5 x contamination), as defined by Parks et al.",
+  },
+  checkm2_quality_tier: {
+    term: "Quality tier",
+    description:
+      "Which MIMAG band this bin falls in: high (at least 90% complete, at most 5% contaminated), medium (at least 50% and at most 10%), or low. A descriptive label only -- no bin is hidden, filtered or discarded on the basis of it.",
+    computed:
+      "Derived from the completeness and contamination scores using the MIMAG thresholds (Bowers et al. 2017).",
+  },
+  checkm2_completeness_model: {
+    term: "Completeness model",
+    description:
+      "Which of CheckM2's two models produced the completeness estimate. The specific (neural network) model is used when the bin resembles the training genomes closely enough; the general (gradient boost) model is the fallback for novel organisms.",
+    computed: "Reported by CheckM2 per bin.",
+  },
+  checkm2_coding_density: {
+    term: "Coding density",
+    description:
+      "The fraction of the bin's bases that fall inside predicted protein-coding genes. Bacterial and archaeal genomes are typically around 0.85-0.90; a much lower value can indicate assembly problems or non-coding contamination.",
+    computed: "Computed by CheckM2 from the Prodigal gene predictions.",
+  },
+  checkm2_contig_n50: {
+    term: "Contig N50",
+    description:
+      "The length such that half of this bin's total bases sit in contigs at least that long. Higher means a less fragmented bin, which makes gene calls and downstream annotation more reliable.",
+    computed: "Computed by CheckM2 over the bin's contigs.",
+  },
+  checkm2_genome_size: {
+    term: "Genome size",
+    description:
+      "The total number of bases in this bin. Read alongside completeness: a small bin that scores highly complete suggests a genuinely small genome, while a large bin that scores poorly complete often means several partial genomes merged.",
+    computed: "The sum of the bin's contig lengths, as reported by CheckM2.",
+  },
+  checkm2_gc_content: {
+    term: "GC content",
+    description:
+      "The fraction of bases in this bin that are G or C. Within one organism it is fairly uniform, so a bin whose GC content is unusually broad is a hint that it mixes organisms -- which the contamination score measures directly.",
+    computed: "Computed by CheckM2 across the bin's contigs.",
+  },
+  checkm2_total_contigs: {
+    term: "Contigs",
+    description:
+      "How many contigs this bin holds. A draft genome in a handful of contigs is far more usable than the same sequence split across hundreds.",
+    computed: "Counted by CheckM2.",
+  },
+  checkm2_notes: {
+    term: "CheckM2 notes",
+    description:
+      "Any caveat CheckM2 attached to this bin -- most often that its two completeness models disagreed substantially, which is a sign the organism is unlike the training set and the estimate should be treated with more caution.",
+    computed: "Reported by CheckM2 per bin.",
+  },
+  checkm2_scored_bins: {
+    term: "Bins scored",
+    description:
+      "How many of this assembly's bins received a completeness and contamination score. Fewer than the bin count means some bins could not be read or scored; their scores are simply absent rather than the run failing.",
+    computed: "Counted when the scores were written back onto the bins.",
+  },
   bin_unclassified_fraction: {
     term: "Unclassified fraction",
     description:
@@ -918,6 +993,10 @@ export const METRIC_INFO: Record<string, MetricInfo> = {
  */
 export const NO_INFO_NEEDED: ReadonlySet<string> = new Set([
   // Provenance: which tool ran, which version, and when. Self-describing.
+  "checkm2_version",
+  // Which database the scores came from. Names a registry entry; the label
+  // says what it is, and the pin itself is not something to interpret.
+  "checkm2_db_key",
   "bam_stats_computed_at",
   "bam_stats_tool_version",
   "bam_stats_status",

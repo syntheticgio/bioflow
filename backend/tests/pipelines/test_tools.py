@@ -318,6 +318,11 @@ class TestSerialization:
             "mosdepth",
             "modkit",
             "metabat2",
+            # x86-64 only in practice: the probe returns an explicit
+            # architecture message on arm64 rather than a "not found", the
+            # polypolish posture. Listed here regardless -- the availability
+            # panel is exactly where a user should read why it is missing.
+            "checkm2",
             "seqkit",
             # Not a binary at all -- a Python library, probed by import rather
             # than by shutil.which. It is in `all_tools` deliberately: the

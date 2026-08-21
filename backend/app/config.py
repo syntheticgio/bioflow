@@ -271,6 +271,10 @@ class Settings(BaseSettings):
     # same reason mosdepth's is. See scripts/install-metabat2.sh.
     metabat2_path: str = "metabat2"
     jgi_depths_path: str = "jgi_summarize_bam_contig_depths"
+    # CheckM2, the bin completeness/contamination scorer. Absent on arm64 by
+    # design rather than by accident -- see tools.checkm2() for why bioconda
+    # cannot install it there at all.
+    checkm2_path: str = "checkm2"
     # How many bins one binning job may turn into DataObjects. A deep
     # community can produce hundreds, and several hundred new objects from a
     # single click is a usability failure even when every object is correct.
@@ -606,6 +610,16 @@ class Settings(BaseSettings):
         the network, so what it reads here must already exist.
         """
         return self.bioinfo_home / "kraken_dbs"
+
+    @property
+    def checkm2_db_dir(self) -> Path:
+        """CheckM2 quality-prediction databases, shared across every project.
+
+        The same class of thing as `kraken_dbs_dir`: reference data fetched
+        by `download_checkm2_db`, which a scoring job must find already on
+        disk rather than fetching mid-run.
+        """
+        return self.bioinfo_home / "checkm2_dbs"
 
     @property
     def meta_dir(self) -> Path:

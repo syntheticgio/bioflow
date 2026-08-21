@@ -1742,6 +1742,77 @@ async def _apply_assemble_reads(result: dict, *, owner: str) -> None:
         await run_service.record_outputs(run_id, produced, owner=contigs.owner)
 
 
+async def _apply_checkm2_scores(result: dict, *, owner: str) -> None:
+    """Write each bin's completeness and contamination onto that bin.
+
+    Per bin, independently, in the `_apply_binning` posture: one bin failing
+    to update must not cost the other thirty-nine their scores.
+
+    **Nothing is filtered, hidden or deleted on the basis of a score**
+    (spec Q4/R5). A 40%-complete bin is a legitimate result for a
+    low-abundance organism, and discarding it would destroy the finding that
+    the organism is present at all. This applier stores; the user decides.
+    """
+    scored = result.get("scored") or []
+    if not scored:
+        log.warning("checkm2_no_rows", assembly_id=result.get("assembly_id"))
+        return
+
+    tool_version = result.get("tool_version")
+    updated = 0
+    for entry in scored:
+        object_id = entry.get("object_id")
+        facts = dict(entry.get("facts") or {})
+        if not object_id or not facts:
+            continue
+        if tool_version:
+            facts["checkm2_version"] = tool_version
+        try:
+            bin_obj = await DataObject.get(PydanticObjectId(object_id))
+            if bin_obj is None:
+                log.warning("checkm2_bin_missing", object_id=object_id)
+                continue
+            # Per-key `facts.<key>` paths rather than a whole-dict merge, for
+            # the reason #606 documents: a merge computed from a stale
+            # snapshot erases whatever else wrote facts on this bin meanwhile.
+            await bin_obj.set(
+                {
+                    **{f"facts.{key}": value for key, value in facts.items()},
+                    DataObject.updated_at: datetime.now(UTC),
+                }
+            )
+            updated += 1
+        except Exception as e:  # noqa: BLE001
+            log.error("checkm2_apply_failed", object_id=object_id, error=str(e))
+            continue
+
+    # On the source assembly, so "have these bins been scored" is answerable
+    # without opening N objects.
+    assembly_id = result.get("assembly_id")
+    if assembly_id:
+        try:
+            assembly = await DataObject.get(PydanticObjectId(assembly_id))
+            if assembly is not None:
+                await assembly.set(
+                    {
+                        "facts.checkm2_scored_bins": updated,
+                        "facts.checkm2_db_key": result.get("db_key"),
+                        DataObject.updated_at: datetime.now(UTC),
+                    }
+                )
+        except Exception as e:  # noqa: BLE001
+            log.error(
+                "checkm2_assembly_facts_failed", object_id=assembly_id, error=str(e)
+            )
+
+    log.info(
+        "checkm2_applied",
+        assembly_id=assembly_id,
+        scored=len(scored),
+        updated=updated,
+    )
+
+
 async def _apply_binning(result: dict, *, owner: str) -> None:
     """Turn a finished binning run into one DataObject per bin.
 
@@ -4309,6 +4380,7 @@ _APPLIERS = {
     "differential_expression": _apply_differential_expression,
     "assemble_reads": _apply_assemble_reads,
     "binning": _apply_binning,
+    "score_bin_quality": _apply_checkm2_scores,
     "assess_completeness": _apply_assess_completeness,
     "assess_misassemblies": _apply_assess_misassemblies,
     "analyze_gc_tracks": _apply_analyze_gc_tracks,

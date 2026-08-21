@@ -4796,6 +4796,181 @@ def _binning_dedup_key(contigs_id, bam_id, params: dict) -> str:
     return f"binning:{contigs_id}:{bam_id}:{_params_fingerprint(params)}"
 
 
+async def launch_checkm2_db_download(*, db_key: str, owner: str) -> Job:
+    """Queue fetching the CheckM2 quality-prediction database.
+
+    A dependency of `launch_bin_qc`, not something it fetches inline -- a
+    scoring job must not depend on the network partway through, the same
+    reasoning `launch_kraken_db_download` records.
+    """
+    from app.pipelines.checkm2_db_registry import CHECKM2_DBS
+    from app.queue import queue
+
+    if db_key not in CHECKM2_DBS:
+        raise ValidationError(
+            f"Unknown CheckM2 database {db_key!r}",
+            details={"db_key": db_key},
+        )
+
+    return await queue.enqueue(
+        "download_checkm2_db",
+        owner=owner,
+        payload={"db_key": db_key},
+        job_class=JobClass.USER_INTERACTIVE,
+        resources=JobResources(cpu=1, mem_mb=512, io=IoClass.HEAVY),
+        max_attempts=3,
+        # One download at a time, project-agnostic: the store is shared, so
+        # two projects requesting it collapse into one job rather than
+        # downloading 9.3 GB twice concurrently.
+        dedup_key=f"download_checkm2_db:{db_key}",
+    )
+
+
+async def launch_bin_qc(
+    *,
+    object_id: PydanticObjectId,
+    owner: str,
+    db_key: str | None = None,
+    resource_override: bool = False,
+) -> Job:
+    """Queue CheckM2 scoring for every bin of one community assembly.
+
+    Anchored on the **assembly**, not on a bin: one job scores the whole set
+    (spec Q3). CheckM2's fixed cost is loading the DIAMOND database, so N jobs
+    would pay it N times and put N queue entries behind one click.
+
+    When the database is absent the download is enqueued and this job chains
+    behind it (spec Q2/R2), rather than refusing with "run the download
+    first". A missing database is not a missing *decision*: there is exactly
+    one database and the user does not choose it, so a refusal would be
+    busywork. Contrast the binning card, which refuses without an alignment --
+    that is a real input the user must supply.
+
+    The same dedup race `launch_classify_reads` documents applies: when a
+    concurrent request already deduped onto an existing download,
+    `launch_checkm2_db_download` returns None and this job races it rather
+    than waiting. `score_bin_quality` re-checks `db_present` at the top and
+    fails cleanly if it loses, so the failure mode is "retry the job".
+    """
+    from app.pipelines.checkm2_db_registry import CHECKM2_DBS, DEFAULT_DB, db_present
+    from app.queue import queue
+    from app.services import object_service
+
+    key = db_key or DEFAULT_DB
+    spec = CHECKM2_DBS.get(key)
+    if spec is None:
+        raise ValidationError(
+            f"Unknown CheckM2 database {key!r}", details={"db_key": key}
+        )
+
+    # Hoisted above the enqueue, per #478/#527: a declaration the budget can
+    # never satisfy is unclaimable, and claim.lua has no starvation escape.
+    refuse_if_over_budget(
+        declared_mb=spec.mem_mb,
+        budget_mb=await current_admission_budget_mb(),
+        resource_override=resource_override,
+    )
+
+    tools.require(tools.checkm2())
+
+    assembly = await object_service.get_object(object_id, owner=owner)
+    if assembly is None:
+        raise ValidationError(
+            "Assembly not found.", details={"object_id": str(object_id)}
+        )
+
+    bins = await _bins_of_assembly(assembly, owner=owner)
+    if not bins:
+        raise ValidationError(
+            f"{assembly.name!r} has no bins to score. Bin it first.",
+            details={"object_id": str(assembly.id), "needs": "binning"},
+        )
+
+    payload: dict = {
+        "assembly_id": str(assembly.id),
+        "db_key": key,
+        "project_id": str(assembly.project_id),
+        "threads": 4,
+        "bins": [],
+    }
+    for bin_obj in bins:
+        digest, path = await _resolve_readable(bin_obj)
+        if not digest and not path:
+            # A bin whose bytes are not resolvable is skipped rather than
+            # failing the run: the other bins are still scoreable.
+            log.warning("checkm2_bin_unreadable", object_id=str(bin_obj.id))
+            continue
+        entry: dict = {"object_id": str(bin_obj.id), "bin_name": bin_obj.name}
+        if digest:
+            entry["bin_sha256"] = digest
+        if path:
+            entry["bin_path"] = str(path)
+        payload["bins"].append(entry)
+
+    if not payload["bins"]:
+        raise ValidationError(
+            f"None of the bins of {assembly.name!r} have stored content yet.",
+            details={"object_id": str(assembly.id)},
+        )
+
+    depends_on: list[PydanticObjectId] = []
+    if not db_present(key):
+        download = await launch_checkm2_db_download(db_key=key, owner=owner)
+        # None when a concurrent request already deduped onto an existing
+        # download -- see the docstring. Nothing to depend on in that case.
+        if download is not None:
+            depends_on.append(download.id)
+
+    job = await queue.enqueue(
+        "score_bin_quality",
+        owner=owner,
+        payload=payload,
+        job_class=JobClass.COMPUTE,
+        # From the registry, never the fitted memory model (spec Q1).
+        resources=JobResources(cpu=4, mem_mb=spec.mem_mb, io=IoClass.HEAVY),
+        max_attempts=1,
+        dedup_key=f"score_bin_quality:{assembly.id}:{key}",
+        project_id=assembly.project_id,
+        object_id=assembly.id,
+        resource_override=resource_override,
+        depends_on=depends_on,
+    )
+    if job is None:
+        raise ConflictError(
+            "Bin scoring is already queued or running for this assembly",
+            details={"object_id": str(assembly.id), "db_key": key},
+        )
+
+    log.info(
+        "bin_qc_launched",
+        job_id=str(job.id),
+        object_id=str(assembly.id),
+        bins=len(payload["bins"]),
+        db_key=key,
+        chained_download=bool(depends_on),
+    )
+    return job
+
+
+async def _bins_of_assembly(assembly, *, owner: str) -> list:
+    """Every bin object produced from this assembly.
+
+    Keyed on the `bin_source_assembly` fact #728 writes onto each bin rather
+    than on `derived_from`: a bin's parents include the alignment as well as
+    the assembly, and the fact is the one that means "this is a MAG *of* that
+    community" specifically.
+    """
+    from app.models import DataObject
+
+    return await DataObject.find(
+        {
+            "facts.bin_source_assembly": str(assembly.id),
+            "owner": owner,
+            "status": ObjectStatus.READY.value,
+        }
+    ).to_list()
+
+
 async def launch_binning(
     *,
     object_id: PydanticObjectId,
