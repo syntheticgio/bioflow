@@ -95,8 +95,23 @@ def estimate_assembly_mb(
 
     spec = assembler_spec_for(assembler)
 
+    model = spec.memory_model
     if meta and spec.meta_memory_model is not None:
         model = spec.meta_memory_model
+
+    # A model with no genome term cannot be estimated from a genome size, and
+    # for a community there is no genome size to offer -- so read volume is
+    # the only input it has. True for both `meta_memory_model`s above and,
+    # unconditionally, for MEGAHIT, whose single model *is* a meta model
+    # because it has no non-meta mode to have a second one for.
+    #
+    # Keyed off the model's own coefficients rather than off `meta`: selecting
+    # this branch on `meta and spec.meta_memory_model is not None` sent
+    # MEGAHIT down the genome-size path below, where a community with no
+    # genome size estimates to None and is therefore guarded by nothing --
+    # the cleanest instance of the #478 hole that the meta models exist to
+    # close.
+    if not model.bytes_per_genome_base:
         if not read_bases or read_bases <= 0:
             return None
         reads_mb = (read_bases * model.bytes_per_read_base) / (1024 * 1024)
@@ -107,7 +122,6 @@ def estimate_assembly_mb(
     if genome_bases is None or genome_bases <= 0:
         return None
 
-    model = spec.memory_model
     graph_mb = (genome_bases * model.bytes_per_genome_base) / (1024 * 1024)
     # Zero for every assembler whose model leaves the coefficient at its
     # default, so this term is invisible to Flye.
