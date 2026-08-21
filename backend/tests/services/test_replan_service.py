@@ -333,3 +333,64 @@ def test_every_registered_proposer_is_reachable():
 def test_every_proposer_has_a_verifier():
     """A proposer without a verifier can never offer anything."""
     assert set(replan_service._PROPOSERS) == set(replan_service._VERIFIERS)
+
+
+class TestAssemblyReplanCarriesMetaMode:
+    """A replan of a community assembly must re-estimate with the same model
+    the launch path used.
+
+    `_assembly_estimate` never passed `meta=` until #781, so every replan of a
+    metagenome assembly re-estimated against the assembler's *single-genome*
+    model. For a community that model has no genome size to consume, so the
+    estimate came back None and the proposal was measured against nothing.
+    """
+
+    def test_flye_meta_replan_estimates_from_read_volume(self):
+        estimate = replan_service._assembly_estimate(
+            {
+                "assembler": Assembler.FLYE.value,
+                "threads": 8,
+                "genome_bases": None,
+                "read_bases": 2_000_000_000,
+                "meta": True,
+            }
+        )
+        assert estimate is not None
+        assert estimate > 0
+
+    def test_flye_non_meta_replan_is_unchanged(self):
+        """The single-genome path must be arithmetically untouched."""
+        estimate = replan_service._assembly_estimate(
+            {
+                "assembler": Assembler.FLYE.value,
+                "threads": 8,
+                "genome_bases": None,
+                "read_bases": 2_000_000_000,
+                "meta": False,
+            }
+        )
+        assert estimate is None
+
+    def test_spades_meta_mode_is_read_off_the_mode_value(self):
+        """SPAdes spells meta as its mode, not as a boolean."""
+        estimate = replan_service._assembly_estimate(
+            {
+                "assembler": Assembler.SPADES.value,
+                "threads": 8,
+                "genome_bases": None,
+                "read_bases": 2_000_000_000,
+                "mode": "meta",
+            }
+        )
+        assert estimate is not None
+
+    def test_megahit_needs_no_meta_key_at_all(self):
+        estimate = replan_service._assembly_estimate(
+            {
+                "assembler": Assembler.MEGAHIT.value,
+                "threads": 8,
+                "genome_bases": None,
+                "read_bases": 2_000_000_000,
+            }
+        )
+        assert estimate is not None
