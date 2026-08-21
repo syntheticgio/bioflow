@@ -8,6 +8,8 @@ from both sides.
 
 import math
 
+import pytest
+
 from app.pipelines import resource_estimator as est
 from app.pipelines.aligner_registry import spec_for
 from app.pipelines.aligners import Aligner
@@ -339,6 +341,114 @@ class TestAssemblyEstimate:
         ).spec_for(Assembler.SPADES).memory_model
         expected_genome_mb = (5_000_000 * spec_model.bytes_per_genome_base) / 1024**2
         assert est > expected_genome_mb
+
+    def test_megahit_estimates_from_reads_with_no_genome_size(self):
+        """The hole the model-selection branch used to leave open.
+
+        Selecting the read-only branch on `meta and meta_memory_model is not
+        None` sent MEGAHIT -- always meta, no `meta_memory_model` -- down the
+        genome-size path, where a community (which has no genome size)
+        estimated to None and was therefore guarded by nothing at all. The
+        branch keys off the model's own coefficients now.
+        """
+        from app.pipelines import resource_estimator
+        from app.pipelines.assemblers import Assembler
+
+        est = resource_estimator.estimate_assembly_mb(
+            assembler=Assembler.MEGAHIT,
+            genome_bases=None,
+            threads=4,
+            read_bases=500_000_000,
+            meta=True,
+        )
+        assert est is not None
+        assert est > 0
+
+    def test_megahit_estimate_is_the_same_whether_or_not_meta_is_passed(self):
+        """MEGAHIT has no non-meta mode, so the flag must not change its
+        arithmetic. A caller that forgot to pass `meta=True` -- as
+        replan_service did for every assembler until #781 -- must still get a
+        real number rather than None."""
+        from app.pipelines import resource_estimator
+        from app.pipelines.assemblers import Assembler
+
+        kwargs = dict(
+            assembler=Assembler.MEGAHIT,
+            genome_bases=None,
+            threads=4,
+            read_bases=500_000_000,
+        )
+        assert resource_estimator.estimate_assembly_mb(
+            **kwargs, meta=True
+        ) == resource_estimator.estimate_assembly_mb(**kwargs, meta=False)
+
+    def test_megahit_estimate_is_none_without_read_bases(self):
+        """Read volume is its only input, so nothing to estimate from is
+        still a real 'no opinion' answer."""
+        from app.pipelines import resource_estimator
+        from app.pipelines.assemblers import Assembler
+
+        assert (
+            resource_estimator.estimate_assembly_mb(
+                assembler=Assembler.MEGAHIT,
+                genome_bases=5_000_000,
+                threads=4,
+                read_bases=None,
+                meta=True,
+            )
+            is None
+        )
+
+    @pytest.mark.parametrize(
+        "read_bases,measured_mb",
+        [
+            (2_844_600, 268),
+            (11_378_400, 284),
+            (34_135_200, 325),
+            (85_338_000, 418),
+        ],
+    )
+    def test_megahit_estimate_covers_the_measured_peaks(
+        self, read_bases, measured_mb
+    ):
+        """The model must not sit under what was actually observed.
+
+        Measured with MEGAHIT 1.2.9 at 4 threads on linux-aarch64 over
+        synthetic communities of 5 to 150 genomes (2026-08-21). Under-
+        estimating is an OOM, which also poisons the timing models; over-
+        estimating is a warning someone can override.
+        """
+        from app.pipelines import resource_estimator
+        from app.pipelines.assemblers import Assembler
+
+        est = resource_estimator.estimate_assembly_mb(
+            assembler=Assembler.MEGAHIT,
+            genome_bases=None,
+            threads=4,
+            read_bases=read_bases,
+            meta=True,
+        )
+        assert est >= measured_mb
+
+    def test_megahit_estimate_grows_with_read_bases(self):
+        from app.pipelines import resource_estimator
+        from app.pipelines.assemblers import Assembler
+
+        small = resource_estimator.estimate_assembly_mb(
+            assembler=Assembler.MEGAHIT,
+            genome_bases=None,
+            threads=4,
+            read_bases=1_000_000_000,
+            meta=True,
+        )
+        large = resource_estimator.estimate_assembly_mb(
+            assembler=Assembler.MEGAHIT,
+            genome_bases=None,
+            threads=4,
+            read_bases=50_000_000_000,
+            meta=True,
+        )
+        assert large > small
 
     def test_flye_meta_estimate_grows_with_read_bases(self):
         from app.pipelines import resource_estimator
