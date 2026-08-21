@@ -1150,6 +1150,36 @@ class TestAssembleCard:
         assert "not installed" not in (card.reason or "")
         assert "abyss" in card.title.lower()
 
+    def test_short_read_why_names_whichever_assembler_the_spec_carries(self):
+        """`why` used to say "with ABySS" in prose while the title beside it
+        read `spec.assembler.value`.
+
+        Three assemblers now declare `layout="paired"` (ABySS, SPAdes,
+        MEGAHIT), so a hardcoded name is a sentence that contradicts its own
+        title the moment `spec_for_chemistry` routes SHORT anywhere else.
+        This asserts the two agree by construction.
+        """
+
+        class _Available:
+            available = True
+
+        megahit_spec = dataclasses.replace(
+            assembler_registry.MEGAHIT_SPEC, tool=lambda: _Available()
+        )
+
+        obj = _fake_obj(facts={"qc_read_chemistry": "short"})
+        obj.name = "sample_R1.fastq.gz"
+
+        with patch.object(
+            assembler_registry, "spec_for_chemistry", return_value=megahit_spec
+        ):
+            card = build_assemble_card(obj)
+
+        assert card.status is CardStatus.AVAILABLE
+        assert "megahit" in card.why.lower()
+        assert "megahit" in card.title.lower()
+        assert "abyss" not in card.why.lower()
+
     def test_short_read_card_says_when_reads_are_unpaired(self):
         """`why` is filename-level only -- this builder is synchronous and
         pure and cannot look up the mate object, so it can only say what the
