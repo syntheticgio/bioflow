@@ -13,7 +13,12 @@ import pytest
 
 from app.pipelines import assembly_runner
 from app.pipelines.assemblers import Assembler
-from app.pipelines.assembly_params import AbyssParams, FlyeParams, SpadesParams
+from app.pipelines.assembly_params import (
+    AbyssParams,
+    FlyeParams,
+    MegahitParams,
+    SpadesParams,
+)
 from app.pipelines.assembly_runner import AssemblyProgress, parse_assembly_info
 
 
@@ -248,6 +253,165 @@ class TestSpadesCommand:
     def test_tiny_estimate_is_raised_to_the_floor(self):
         cmd = _spades_cmd(memory_bytes=100 * 1024**2)
         assert cmd[cmd.index("-m") + 1] == str(assembly_runner.MIN_SPADES_MEMORY_GB)
+
+
+def _megahit_cmd(**kwargs):
+    defaults = dict(
+        assembler=Assembler.MEGAHIT,
+        tool_path="/usr/local/bin/megahit",
+        reads=Path("/work/r1.fastq.gz"),
+        out_dir=Path("/work/out"),
+        params=MegahitParams(threads=4),
+        mate=Path("/work/r2.fastq.gz"),
+        memory_bytes=8 * 1024**3,
+    )
+    defaults.update(kwargs)
+    return assembly_runner.build_assembly_command(**defaults)
+
+
+class TestMegahitCommand:
+    def test_full_argv(self):
+        assert _megahit_cmd() == [
+            "/usr/local/bin/megahit",
+            "-o",
+            "/work/out",
+            "--force",
+            "-t",
+            "4",
+            "-m",
+            str(8 * 1024**3),
+            "--min-contig-len",
+            "200",
+            "-1",
+            "/work/r1.fastq.gz",
+            "-2",
+            "/work/r2.fastq.gz",
+        ]
+
+    def test_force_is_always_passed(self):
+        """Without it, every run here fails before assembling anything.
+
+        MEGAHIT refuses to start when `-o` already exists, and
+        `assembly_handlers` creates out_dir before building any command --
+        which Flye, ABySS and SPAdes all accept. This is not a convenience
+        flag; it is the difference between the tool working and not.
+        """
+        assert "--force" in _megahit_cmd()
+        assert "--force" in _megahit_cmd(mate=None)
+        assert "--force" in _megahit_cmd(memory_bytes=None)
+
+    def test_memory_is_in_bytes_not_gigabytes(self):
+        """The opposite of SPAdes' `-m`, which is in GB.
+
+        `-m 8` to MEGAHIT means eight *bytes*. The number here must be the
+        byte count itself.
+        """
+        cmd = _megahit_cmd(memory_bytes=8 * 1024**3)
+        assert cmd[cmd.index("-m") + 1] == str(8 * 1024**3)
+
+    def test_memory_is_floored_when_no_estimate_exists(self):
+        cmd = _megahit_cmd(memory_bytes=None)
+        assert cmd[cmd.index("-m") + 1] == str(
+            assembly_runner.MIN_MEGAHIT_MEMORY_BYTES
+        )
+
+    def test_tiny_estimate_is_raised_to_the_floor(self):
+        cmd = _megahit_cmd(memory_bytes=100 * 1024**2)
+        assert cmd[cmd.index("-m") + 1] == str(
+            assembly_runner.MIN_MEGAHIT_MEMORY_BYTES
+        )
+
+    @pytest.mark.parametrize("memory_bytes", [None, 0, 1, 100, 100 * 1024**2, 8 * 1024**3])
+    def test_memory_is_never_a_fraction(self, memory_bytes):
+        """A value in [0, 1] is read by MEGAHIT as a *fraction of host
+        memory*, not a byte count.
+
+        That is the silent half of this flag: it makes a run's real memory
+        depend on the machine rather than on the estimate that admitted it,
+        so two runs with identical recorded parameters behave differently on
+        different hosts. The floor is what prevents it; this asserts the
+        property rather than the floor, so it keeps holding if the floor
+        changes.
+        """
+        cmd = _megahit_cmd(memory_bytes=memory_bytes)
+        value = float(cmd[cmd.index("-m") + 1])
+        assert value > 1
+
+    def test_pairs_mates_as_separate_flags(self):
+        cmd = _megahit_cmd()
+        assert cmd[cmd.index("-1") + 1] == "/work/r1.fastq.gz"
+        assert cmd[cmd.index("-2") + 1] == "/work/r2.fastq.gz"
+
+    def test_falls_back_to_single_end_with_r(self):
+        """`-r`, not SPAdes' `-s`. MEGAHIT assembles single-end input fine,
+        unlike metaSPAdes, so there is no launch-time refusal to match."""
+        cmd = _megahit_cmd(mate=None)
+        assert cmd[cmd.index("-r") + 1] == "/work/r1.fastq.gz"
+        assert "-1" not in cmd
+        assert "-s" not in cmd
+
+    def test_min_contig_len_is_passed(self):
+        cmd = _megahit_cmd(params=MegahitParams(threads=4, min_contig_len=1000))
+        assert cmd[cmd.index("--min-contig-len") + 1] == "1000"
+
+    def test_no_meta_flag_exists_to_pass(self):
+        """MEGAHIT is a metagenome assembler throughout -- there is no
+        `--meta` to emit, which is why `assembly_meta_mode` is keyed off the
+        assembler rather than a parameter."""
+        cmd = _megahit_cmd()
+        assert "--meta" not in cmd
+
+    def test_genome_size_is_never_passed(self):
+        """Same asymmetry the other three builders keep: genome size is
+        collected for BioFlow's estimate, and here it does not even feed
+        that -- MEGAHIT's memory model has no genome term."""
+        cmd = _megahit_cmd(
+            params=MegahitParams(threads=4, genome_size=5_000_000)
+        )
+        assert "5000000" not in cmd
+        assert "--genome-size" not in cmd
+
+
+class TestExistingBuildersAreUnchanged:
+    """Full-argv equality for every assembler that existed before MEGAHIT.
+
+    Adding a builder edits `build_assembly_command`, which every existing
+    assembly goes through. A negative check (`"--force" not in cmd`) would
+    sail past a reordering or a dropped flag; these would not.
+    """
+
+    def test_flye_argv(self):
+        cmd = assembly_runner.build_assembly_command(
+            assembler=Assembler.FLYE,
+            tool_path="/usr/bin/flye",
+            reads=Path("/work/reads.fastq.gz"),
+            out_dir=Path("/work/out"),
+            params=FlyeParams(mode="nano-hq", threads=4, iterations=1),
+        )
+        assert cmd == [
+            "/usr/bin/flye",
+            "--nano-hq",
+            "/work/reads.fastq.gz",
+            "--out-dir",
+            "/work/out",
+            "--threads",
+            "4",
+            "--iterations",
+            "1",
+        ]
+
+    def test_abyss_argv(self):
+        cmd = _abyss_cmd()
+        assert cmd == [
+            "/usr/bin/abyss-pe",
+            "-C",
+            "/work/out",
+            "name=asm",
+            "k=51",
+            "j=4",
+            "B=2048M",
+            "se=/work/r1.fastq.gz",
+        ]
 
 
 class TestAssemblyProgress:

@@ -31,6 +31,7 @@ from app.models import (
 )
 from app.models.job import Job
 from app.pipelines.aligners import Aligner
+from app.pipelines.assemblers import Assembler
 from app.queue.chunked_align_results import apply_chunked_alignment as _apply_chunked_alignment
 
 log = get_logger(__name__)
@@ -1631,13 +1632,24 @@ def assembly_provenance(result: dict) -> dict:
     if params.get("mode"):
         provenance["assembly_mode"] = params["mode"]
     # Whether this is a community assembly, as one key regardless of which
-    # assembler produced it. The two spell it differently -- Flye carries a
+    # assembler produced it. The three spell it differently -- Flye carries a
     # `meta` boolean orthogonal to its accuracy mode, SPAdes carries `meta` as
-    # the mode itself -- and a consumer asking "can this be binned?" should not
-    # have to know which assembler ran. Recorded only when true: an
+    # the mode itself, and MEGAHIT carries nothing at all because it has no
+    # other mode to be in -- and a consumer asking "can this be binned?"
+    # should not have to know which assembler ran. Recorded only when true: an
     # `assembly_meta_mode: false` on every single-genome assembly ever made is
     # noise in a facts table that renders what it holds.
-    if params.get("meta") or params.get("mode") == "meta":
+    #
+    # MEGAHIT is keyed off the assembler rather than a parameter, matching
+    # `pipeline_service._is_meta_assembly` and for the same reason: an
+    # always-true `meta` param would sit in provenance with no flag behind it.
+    # Read from `result["assembler"]`, which is what the handler reports the
+    # run under, rather than from `params`.
+    if (
+        params.get("meta")
+        or params.get("mode") == "meta"
+        or result.get("assembler") == Assembler.MEGAHIT.value
+    ):
         provenance["assembly_meta_mode"] = True
     if params.get("genome_size"):
         provenance["assembly_genome_size"] = params["genome_size"]

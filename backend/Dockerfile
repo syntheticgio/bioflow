@@ -686,6 +686,23 @@ RUN chmod +x /srv/scripts/install-metabat2.sh \
     && METABAT2_VERSION="${METABAT2_VERSION}" \
        /srv/scripts/install-metabat2.sh
 
+# --- MEGAHIT -----------------------------------------------------------
+#
+# Short-read metagenome assembly, feeding the MetaBAT2 binning above. Added
+# for #781 after #731 measured it against metaSPAdes on the same community:
+# quality was a wash and speed was not the criterion, but under a 500 MB cap
+# metaSPAdes terminated with "Cannot allocate memory" and produced nothing
+# while MEGAHIT finished with a statistically identical assembly. Its `-m` is
+# a budget it plans within, not a ceiling it dies at.
+#
+# From bioconda, which is what makes it work on Apple Silicon -- upstream
+# ships no Linux arm64 release asset, bioconda publishes linux-aarch64.
+ARG MEGAHIT_VERSION=1.2.9
+COPY scripts/install-megahit.sh /srv/scripts/install-megahit.sh
+RUN chmod +x /srv/scripts/install-megahit.sh \
+    && MEGAHIT_VERSION="${MEGAHIT_VERSION}" \
+       /srv/scripts/install-megahit.sh
+
 # --- CheckM2 -----------------------------------------------------------
 #
 # Completeness/contamination scoring for the bins MetaBAT2 produces, in its

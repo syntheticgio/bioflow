@@ -646,6 +646,21 @@ def spades() -> Tool:
 
 
 @lru_cache(maxsize=1)
+def megahit() -> Tool:
+    """MEGAHIT, the short-read metagenome assembler.
+
+    No architecture branch, unlike spades() -- bioconda publishes megahit
+    1.2.9 for linux-aarch64 as well as linux-64 (verified against the
+    anaconda.org API on 2026-08-21), so Apple Silicon needs no skip. That is
+    the standing bioconda-over-release-binary rule paying off: upstream ships
+    no Linux arm64 release asset at all.
+
+    `--version` writes one line to stdout and exits 0.
+    """
+    return _probe("megahit", settings.megahit_path, ["--version"])
+
+
+@lru_cache(maxsize=1)
 def bakta() -> Tool:
     # On-demand delivery: this probes the binary, not the database. A missing
     # database surfaces at launch time, not here -- same posture as compleasm's
@@ -1075,6 +1090,7 @@ def all_tools() -> list[Tool]:
         flye(),
         abyss(),
         spades(),
+        megahit(),
         miniprot(),
         compleasm(),
         ivar(),
@@ -2090,6 +2106,49 @@ TOOL_META: dict[str, ToolMeta] = {
             "and passes a memory ceiling derived from the same estimate that "
             "guards the run -- SPAdes terminates on reaching that ceiling "
             "rather than exceeding it."
+        ),
+        runnable=True,
+    ),
+    "megahit": ToolMeta(
+        pipelines=(PipelineType.ASSEMBLE,),
+        one_liner="Short-read metagenome assembler with a bounded memory budget",
+        summary=(
+            "Assembles short reads from a mixed microbial community into "
+            "contigs, using a succinct de Bruijn graph that holds the graph "
+            "in a fraction of the memory an explicit one needs. Unlike SPAdes "
+            "and ABySS it has no isolate mode -- it is a metagenome assembler "
+            "throughout, so its contigs are always recorded as a community "
+            "assembly and can be binned into per-organism genomes."
+        ),
+        strengths=(
+            "Mixed communities with uneven per-organism abundance",
+            "Finishing within a memory budget that stops metaSPAdes",
+            "Much faster than metaSPAdes on the same community",
+        ),
+        homepage="https://github.com/voutcn/megahit",
+        repository="https://github.com/voutcn/megahit",
+        # The 2015 Bioinformatics paper, which upstream's README lists first
+        # under "Publications". The 2016 Methods paper describes v1.0's
+        # engineering rather than the algorithm, and is the second entry.
+        citation=(
+            "Li D, Liu C-M, Luo R, Sadakane K, Lam T-W. MEGAHIT: an "
+            "ultra-fast single-node solution for large and complex "
+            "metagenomics assembly via succinct de Bruijn graph. "
+            "Bioinformatics. 2015."
+        ),
+        citation_url="https://doi.org/10.1093/bioinformatics/btv033",
+        # Read from upstream's own LICENSE file on 2026-08-21 (GNU GPL
+        # Version 3, 29 June 2007), and its README says "licensed under the
+        # GPLv3 License". Note SPAdes above is GPL-2.0-only -- the two
+        # assemblers differ, so neither entry may be copied from the other.
+        license="GPL-3.0-only",
+        usage=(
+            "Assembles short reads from a mixed community into contigs with "
+            "no reference. BioFlow passes a memory budget in bytes derived "
+            "from the same estimate that guards the run -- MEGAHIT plans its "
+            "graph construction to fit that budget rather than terminating "
+            "on reaching it, which is why it completes assemblies that "
+            "metaSPAdes cannot on the same machine."
         ),
         runnable=True,
     ),
@@ -3342,6 +3401,7 @@ def reset_cache() -> None:
     flye.cache_clear()
     abyss.cache_clear()
     spades.cache_clear()
+    megahit.cache_clear()
     miniprot.cache_clear()
     compleasm.cache_clear()
     ivar.cache_clear()

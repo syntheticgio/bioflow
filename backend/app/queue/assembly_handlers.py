@@ -113,12 +113,15 @@ def assemble_reads(ctx: JobContext) -> dict:
             stage_order=assembly_runner.flye_stage_order(params)
         )
     else:
-        # SPAdes (and any future assembler landing here): no stage-order
-        # source exists for it (flye_stage_order reads params.iterations,
-        # which only FlyeParams has), and nothing in this codebase parses
-        # SPAdes' own progress banners. An empty stage_order is the honest
-        # default -- AssemblyProgress's docstring says exactly this falls
-        # back to reporting the phase name alone, with no phase structure.
+        # SPAdes and MEGAHIT (and any future assembler landing here): no
+        # stage-order source exists for either (flye_stage_order reads
+        # params.iterations, which only FlyeParams has), and nothing in this
+        # codebase parses their progress banners. An empty stage_order is the
+        # honest default -- AssemblyProgress's docstring says exactly this
+        # falls back to reporting the phase name alone, with no phase
+        # structure. MEGAHIT's k-sweep would suit a step counter, but its
+        # k-list is configurable and its log line format is not parsed here,
+        # so a denominator would be invented.
         progress = assembly_runner.AssemblyProgress()
     ctx.progress(phase="starting", pct=None, message=f"starting {assembler.value}")
     ctx.extend_lease(ASSEMBLY_LEASE_SECONDS)

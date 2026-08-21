@@ -25,6 +25,11 @@ class Assembler(StrEnum):
     # tarball. See #519.
     SPADES = "spades"
     ABYSS = "abyss"
+    # A metagenome assembler by construction: it has no isolate mode to switch
+    # off and no `--meta` to switch on. That is why `_is_meta_assembly` answers
+    # True for it unconditionally rather than reading a parameter, and why
+    # MEGAHIT_SPEC has one memory model rather than a pair.
+    MEGAHIT = "megahit"
 
 
 class OutputKind(StrEnum):

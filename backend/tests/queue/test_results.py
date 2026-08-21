@@ -204,12 +204,14 @@ async def test_apply_merge_transcripts_ingests_annotation_role_from_all_inputs(
 
 
 class TestAssemblyProvenanceMetaMode:
-    """`assembly_meta_mode` as one key across two spellings.
+    """`assembly_meta_mode` as one key across three spellings.
 
     Flye carries `meta` as a boolean orthogonal to its accuracy mode; SPAdes
     carries it as the mode itself, because the tool rejects `--meta` combined
-    with `--isolate` or `--careful`. A consumer asking "can this be binned?"
-    should not have to know which assembler ran.
+    with `--isolate` or `--careful`; MEGAHIT carries nothing at all, because
+    it is a metagenome assembler throughout and has no other mode to be in. A
+    consumer asking "can this be binned?" should not have to know which
+    assembler ran.
     """
 
     def test_flye_meta_boolean_sets_the_fact(self):
@@ -245,3 +247,21 @@ class TestAssemblyProvenanceMetaMode:
         """
         prov = results.assembly_provenance({"assembler": "flye", "params": params})
         assert "assembly_meta_mode" not in prov
+
+    def test_megahit_sets_the_fact_with_no_meta_param_at_all(self):
+        """The whole point of keying this off the assembler.
+
+        MegahitParams has neither a `meta` boolean nor a `mode`, deliberately
+        -- an always-true parameter would sit in provenance with no flag
+        behind it. So the fact has to come from which tool ran.
+        """
+        prov = results.assembly_provenance(
+            {"assembler": "megahit", "params": {"min_contig_len": 200}}
+        )
+        assert prov["assembly_meta_mode"] is True
+        # No accuracy/running mode to record, unlike the other two.
+        assert "assembly_mode" not in prov
+
+    def test_megahit_sets_the_fact_even_with_empty_params(self):
+        prov = results.assembly_provenance({"assembler": "megahit", "params": {}})
+        assert prov["assembly_meta_mode"] is True

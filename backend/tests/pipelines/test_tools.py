@@ -298,6 +298,9 @@ class TestSerialization:
             "flye",
             "abyss",
             "spades",
+            # No architecture caveat, unlike checkm2 below: bioconda publishes
+            # megahit for linux-aarch64, so this probes the same way on both.
+            "megahit",
             "miniprot",
             "compleasm",
             "fasterq-dump",
