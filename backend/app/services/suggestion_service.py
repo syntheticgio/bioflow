@@ -1533,11 +1533,18 @@ def build_assemble_card(obj) -> SuggestionCard | None:
         # when the veto later fires is, and that path refuses with an
         # explanation rather than assembling.
         paired = pairing.pairing_key(obj.name) is not None
+        # Named from the spec rather than written in: three assemblers now
+        # declare `layout="paired"` (ABySS, SPAdes, MEGAHIT), so a hardcoded
+        # "with ABySS" here is a sentence that goes quietly wrong the moment
+        # `spec_for_chemistry` routes SHORT anywhere else. The title beside it
+        # already reads `spec.assembler.value`; this now agrees with it by
+        # construction rather than by coincidence.
+        name = spec.assembler.value
         why = (
-            "Paired short reads, assembled with ABySS."
+            f"Paired short reads, assembled with {name}."
             if paired
-            else "Unpaired short reads, assembled with ABySS -- pairing both "
-            "mates gives a better assembly."
+            else f"Unpaired short reads, assembled with {name} -- pairing "
+            "both mates gives a better assembly."
         )
     else:
         mode = assembler_registry.mode_for_chemistry(spec, chemistry)
