@@ -2968,7 +2968,7 @@ TOOL_META: dict[str, ToolMeta] = {
             "has been binned: scores every bin from one run and writes each "
             "bin's completeness and contamination back onto that bin. No bin "
             "is filtered or hidden on the basis of its score. Requires a "
-            "9.3 GB DIAMOND database, downloaded on first use."
+            "1.7 GB DIAMOND database, downloaded on first use."
         ),
         runnable=True,
     ),

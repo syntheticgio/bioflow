@@ -1261,9 +1261,9 @@ def build_bin_qc_card(obj) -> SuggestionCard | None:
     if not db_present(DEFAULT_DB):
         # Said on an AVAILABLE card, not used to refuse one (spec Q2). There
         # is one database and the user does not choose it, so refusing would
-        # be busywork -- but a 9.3 GB fetch should not be a surprise either.
+        # be busywork -- but a 1.7 GB fetch should not be a surprise either.
         why += (
-            " The 9.3 GB CheckM2 database is not downloaded yet; it will be "
+            " The 1.7 GB CheckM2 database is not downloaded yet; it will be "
             "fetched first, which can take a while."
         )
 

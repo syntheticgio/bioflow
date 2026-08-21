@@ -4821,7 +4821,7 @@ async def launch_checkm2_db_download(*, db_key: str, owner: str) -> Job:
         max_attempts=3,
         # One download at a time, project-agnostic: the store is shared, so
         # two projects requesting it collapse into one job rather than
-        # downloading 9.3 GB twice concurrently.
+        # downloading 1.7 GB twice concurrently.
         dedup_key=f"download_checkm2_db:{db_key}",
     )
 

@@ -11,7 +11,7 @@ Two handlers, in the `kraken_handlers` shape and for the same reasons:
     pay that cost N times and put N queue entries behind one click.
 
 The download streams with urllib for the reason `kraken_handlers` documents:
-nothing else in this repo streams HTTP to disk, and a 9.3 GB tarball must not
+nothing else in this repo streams HTTP to disk, and a 1.7 GB tarball must not
 be buffered in memory. Integrity is this handler's own job -- `checkm2
 database --download` exists and is deliberately unused, because it resolves
 its own URL at runtime, which is the moving target the pin exists to prevent
@@ -36,7 +36,7 @@ from app.queue.registry import HandlerMode, JobContext, handler
 
 log = get_logger(__name__)
 
-_DOWNLOAD_LEASE_SECONDS = 3 * 3600  # 9.3 GB on a slow line takes a while
+_DOWNLOAD_LEASE_SECONDS = 3 * 3600  # 1.7 GB on a slow line takes a while
 _PREDICT_LEASE_SECONDS = 4 * 3600
 
 
@@ -95,7 +95,7 @@ def download_checkm2_db(ctx: JobContext) -> dict:
 
     Idempotent: an already-present database returns immediately, so the dedup
     collapse in `launch_checkm2_db_download` plus this check makes a re-run a
-    fast no-op rather than a duplicate 9.3 GB download.
+    fast no-op rather than a duplicate 1.7 GB download.
     """
     from app.pipelines.checkm2_db_registry import db_present
 

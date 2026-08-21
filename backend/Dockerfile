@@ -699,7 +699,7 @@ RUN chmod +x /srv/scripts/install-metabat2.sh \
 # neither (only 2.18/2.19), so the environment is unsolvable. See the script for
 # the verification, and tools.checkm2() for what the user is told instead.
 #
-# The 9.3 GB DIAMOND database is NOT baked in: it is fetched at runtime by
+# The 1.7 GB DIAMOND database is NOT baked in: it is fetched at runtime by
 # download_checkm2_db so the pin, checksum and disk cost live in
 # checkm2_db_registry.py rather than in an image layer.
 ARG CHECKM2_VERSION=1.1.0

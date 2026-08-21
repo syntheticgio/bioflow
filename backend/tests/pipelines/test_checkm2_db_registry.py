@@ -39,15 +39,19 @@ def test_every_entry_is_complete():
 def test_url_is_pinned_to_a_dated_record():
     """The exact regression the pin exists to prevent (spec Q1/R4).
 
-    Zenodo serves two kinds of URL: a *version* record (7563512, fixed
-    content) and a *concept* record (7563511, an alias for whatever is
-    newest). Only the former is reproducible, and the difference is one
-    digit -- which is why this is asserted rather than left to review.
+    Zenodo serves two kinds of URL: a *version* record (14897628, fixed
+    content) and a *concept* record (4626518, an alias for whatever is
+    newest). Only the former is reproducible.
+
+    The specific record matters beyond reproducibility: CheckM2 1.1.0
+    requires DIAMONDDB **version 3** and rejects the older v2 (record
+    7563512) as incompatible, so pinning the wrong one is not a stale-data
+    problem but a run that cannot start.
     """
     for spec in CHECKM2_DBS.values():
         assert "latest" not in spec.url
         # The versioned record, not the concept record it belongs to.
-        assert "/records/7563512/" in spec.url
+        assert "/records/14897628/" in spec.url
 
 
 def test_db_present_requires_the_diamond_file(tmp_path, monkeypatch):

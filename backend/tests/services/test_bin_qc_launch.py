@@ -4,7 +4,7 @@ The behaviour this launch actually guards is the **database chaining**
 (spec Q2/R2): when the database is absent the download is enqueued and the
 scoring job depends on it, rather than the launch refusing. Both directions
 are asserted, because "present -> no download" is the half that silently
-regresses into a duplicate 9.3 GB fetch on every run.
+regresses into a duplicate 1.7 GB fetch on every run.
 """
 
 from types import SimpleNamespace
@@ -136,7 +136,7 @@ class TestDatabaseChaining:
         assert scoring["depends_on"] == [download["job_id"]]
 
     async def test_present_database_enqueues_no_download(self):
-        """The half that silently regresses into a duplicate 9.3 GB fetch."""
+        """The half that silently regresses into a duplicate 1.7 GB fetch."""
         assembly = _assembly()
         bins = [_bin(project_id=assembly.project_id, source_id=assembly.id, index=1)]
 
