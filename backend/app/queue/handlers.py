@@ -1038,6 +1038,7 @@ from app.queue import (  # noqa: E402, F401
     assembly_handlers,
     assembly_qc_handlers,
     binning_handlers,
+    checkm2_handlers,
     chunked_align_handlers,
     de_summary_handlers,
     expression_handlers,

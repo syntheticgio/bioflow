@@ -1210,6 +1210,77 @@ def build_binning_card(obj, assembly_alignments) -> SuggestionCard | None:
     )
 
 
+def build_bin_qc_card(obj) -> SuggestionCard | None:
+    """CheckM2 completeness/contamination scoring for a binned assembly.
+
+    Anchored on the community assembly rather than on a bin: one run scores
+    the whole set (spec Q3), so a per-bin card would offer N buttons that each
+    do the same expensive thing.
+
+    Gated on the assembly having been binned, which -- unlike the `--meta`
+    gate on the binning card -- is a HARD requirement rather than a soft one:
+    without bins there is literally nothing to score, so this is a missing
+    input like the binning card's alignment, not a judgement call about
+    whether the user knows better.
+    """
+    if obj.format.kind is not FormatKind.FASTA:
+        return None
+    if obj.role in pipeline_service.COMPLETENESS_EXCLUDED_ROLES:
+        return None
+
+    facts = obj.facts or {}
+    bin_count = facts.get("binning_bin_count")
+    if not bin_count:
+        # Not a refusal card: an assembly that was never binned is not a
+        # metagenome workflow at all, and offering a greyed-out MAG-scoring
+        # card on every ordinary assembly would be noise on the majority of
+        # files. The binning card is what appears there instead.
+        return None
+
+    title = "Score bin quality"
+    description = "Estimate each bin's completeness and contamination."
+
+    from app.pipelines.checkm2_db_registry import DEFAULT_DB, db_present
+
+    checkm2_tool = tools.checkm2()
+    if not checkm2_tool.available:
+        return SuggestionCard(
+            kind="bin_qc",
+            category="ASSEMBLY",
+            title=title,
+            description=description,
+            status=CardStatus.UNAVAILABLE,
+            reason=checkm2_tool.error or "CheckM2 is not available.",
+        )
+
+    why = (
+        f"Score the {bin_count} bins of {obj.name} for completeness and "
+        f"contamination, so a near-complete genome can be told from a pile "
+        f"of misassigned contigs."
+    )
+    if not db_present(DEFAULT_DB):
+        # Said on an AVAILABLE card, not used to refuse one (spec Q2). There
+        # is one database and the user does not choose it, so refusing would
+        # be busywork -- but a 9.3 GB fetch should not be a surprise either.
+        why += (
+            " The 9.3 GB CheckM2 database is not downloaded yet; it will be "
+            "fetched first, which can take a while."
+        )
+
+    return SuggestionCard(
+        kind="bin_qc",
+        category="ASSEMBLY",
+        title=title,
+        description=description,
+        why=why,
+        status=CardStatus.AVAILABLE,
+        launch={
+            "endpoint": "/pipelines/bin-qc",
+            "body": {"object_id": str(obj.id)},
+        },
+    )
+
+
 def build_annotate_genome_card(obj) -> SuggestionCard | None:
     """Genome annotation for a bacterial or archaeal assembly.
 
@@ -3411,6 +3482,7 @@ CARD_BUILDERS: tuple[tuple[str, object], ...] = (
     ("haplotag", lambda obj, ctx: build_haplotag_card(obj, ctx.haplotag_inputs)),
     ("annotate_genome", lambda obj, ctx: build_annotate_genome_card(obj)),
     ("binning", lambda obj, ctx: build_binning_card(obj, ctx.assembly_alignments)),
+    ("bin_qc", lambda obj, ctx: build_bin_qc_card(obj)),
     ("classify_reads", lambda obj, ctx: build_classify_reads_card(obj)),
     ("assemble", lambda obj, ctx: build_assemble_card(obj)),
     ("completeness", lambda obj, ctx: build_completeness_card(obj)),

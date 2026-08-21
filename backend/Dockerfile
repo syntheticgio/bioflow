@@ -686,6 +686,29 @@ RUN chmod +x /srv/scripts/install-metabat2.sh \
     && METABAT2_VERSION="${METABAT2_VERSION}" \
        /srv/scripts/install-metabat2.sh
 
+# --- CheckM2 -----------------------------------------------------------
+#
+# Completeness/contamination scoring for the bins MetaBAT2 produces, in its
+# own conda env for the same reason medaka gets one: it pins old, mutually
+# constrained versions of tensorflow, scikit-learn and numpy that must not
+# reach the app's own environment.
+#
+# Deliberately SKIPPED on arm64, and unusually for this image the blocker is
+# not a missing build of the tool itself -- the bioconda package is noarch.
+# CheckM2's builds require tensorflow ==2.17 or <2.6, and linux-aarch64 has
+# neither (only 2.18/2.19), so the environment is unsolvable. See the script for
+# the verification, and tools.checkm2() for what the user is told instead.
+#
+# The 9.3 GB DIAMOND database is NOT baked in: it is fetched at runtime by
+# download_checkm2_db so the pin, checksum and disk cost live in
+# checkm2_db_registry.py rather than in an image layer.
+ARG CHECKM2_VERSION=1.1.0
+COPY scripts/install-checkm2.sh /srv/scripts/install-checkm2.sh
+RUN chmod +x /srv/scripts/install-checkm2.sh \
+    && CHECKM2_VERSION="${CHECKM2_VERSION}" \
+       TARGETARCH="${TARGETARCH}" \
+       /srv/scripts/install-checkm2.sh
+
 # --- CRAQ --------------------------------------------------------------
 #
 # Reference-free assembly error detection. Not packaged for Debian trixie;

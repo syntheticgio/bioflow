@@ -24,6 +24,7 @@ from app.services.suggestion_service import (
     build_annotate_card,
     build_annotation_comparison_card,
     build_assemble_card,
+    build_bin_qc_card,
     build_binning_card,
     build_classify_reads_card,
     build_coverage_card,
@@ -4097,6 +4098,90 @@ class TestExtractSequencesCard:
         assert card is not None
         assert card.status is CardStatus.UNAVAILABLE
         assert "not installed" in card.reason
+
+
+class TestBinQcCard:
+    """CheckM2 scoring, anchored on the binned community assembly.
+
+    Failing direction first, as TestBinningCard does: a card that reports the
+    wrong reason sends the user to fix the wrong thing.
+    """
+
+    def _assembly(self, facts=None):
+        obj = _fake_obj(
+            kind=FormatKind.FASTA,
+            facts=facts if facts is not None else {"binning_bin_count": 12},
+            role=ObjectRole.REFERENCE,
+        )
+        obj.name = "community.assembly.fasta"
+        return obj
+
+    def test_no_card_for_a_non_fasta(self):
+        assert build_bin_qc_card(_fake_obj(kind=FormatKind.BAM)) is None
+
+    def test_no_card_for_an_assembly_that_was_never_binned(self):
+        """Not a refusal card, deliberately.
+
+        An unbinned assembly is not a metagenome workflow at all, and a
+        greyed-out MAG-scoring card on every ordinary assembly would be noise
+        on the majority of files -- the binning card is what belongs there.
+        """
+        assert build_bin_qc_card(self._assembly(facts={})) is None
+
+    def test_unavailable_when_checkm2_is_not_installed(self):
+        """The arm64 case, which is the common one on this project's own
+        hardware -- so the message the user actually sees is asserted."""
+        with patch(
+            "app.services.suggestion_service.tools.checkm2",
+            return_value=_FakeTool(
+                False,
+                error=(
+                    "CheckM2 is not available on arm64 / Apple Silicon. It "
+                    "requires tensorflow <2.6, and no tensorflow build below "
+                    "2.18 is published for linux-aarch64, so the environment "
+                    "cannot be solved and BioFlow intentionally skips it."
+                ),
+            ),
+        ):
+            card = build_bin_qc_card(self._assembly())
+        assert card.status is CardStatus.UNAVAILABLE
+        assert card.launch is None
+        assert "arm64" in card.reason
+
+    def test_available_for_a_binned_assembly(self):
+        with (
+            patch(
+                "app.services.suggestion_service.tools.checkm2",
+                return_value=_FakeTool(True),
+            ),
+            patch(
+                "app.pipelines.checkm2_db_registry.db_present", return_value=True
+            ),
+        ):
+            card = build_bin_qc_card(self._assembly())
+        assert card.status is CardStatus.AVAILABLE
+        assert card.launch["endpoint"] == "/pipelines/bin-qc"
+        assert card.launch["body"]["object_id"]
+        assert "12" in card.why
+
+    def test_a_missing_database_is_explained_not_refused(self):
+        """Spec Q2: the download is chained, so the card stays AVAILABLE.
+
+        There is one database and the user does not choose it, so refusing
+        would be busywork -- but a 9.3 GB fetch should not be a surprise.
+        """
+        with (
+            patch(
+                "app.services.suggestion_service.tools.checkm2",
+                return_value=_FakeTool(True),
+            ),
+            patch(
+                "app.pipelines.checkm2_db_registry.db_present", return_value=False
+            ),
+        ):
+            card = build_bin_qc_card(self._assembly())
+        assert card.status is CardStatus.AVAILABLE
+        assert "9.3 GB" in card.why
 
 
 class TestBinningCard:

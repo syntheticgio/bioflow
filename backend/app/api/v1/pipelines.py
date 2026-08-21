@@ -1179,6 +1179,29 @@ async def launch_binning_route(body: BinningRequest, owner: OwnerDep) -> JobOut:
     return JobOut.of(job)
 
 
+class BinQcRequest(BaseModel):
+    # The community assembly, not a bin: one job scores the whole set
+    # (spec Q3).
+    object_id: PydanticObjectId
+    # Optional because CheckM2 has exactly one database and the user does not
+    # pick it; carried so a future second entry needs no API change.
+    db_key: str | None = None
+    # "Launch anyway" from the refusal card. Skips the declared-budget refusal.
+    resource_override: bool = False
+
+
+@router.post("/bin-qc", response_model=JobOut, status_code=status.HTTP_201_CREATED)
+async def launch_bin_qc_route(body: BinQcRequest, owner: OwnerDep) -> JobOut:
+    """Queue CheckM2 scoring of every bin of one community assembly."""
+    job = await pipeline_service.launch_bin_qc(
+        object_id=body.object_id,
+        owner=owner,
+        db_key=body.db_key,
+        resource_override=body.resource_override,
+    )
+    return JobOut.of(job)
+
+
 @router.get("/vcfstats/variants/{object_id}")
 async def get_vcf_stats_variants(
     object_id: PydanticObjectId,

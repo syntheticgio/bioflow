@@ -922,6 +922,49 @@ def jgi_depths() -> Tool:
 
 
 @lru_cache(maxsize=1)
+def checkm2() -> Tool:
+    """CheckM2, the bin completeness/contamination scorer.
+
+    Absent on arm64 by design rather than by accident, in the polypolish()
+    posture but for a different reason -- and one worth writing down, because
+    "CheckM2 is pure Python" makes it look like it should work anywhere.
+
+    CheckM2 1.1.0 has two builds -- one requiring `tensorflow ==2.17`, one
+    requiring `tensorflow >=2.1.0,<2.6.0` -- and linux-aarch64 has NEITHER:
+    the only tensorflow builds published for it, of any variant (tensorflow,
+    -cpu, -base, libtensorflow), are 2.18.0 and 2.19.1. Both branches fail, so
+    the environment is unsolvable. Verified with a real micromamba solve on
+    2026-08-21 against a linux-64 control run in the same session that
+    installs and imports cleanly. DIAMOND, the dependency the design doc
+    expected to be the blocker, is fine: bioconda publishes it for aarch64.
+
+    pip is not an escape hatch either: CheckM2 hard-pins `scikit-learn==0.23.2`,
+    which has no aarch64 wheel and source-builds against `numpy==1.17.3` (2019),
+    which does not build under Python 3.12.
+
+    Unpinning those dependencies would install, but CheckM2 scores by loading a
+    pickled scikit-learn/Keras model -- crossing a 0.23 -> 1.x scikit-learn and
+    a 2.5 -> 2.21 tensorflow gap is the case that yields numbers rather than
+    errors, and a silently wrong completeness score is worse than an honest
+    skip. See docs/superpowers/specs/2026-08-20-checkm2-bin-qc-design.md.
+    """
+    tool = _probe("checkm2", settings.checkm2_path, ["--version"])
+    if tool.error and is_arm64():
+        return Tool(
+            name="checkm2",
+            path=None,
+            version=None,
+            error=(
+                "CheckM2 is not available on arm64 / Apple Silicon. It "
+                "requires tensorflow <2.6, and no tensorflow build below "
+                "2.18 is published for linux-aarch64, so the environment "
+                "cannot be solved and BioFlow intentionally skips it."
+            ),
+        )
+    return tool
+
+
+@lru_cache(maxsize=1)
 def seqkit() -> Tool:
     # seqkit has no `--version`; `seqkit version` prints "seqkit v2.x.y".
     return _probe("seqkit", settings.seqkit_path, ["version"])
@@ -1053,6 +1096,7 @@ def all_tools() -> list[Tool]:
         mosdepth(),
         modkit(),
         metabat2(),
+        checkm2(),
         seqkit(),
         snpeff(),
         filtlong(),
@@ -2891,6 +2935,43 @@ TOOL_META: dict[str, ToolMeta] = {
         # is now dispatched to directly, not just installed alongside Merqury.
         runnable=True,
     ),
+    "checkm2": ToolMeta(
+        # ASSEMBLY_QC, beside compleasm: CheckM2 judges genomes rather than
+        # producing them. The distinction that matters here is what it judges
+        # -- compleasm scores a single-organism assembly against a lineage's
+        # BUSCOs, CheckM2 scores a metagenome bin without being told what
+        # organism it is, which is the question a MAG actually poses.
+        pipelines=(PipelineType.ASSEMBLY_QC,),
+        one_liner="Scores metagenome bin completeness and contamination",
+        summary=(
+            "CheckM2 predicts how complete and how contaminated a genome bin "
+            "is, using machine-learning models trained on protein annotations "
+            "rather than a lineage-specific marker set. That is what makes it "
+            "usable on a MAG: it needs no prior knowledge of which organism a "
+            "bin holds, and it scores organisms with no close reference. "
+            "Contamination above 100% is a real result and means several "
+            "organisms merged into one bin."
+        ),
+        strengths=(
+            "Scores bins with no prior knowledge of their taxonomy",
+            "Handles organisms with few or no close reference genomes",
+            "One pass over a directory of bins, not one run per bin",
+            "Reports completeness and contamination separately, not one score",
+        ),
+        homepage="https://github.com/chklovski/CheckM2",
+        repository="https://github.com/chklovski/CheckM2",
+        citation="Chklovski et al., Nature Methods 2023",
+        citation_url="https://doi.org/10.1038/s41592-023-01940-w",
+        license="GPL-3.0",
+        usage=(
+            "Backs the Score bin quality card on a metagenome assembly that "
+            "has been binned: scores every bin from one run and writes each "
+            "bin's completeness and contamination back onto that bin. No bin "
+            "is filtered or hidden on the basis of its score. Requires a "
+            "9.3 GB DIAMOND database, downloaded on first use."
+        ),
+        runnable=True,
+    ),
     "metabat2": ToolMeta(
         # REFERENCE_ASSEMBLY, not ASSEMBLE. MetaBAT2 produces assemblies but
         # assembles nothing: it takes a finished assembly plus an alignment and
@@ -3290,4 +3371,5 @@ def reset_cache() -> None:
     mosdepth.cache_clear()
     metabat2.cache_clear()
     jgi_depths.cache_clear()
+    checkm2.cache_clear()
     modkit.cache_clear()

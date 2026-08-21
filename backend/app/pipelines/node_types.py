@@ -302,6 +302,24 @@ async def _launch_binning(*, inputs: dict, params: dict, owner: str):
     )
 
 
+async def _launch_checkm2_db_download(*, inputs: dict, params: dict, owner: str):
+    return await pipeline_service.launch_checkm2_db_download(
+        db_key=params["db_key"], owner=owner
+    )
+
+
+async def _launch_bin_qc(*, inputs: dict, params: dict, owner: str):
+    # The assembly, not a bin: one run scores every bin of the set (spec Q3).
+    # The bins themselves are found from the assembly by the launcher, so this
+    # node needs no N-input port representation -- the same limitation the
+    # binning node documents on its output side, avoided here rather than met.
+    return await pipeline_service.launch_bin_qc(
+        object_id=inputs["assembly"],
+        owner=owner,
+        db_key=params.get("db_key"),
+    )
+
+
 async def _launch_annotation_export(*, inputs: dict, params: dict, owner: str):
     """Export a filtered subset, holding the export behind the results
     sidecar it depends on.
@@ -1510,6 +1528,38 @@ NODE_TYPES: dict[str, NodeTypeSpec] = {
                 PortType(format=FormatKind.FASTA, role=ObjectRole.REFERENCE),
             ),
         ),
+    ),
+    "download_checkm2_db": NodeTypeSpec(
+        label="Download CheckM2 database",
+        launch_name="pipeline_service.launch_checkm2_db_download",
+        launch=_launch_checkm2_db_download,
+        # No PipelineRun: shared reference data, the download_kraken_db shape.
+        run_kind=None,
+        # No object inputs: `db_key` names a registry entry.
+        inputs=(),
+        # No DataObject either -- the dataset lands under
+        # settings.checkm2_db_dir, outside the object model, and is consumed
+        # by launch_bin_qc checking db_present().
+        outputs=(),
+    ),
+    "score_bin_quality": NodeTypeSpec(
+        label="Score bin quality (CheckM2)",
+        launch_name="pipeline_service.launch_bin_qc",
+        launch=_launch_bin_qc,
+        # No PipelineRun: scores are merged onto the bins as facts, the
+        # completeness shape exactly -- nothing new is produced to hold a
+        # run accountable for.
+        run_kind=None,
+        inputs=(
+            PortSpec(
+                "assembly",
+                PortType(format=FormatKind.FASTA, role=ObjectRole.REFERENCE),
+            ),
+        ),
+        # No outputs: scores are written back onto the bins that already
+        # exist, so this node produces no DataObject -- the coverage/gc_bias
+        # shape rather than the binning one.
+        outputs=(),
     ),
     "haplotag": NodeTypeSpec(
         label="Haplotag variants",

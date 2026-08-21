@@ -190,6 +190,11 @@ _NO_NARRATIVE_STEP: frozenset[str] = frozenset(
         "annotation_comparison",
         "coverage",
         "gc_bias",
+        # Scores written back onto bins that already exist, not a new
+        # artifact -- the completeness numbers show in the bin's own
+        # panel, and a lineage step saying "scored" would add a node
+        # to every MAG's history that produced nothing.
+        "score_bin_quality",
         "run_transcript_qc",
         "run_vcf_stats",
         "run_annotation_stats",
@@ -262,6 +267,11 @@ _NO_NARRATIVE_STEP: frozenset[str] = frozenset(
         # dataset lands under settings.kraken_dbs_dir, outside the object
         # model, so there is nothing for a chain to walk through here.
         "download_kraken_db",
+        # CheckM2 database download: exactly download_kraken_db's shape --
+        # it produces no DataObject at all, the dataset landing under
+        # settings.checkm2_db_dir outside the object model, so there is
+        # nothing for a chain to walk through here.
+        "download_checkm2_db",
     }
 )
 
