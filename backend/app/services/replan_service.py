@@ -326,15 +326,32 @@ _VERIFIERS[JOB_TYPE_ALIGN_READS] = _align_estimate
 
 
 def _assembly_estimate(params: dict) -> int | None:
-    """Re-estimate an assembly. None when genome size is unknown."""
+    """Re-estimate an assembly. None when genome size is unknown.
+
+    `meta` is passed through rather than defaulted away. Without it a replan
+    of a community assembly re-estimates against the assembler's
+    *single-genome* model -- which for a community has no genome size to
+    consume, so every proposal it makes is measured against a None estimate
+    and the replan silently proposes nothing useful. The launch path derives
+    the same flag via `pipeline_service._is_meta_assembly`; this reads it back
+    off the recorded params, which is the same question asked of a dict.
+    """
     from app.pipelines import resource_estimator
     from app.pipelines.assemblers import Assembler
 
+    assembler = Assembler(params["assembler"])
     return resource_estimator.estimate_assembly_mb(
-        assembler=Assembler(params["assembler"]),
+        assembler=assembler,
         genome_bases=params["genome_bases"],
         threads=params["threads"],
         read_bases=params.get("read_bases"),
+        # The three spellings `_is_meta_assembly` documents, over a dict:
+        # Flye's boolean, SPAdes' mode value, and MEGAHIT's always.
+        meta=bool(
+            params.get("meta")
+            or params.get("mode") == "meta"
+            or assembler is Assembler.MEGAHIT
+        ),
     )
 
 
