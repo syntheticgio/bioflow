@@ -4,7 +4,8 @@ import pytest
 
 from app.models.ai import AiProvider, AiRouting, FailureReason, ProviderKind, TaskSlot
 
-pytestmark = pytest.mark.asyncio(loop_scope="module")
+# Applied per class: the sync classes below must not carry the asyncio mark.
+asyncio_module_loop = pytest.mark.asyncio(loop_scope="module")
 
 
 class TestTaskSlot:
@@ -21,6 +22,8 @@ class TestTaskSlot:
 
 
 class TestAiProvider:
+    pytestmark = asyncio_module_loop
+
     async def test_defaults(self, beanie_models):
         p = AiProvider(name="Local", kind=ProviderKind.OPENAI_COMPAT, base_url="http://x:1234")
         assert p.status == "untested"
@@ -43,6 +46,8 @@ class TestAiProvider:
 
 
 class TestAiRouting:
+    pytestmark = asyncio_module_loop
+
     async def test_singleton_id_is_fixed(self, beanie_models):
         """A fixed id is what makes this a singleton -- two concurrent
         writers upsert the same document rather than creating a second one

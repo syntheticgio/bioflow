@@ -12,10 +12,9 @@ from app.config import settings
 from app.services import object_service, project_service
 from tests.services.helpers import TEST_OWNER
 
-pytestmark = [
-    pytest.mark.usefixtures("beanie_models", "private_report_roots"),
-    pytest.mark.asyncio(loop_scope="module"),
-]
+pytestmark = pytest.mark.usefixtures("beanie_models", "private_report_roots")
+# Applied per class: TestReportDirCleanup holds one sync test.
+asyncio_module_loop = pytest.mark.asyncio(loop_scope="module")
 
 _ROOT_NAMES = (
     "qc_reports_dir",
@@ -71,6 +70,7 @@ class TestReportDirCleanup:
         assert set(report_dirs()) == set(object_service._REPORT_ROOTS)
 
 
+    @asyncio_module_loop
     async def test_removes_every_report_dir_for_the_deleted_object(self):
         from tests.services.helpers import make_object
 
@@ -89,6 +89,7 @@ class TestReportDirCleanup:
         for d in made:
             assert not d.exists(), f"leaked {d}"
 
+    @asyncio_module_loop
     async def test_logs_caller_and_reason_for_an_inline_delete(self, monkeypatch):
         """Issue #10: a removal with no caller/reason on the log line is
         unattributable after the fact. delete_object must stamp both."""
@@ -112,6 +113,7 @@ class TestReportDirCleanup:
         assert removed[0]["caller"] == "delete_object"
         assert removed[0]["reason"] == "object_deleted"
 
+    @asyncio_module_loop
     async def test_leaves_other_objects_reports_alone(self):
         """The removal is keyed by object id, so a sibling's identically-shaped
         directory next to it must survive."""
@@ -132,6 +134,7 @@ class TestReportDirCleanup:
         assert not doomed.exists()
         assert (kept / "variants.tsv").read_text() == "keep me"
 
+    @asyncio_module_loop
     async def test_deletes_cleanly_when_no_reports_were_ever_computed(self):
         """The normal case: most objects never have Results computed, so a
         missing directory is expected and must not fail the delete."""
@@ -147,6 +150,7 @@ class TestReportDirCleanup:
 
         assert await DataObject.get(obj.id) is None
 
+    @asyncio_module_loop
     async def test_removes_a_sidecars_reports_too(self):
         """Sidecars are deleted by recursion, so their reports have to ride the
         same path -- a .bai's own stats directory would otherwise outlive it."""
@@ -171,6 +175,8 @@ class TestReportDirCleanup:
 
 
 class TestCopyReportDirs:
+    pytestmark = asyncio_module_loop
+
     async def test_copies_annotation_stats_dir(self):
         """Sharing an object copies the annotation feature database too."""
         from app.services import project_service
@@ -205,6 +211,8 @@ class TestCopyReportDirs:
 
 
 class TestReapReportDirs:
+    pytestmark = asyncio_module_loop
+
     """The sweep for directories stranded before deletion cleaned up inline."""
 
     @staticmethod

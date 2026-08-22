@@ -19,10 +19,9 @@ from app.models import DataObject, ObjectRole, SidecarRole
 from app.queue import results
 from app.services import object_service, project_service
 
-pytestmark = [
-    pytest.mark.usefixtures("beanie_models"),
-    pytest.mark.asyncio(loop_scope="module"),
-]
+pytestmark = pytest.mark.usefixtures("beanie_models")
+# Applied per test: this module mixes async tests with pure sync ones.
+asyncio_module_loop = pytest.mark.asyncio(loop_scope="module")
 
 OWNER = "sv-results-owner"
 
@@ -97,6 +96,7 @@ async def _bam(owner: str) -> DataObject:
 
 
 class TestSvDbMove:
+    @asyncio_module_loop
     async def test_sv_db_is_moved_to_the_vcf_keyed_directory(
         self, tmp_path, private_sv_stats_root
     ):
@@ -145,6 +145,7 @@ class TestSvDbMove:
         # The scratch source no longer exists -- moved, not copied.
         assert not scratch_db.exists()
 
+    @asyncio_module_loop
     async def test_a_move_failure_is_logged_not_raised(self, tmp_path, monkeypatch):
         """A permissions error or a vanished scratch file must not blow up
         the whole apply -- the VCF and its .tbi are the deliverable, and the
@@ -183,6 +184,7 @@ class TestSvDbMove:
             "a missing scratch source should log sv_db_move_failed, not raise"
         )
 
+    @asyncio_module_loop
     async def test_no_sv_db_path_is_a_silent_no_op(self):
         """A result dict from before this key existed (or a handler that
         genuinely built nothing) must not error just because `sv_db_path` is
@@ -204,6 +206,7 @@ class TestSvDbMove:
         assert [p.name for p in produced] == ["calls.sniffles.vcf.gz"]
 
 
+    @asyncio_module_loop
     async def test_snf_sidecar_is_ingested(self, tmp_path, monkeypatch):
         bam = await _bam(OWNER)
         vcf_out = _scratch_file(suffix=".vcf.gz")
@@ -273,6 +276,7 @@ def test_sv_provenance_does_not_override_a_present_but_falsy_caller():
 
 
 class TestMergeSvApplier:
+    @asyncio_module_loop
     async def test_apply_merge_structural_variants(
         self, tmp_path, private_sv_stats_root
     ):

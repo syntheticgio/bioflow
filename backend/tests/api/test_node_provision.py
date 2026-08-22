@@ -15,7 +15,9 @@ from app.models.node_provision import NodeProvisionTask
 # in this module, including the pure-function ones, so beanie must be
 # initialized for all of them -- without this the teardown raises
 # CollectionWasNotInitialized and every test errors.
-pytestmark = [pytest.mark.usefixtures("beanie_models"), pytest.mark.asyncio(loop_scope="module")]
+pytestmark = pytest.mark.usefixtures("beanie_models")
+# Applied per test: this module mixes async API tests with pure sync ones.
+asyncio_module_loop = pytest.mark.asyncio(loop_scope="module")
 
 # ---- helpers ----
 
@@ -72,6 +74,7 @@ async def _clean_node_provisions():
 
 # ---- POST /nodes/provision validation ----
 
+@asyncio_module_loop
 async def test_provision_missing_host_returns_422(client):
     res = await client.post("/nodes/provision", json={
         "username": "test", "password": "x", "node_name": "n",
@@ -79,6 +82,7 @@ async def test_provision_missing_host_returns_422(client):
     assert res.status_code == 422
 
 
+@asyncio_module_loop
 async def test_provision_neither_password_nor_key_returns_422(client):
     res = await client.post("/nodes/provision", json={
         "host": "1.2.3.4", "username": "test", "node_name": "n",
@@ -86,6 +90,7 @@ async def test_provision_neither_password_nor_key_returns_422(client):
     assert res.status_code == 422
 
 
+@asyncio_module_loop
 async def test_provision_both_password_and_key_returns_422(client):
     res = await client.post("/nodes/provision", json={
         "host": "1.2.3.4", "username": "test",
@@ -95,6 +100,7 @@ async def test_provision_both_password_and_key_returns_422(client):
     assert res.status_code == 422
 
 
+@asyncio_module_loop
 async def test_provision_valid_request_returns_201_and_task_id(client):
     with patch("app.api.v1.nodes._provision_node", new_callable=lambda: AsyncMock()):
         res = await client.post("/nodes/provision", json={
@@ -107,6 +113,7 @@ async def test_provision_valid_request_returns_201_and_task_id(client):
     assert data["status"] == "provisioning"
 
 
+@asyncio_module_loop
 async def test_provision_with_private_key_returns_201(client):
     with patch("app.api.v1.nodes._provision_node", new_callable=lambda: AsyncMock()):
         res = await client.post("/nodes/provision", json={
@@ -119,11 +126,13 @@ async def test_provision_with_private_key_returns_201(client):
 
 # ---- GET /nodes/provision/{task_id} ----
 
+@asyncio_module_loop
 async def test_provision_status_unknown_task_returns_404(client):
     res = await client.get("/nodes/provision/nonexistent")
     assert res.status_code == 404
 
 
+@asyncio_module_loop
 async def test_provision_status_known_task_returns_fields(client):
     task = NodeProvisionTask(
         task_id="test123",
@@ -146,6 +155,7 @@ async def test_provision_status_known_task_returns_fields(client):
     assert data["host"] == "1.2.3.4"
 
 
+@asyncio_module_loop
 async def test_provision_status_success(client):
     task = NodeProvisionTask(
         task_id="done",
@@ -163,6 +173,7 @@ async def test_provision_status_success(client):
     assert res.json()["status"] == "success"
 
 
+@asyncio_module_loop
 async def test_provision_status_failed(client):
     task = NodeProvisionTask(
         task_id="bad",
@@ -364,6 +375,7 @@ def test_provision_request_accepts_key_only():
 
 # ---- orphan cleanup ----
 
+@asyncio_module_loop
 async def test_orphaned_provision_marked_failed(client):
     """Tasks in 'provisioning' status with no active Task are marked failed."""
     task = NodeProvisionTask(
@@ -393,6 +405,7 @@ async def test_orphaned_provision_marked_failed(client):
 
 # ---- managed SSH key installation (NU-14, NU-15) ----
 
+@asyncio_module_loop
 async def test_provision_stores_encrypted_key_not_the_password():
     """The user's password is used once and never stored (NU-15)."""
     from app.api.v1.nodes import ProvisionRequest, _provision_node
@@ -435,6 +448,7 @@ async def test_provision_stores_encrypted_key_not_the_password():
     await node.delete()
 
 
+@asyncio_module_loop
 async def test_provision_fails_loudly_when_key_cannot_be_installed():
     """No fallback to storing the user's credential (NU-14): a node that
     cannot take a managed key is not provisioned at all."""
@@ -473,6 +487,7 @@ async def test_provision_fails_loudly_when_key_cannot_be_installed():
 
 # ---- regression: import_private_key receives a PEM string, not a StringIO ----
 
+@asyncio_module_loop
 async def test_provision_private_key_uses_real_import_private_key():
     """Regression guard for issue #352: `import_private_key` was called with
     `io.StringIO(req.private_key)` instead of the PEM string directly.
@@ -556,6 +571,7 @@ def _step(phase, command, timeout=15, message=None):
     )
 
 
+@asyncio_module_loop
 async def test_execute_remote_commands_runs_every_step_in_order():
     from app.api.v1.nodes import _execute_remote_commands
 
@@ -575,6 +591,7 @@ async def test_execute_remote_commands_runs_every_step_in_order():
     assert [p for p, _ in progress] == ["a", "b", "c"]
 
 
+@asyncio_module_loop
 async def test_execute_remote_commands_stops_at_the_failing_command():
     """A command that fails mid-sequence stops the sequence and reports which
     one -- the later steps assume the earlier ones ran."""
@@ -603,6 +620,7 @@ async def test_execute_remote_commands_stops_at_the_failing_command():
     assert "permission denied" in excinfo.value.reason
 
 
+@asyncio_module_loop
 async def test_execute_remote_commands_reports_each_phase_once():
     """Commands sharing a phase report progress once, so a later command in a
     phase does not replace the message the user is already reading."""
@@ -629,6 +647,7 @@ async def test_execute_remote_commands_reports_each_phase_once():
     ]
 
 
+@asyncio_module_loop
 async def test_provision_emits_the_documented_phase_sequence():
     """The provisioning UI renders `phase` verbatim, so the sequence and the
     exact strings are a user-visible contract (#402)."""
@@ -683,6 +702,7 @@ async def test_provision_emits_the_documented_phase_sequence():
 # ---- _verify_node_operational (#402) ----
 
 
+@asyncio_module_loop
 async def test_verify_node_operational_passes_when_worker_is_running():
     from app.api.v1.nodes import _verify_node_operational
 
@@ -692,6 +712,7 @@ async def test_verify_node_operational_passes_when_worker_is_running():
         assert await _verify_node_operational(conn, "~/.bioflow", "h") is None
 
 
+@asyncio_module_loop
 async def test_verify_node_operational_detects_a_container_that_exited():
     """`docker compose up -d` exits 0 for a container that immediately dies;
     only the state check afterwards catches it (#402)."""
@@ -709,6 +730,7 @@ async def test_verify_node_operational_detects_a_container_that_exited():
     assert "10.0.0.5" in problem
 
 
+@asyncio_module_loop
 async def test_verify_node_operational_detects_a_missing_container():
     """No output means `up -d` created nothing at all."""
     from app.api.v1.nodes import _verify_node_operational
@@ -722,6 +744,7 @@ async def test_verify_node_operational_detects_a_missing_container():
     assert "not present" in problem
 
 
+@asyncio_module_loop
 async def test_verify_node_operational_fails_when_one_replica_is_down():
     """A node runs several worker replicas; all of them must be up."""
     from app.api.v1.nodes import _verify_node_operational
@@ -735,6 +758,7 @@ async def test_verify_node_operational_fails_when_one_replica_is_down():
     assert "started and then stopped" in problem
 
 
+@asyncio_module_loop
 async def test_verify_node_operational_reports_an_unusable_state_probe():
     from app.api.v1.nodes import _verify_node_operational
 
@@ -747,6 +771,7 @@ async def test_verify_node_operational_reports_an_unusable_state_probe():
     assert "command not found" in problem
 
 
+@asyncio_module_loop
 async def test_provision_fails_when_the_worker_exits_after_starting():
     """End to end: a crash-looping worker fails provisioning at `verify`
     rather than reporting the node enrolled (#402)."""

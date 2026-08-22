@@ -12,10 +12,9 @@ from app.metadata.protein_headers import RefKind
 from app.models import Compression, ProteinRecord
 from app.services import protein_record_index as index_mod
 
-pytestmark = [
-    pytest.mark.usefixtures("beanie_models"),
-    pytest.mark.asyncio(loop_scope="module"),
-]
+pytestmark = pytest.mark.usefixtures("beanie_models")
+# Applied per test: this module mixes async tests with pure sync ones.
+asyncio_module_loop = pytest.mark.asyncio(loop_scope="module")
 
 FASTA = (
     ">sp|P00924|ENO1_YEAST Enolase 1 OS=Saccharomyces cerevisiae\n"
@@ -107,6 +106,7 @@ def test_scan_honours_an_explicit_limit(fasta_file):
     assert len(records) == 1
 
 
+@asyncio_module_loop
 async def test_index_writes_one_document_per_record(fasta_file):
     object_id = "507f1f77bcf86cd799439011"
     result = await index_mod.index_protein_records(
@@ -122,6 +122,7 @@ async def test_index_writes_one_document_per_record(fasta_file):
     assert {r.ordinal for r in stored} == {0, 1, 2}
 
 
+@asyncio_module_loop
 async def test_reindexing_replaces_rather_than_appends(fasta_file):
     """R7. The handler promises idempotency; appending would break it.
 
@@ -140,6 +141,7 @@ async def test_reindexing_replaces_rather_than_appends(fasta_file):
     assert len(stored) == 3
 
 
+@asyncio_module_loop
 async def test_index_reports_truncation_above_the_cap(fasta_file, monkeypatch):
     monkeypatch.setattr(index_mod, "MAX_INDEXED_RECORDS", 2)
     result = await index_mod.index_protein_records(
@@ -151,6 +153,7 @@ async def test_index_reports_truncation_above_the_cap(fasta_file, monkeypatch):
     assert result.truncated is True
 
 
+@asyncio_module_loop
 async def test_a_file_exactly_at_the_cap_is_not_truncated(fasta_file, monkeypatch):
     """The boundary. A file of exactly N records is complete, and flagging it
     as truncated would warn the user that a complete list is partial.
