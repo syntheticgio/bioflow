@@ -938,13 +938,10 @@ async def reap_report_dirs(ctx: JobContext) -> dict:
 
     removed = 0
     reclaimed = 0
-    for root in (
-        settings.qc_reports_dir,
-        settings.bam_stats_dir,
-        settings.vcf_stats_dir,
-        settings.annotation_stats_dir,
-        settings.sv_stats_dir,
-    ):
+    # object_service's tuple rather than a copy of it: the two lists drifting
+    # apart is exactly how coverage/, gc_bias/ and the rest went unreaped
+    # while delete_object was already removing them (#787).
+    for root in object_service._REPORT_ROOTS:
         if not root.exists():
             continue
         for entry in await asyncio.to_thread(lambda r=root: list(r.iterdir())):
