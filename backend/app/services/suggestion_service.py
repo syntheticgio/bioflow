@@ -1513,15 +1513,35 @@ def build_assemble_card(obj) -> SuggestionCard | None:
         )
 
     if not spec.available():
-        return SuggestionCard(
-            kind="assemble",
-            category="ASSEMBLE",
-            title="De novo assembly",
-            description="Assemble these reads into contigs without a reference.",
-            status=CardStatus.UNAVAILABLE,
-            reason=spec.unavailable_reason
-            or f"{spec.assembler.value} is not installed.",
+        # The chemistry's default is not installed, which is not the same as
+        # assembly being impossible: since #785 three assemblers declare
+        # `layout="paired"`, so short reads can still be assembled by SPAdes
+        # or MEGAHIT on an image without ABySS. Asking only the default is how
+        # this card came to read "abyss is not installed" beside two installed
+        # assemblers that could both take these exact reads -- the failure
+        # CLAUDE.md names as "a card whose `unavailable` reason just stopped
+        # being true".
+        fallback = next(
+            (
+                entry
+                for entry in assembler_registry.selectable_for_chemistry(chemistry)
+                if entry.compatible
+            ),
+            None,
         )
+        if fallback is None:
+            return SuggestionCard(
+                kind="assemble",
+                category="ASSEMBLE",
+                title="De novo assembly",
+                description=(
+                    "Assemble these reads into contigs without a reference."
+                ),
+                status=CardStatus.UNAVAILABLE,
+                reason=spec.unavailable_reason
+                or f"{spec.assembler.value} is not installed.",
+            )
+        spec = assembler_registry.spec_for(fallback.assembler)
 
     if spec.layout == "paired":
         from app.pipelines import pairing
