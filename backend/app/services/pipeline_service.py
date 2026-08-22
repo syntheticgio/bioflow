@@ -7141,8 +7141,8 @@ async def launch_assembly(
     _check_assemblable(reads)
 
     chemistry = read_chemistry(reads)
-    spec = assembler_registry.spec_for_chemistry(chemistry)
-    if spec is None:
+    default_spec = assembler_registry.spec_for_chemistry(chemistry)
+    if default_spec is None:
         raise ValidationError(
             f"{reads.name!r} has no known read chemistry. Run QC on it first "
             "-- the assembler's input mode depends on how accurate the reads "
@@ -7150,15 +7150,44 @@ async def launch_assembly(
             details={"object_id": str(reads.id)},
         )
 
+    if params is None:
+        params = await default_assembly_params(reads)
+    parsed = assembly_params_module.from_dict(params)
+
+    # The assembler that will actually run, which is not necessarily the one
+    # this chemistry defaults to -- the dialog has a picker (#785) and the API
+    # has always accepted `assembler:` in the params dict. Everything below
+    # validates against *this* spec rather than `default_spec`, which is the
+    # whole point: `available()` on the chemistry's default said nothing about
+    # the tool being launched, and `layout` decides whether a mate is resolved
+    # at all, so validating the wrong one launched paired assemblies with a
+    # silently missing mate. `default_spec` survives only for
+    # `mode_for_chemistry` inside `default_assembly_params` above.
+    spec = assembler_registry.spec_for(parsed.assembler)
+
     if not spec.available():
         raise ValidationError(
             spec.unavailable_reason or f"{spec.assembler.value} is not installed",
             details={"assembler": spec.assembler.value},
         )
 
-    if params is None:
-        params = await default_assembly_params(reads)
-    parsed = assembly_params_module.from_dict(params)
+    # An assembler whose layout cannot take these reads. The dialog greys these
+    # out, but the API is the boundary that has to hold: refused here rather
+    # than several minutes into a run that was never going to work.
+    if spec.layout != assembler_registry.layout_for_chemistry(chemistry):
+        raise ValidationError(
+            f"{spec.assembler.value} assembles "
+            f"{'paired short' if spec.layout == 'paired' else 'single long'} "
+            f"reads, and {reads.name!r} is "
+            f"{'short' if chemistry is align_runner.ReadChemistry.SHORT else 'long'}"
+            f"-read "
+            f"data. Choose an assembler that suits these reads.",
+            details={
+                "assembler": spec.assembler.value,
+                "layout": spec.layout,
+                "chemistry": chemistry.value,
+            },
+        )
 
     mate = None
     if spec.layout == "paired":

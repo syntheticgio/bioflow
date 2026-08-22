@@ -523,6 +523,82 @@ def spec_for_chemistry(chemistry: ReadChemistry | None) -> AssemblerSpec | None:
     return None
 
 
+@dataclass(frozen=True)
+class SelectableAssembler:
+    """One row of the dialog's assembler picker.
+
+    `compatible` is separate from `available()` on purpose, and the two mean
+    genuinely different things: unavailable is "this build cannot run it at
+    all", incompatible is "it runs, but not on these reads". The picker hides
+    the first and greys out the second, because a user wondering why MEGAHIT
+    is missing for a Nanopore file is better served by seeing it disabled with
+    a reason than by it not existing.
+    """
+
+    assembler: Assembler
+    compatible: bool
+    incompatible_reason: str
+    is_default: bool
+    layout: Literal["single", "paired"]
+
+
+def layout_for_chemistry(chemistry: ReadChemistry) -> Literal["single", "paired"]:
+    """Which read layout these reads can be assembled under.
+
+    Short reads are paired-layout, every long-read chemistry is single. This
+    is the same fact `spec_for_chemistry` uses to route, stated once as a
+    layout so the picker can test *every* spec against it rather than only the
+    one that chemistry routes to.
+    """
+    return "paired" if chemistry is ReadChemistry.SHORT else "single"
+
+
+def selectable_for_chemistry(
+    chemistry: ReadChemistry | None,
+) -> tuple[SelectableAssembler, ...]:
+    """Every installed assembler, flagged for whether these reads can use it.
+
+    Partitions rather than filters -- see `SelectableAssembler`. Ordered by
+    `SPECS` so the picker's order is the registry's rather than a dict's
+    accident, and the chemistry default is marked rather than moved, leaving
+    `spec_for_chemistry` the single place that decides what the default is.
+
+    Empty for unknown chemistry, matching `spec_for_chemistry` returning None:
+    `launch_assembly` refuses those reads outright with "run QC first", and a
+    picker offering choices for a launch that cannot happen would contradict
+    it.
+    """
+    if chemistry is None or chemistry is ReadChemistry.UNKNOWN:
+        return ()
+
+    wanted = layout_for_chemistry(chemistry)
+    default = spec_for_chemistry(chemistry)
+    rows = []
+    for assembler, spec in SPECS.items():
+        if not spec.available():
+            continue
+        compatible = spec.layout == wanted
+        rows.append(
+            SelectableAssembler(
+                assembler=assembler,
+                compatible=compatible,
+                incompatible_reason=(
+                    ""
+                    if compatible
+                    else (
+                        f"{assembler.value} assembles "
+                        f"{'paired short' if spec.layout == 'paired' else 'single long'}"
+                        f" reads; these are "
+                        f"{'short' if wanted == 'paired' else 'long'} reads."
+                    )
+                ),
+                is_default=default is not None and default.assembler is assembler,
+                layout=spec.layout,
+            )
+        )
+    return tuple(rows)
+
+
 def mode_for_chemistry(spec: AssemblerSpec, chemistry: ReadChemistry) -> str:
     return spec.mode_flags[chemistry]
 

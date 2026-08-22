@@ -558,6 +558,16 @@ class TestLaunchReachesTheQueue:
                 "spec_for_chemistry",
                 return_value=abyss_installed,
             ),
+            # Patched as well as `spec_for_chemistry`, and not redundantly:
+            # since #785 `launch_assembly` validates availability against
+            # `spec_for(parsed.assembler)` rather than against the chemistry's
+            # default, so the routing patch above no longer decides whether
+            # ABySS probes as installed. Without this the test reads the host
+            # image, which does not ship ABySS.
+            patch.dict(
+                assembler_registry.SPECS,
+                {assembler_registry.Assembler.ABYSS: abyss_installed},
+            ),
             # No memory estimate is mocked here, so this run declares the flat
             # UNKNOWN_ASSEMBLY_MEM_MB fallback (#478's cleanest case). A
             # generous admission budget keeps that declaration from being
@@ -646,3 +656,267 @@ class TestResolveAssemblyMate:
             result = await pipeline_service.resolve_assembly_mate(reads)
         mocked.assert_awaited_once_with(reads)
         assert result is sentinel
+
+
+class TestTheChosenAssemblerIsTheValidatedOne:
+    """#785's seam: `launch_assembly` used to validate against the assembler
+    the *chemistry* implies while enqueuing the one the *params* name.
+
+    Nothing could reach that divergence before the dialog had a picker --
+    `default_assembly_params` always named the chemistry's own choice -- so
+    the two agreed by construction and the bug was latent. With a picker they
+    diverge on every non-default selection, and the consequences are not
+    cosmetic: availability would be probed on the wrong tool, and `layout`
+    decides whether a mate is resolved at all, so picking a paired assembler
+    for reads whose default was single-layout would launch a paired assembly
+    with one mate silently missing.
+    """
+
+    @staticmethod
+    def _long_reads():
+        """Chemistry default is Flye: single layout, no mate resolution."""
+        return SimpleNamespace(
+            id=PydanticObjectId(),
+            name="SRR1.fastq",
+            format=SimpleNamespace(kind=FormatKind.FASTQ),
+            role=None,
+            metadata={},
+            facts={"qc_read_chemistry": "hifi"},
+            status=ObjectStatus.READY,
+            project_id=PydanticObjectId(),
+            owner="local",
+            blob_sha256="a" * 64,
+            size=1_000_000,
+        )
+
+    @staticmethod
+    def _short_reads():
+        return SimpleNamespace(
+            id=PydanticObjectId(),
+            name="SRR1_1.fastq",
+            format=SimpleNamespace(kind=FormatKind.FASTQ),
+            role=None,
+            metadata={},
+            facts={"qc_read_chemistry": "short"},
+            status=ObjectStatus.READY,
+            project_id=PydanticObjectId(),
+            owner="local",
+            blob_sha256="a" * 64,
+            size=1_000_000,
+        )
+
+    @staticmethod
+    def _installed(*assemblers):
+        """Force these assemblers to probe as present.
+
+        Patched through `SPECS` rather than `tools.<name>`: the specs are
+        frozen dataclasses that captured their probe at import time.
+        """
+        import dataclasses
+
+        from app.pipelines import assembler_registry
+
+        return patch.dict(
+            assembler_registry.SPECS,
+            {
+                a: dataclasses.replace(
+                    assembler_registry.SPECS[a],
+                    tool=lambda: SimpleNamespace(available=True),
+                )
+                for a in assemblers
+            },
+        )
+
+    @staticmethod
+    def _fixed_estimate():
+        from app.services import memory_estimate
+
+        return patch(
+            "app.services.memory_estimate.resolve",
+            AsyncMock(
+                return_value=memory_estimate.MemoryEstimate(
+                    mb=1024,
+                    source=memory_estimate.EstimateSource.HEURISTIC,
+                    detail="from published tool coefficients",
+                )
+            ),
+        )
+
+    async def test_a_chosen_paired_assembler_resolves_a_mate(self):
+        """The consequence that actually corrupts a run rather than refusing it.
+
+        These are short reads, so both the default (ABySS) and the choice
+        (MEGAHIT) are paired -- but the mate must be resolved against the
+        chosen spec, and this asserts the resolved mate reaches the payload.
+        """
+        from app.pipelines.assemblers import Assembler
+
+        reads = self._short_reads()
+        mate = self._short_reads()
+        mate.name = "SRR1_2.fastq"
+        enqueued = {}
+
+        async def _enqueue(job_type, **kwargs):
+            enqueued.update(kwargs)
+            return SimpleNamespace(id="job1")
+
+        with (
+            self._installed(Assembler.MEGAHIT, Assembler.ABYSS),
+            self._fixed_estimate(),
+            patch(
+                "app.services.object_service.get_object",
+                AsyncMock(return_value=reads),
+            ),
+            patch(
+                "app.services.pipeline_service.resolve_assembly_mate",
+                AsyncMock(return_value=mate),
+            ),
+            patch(
+                "app.services.pipeline_service._resolve_readable",
+                AsyncMock(return_value=("a" * 64, None)),
+            ),
+            patch(
+                "app.services.run_service.create_run",
+                AsyncMock(return_value=SimpleNamespace(id="run1", owner="local")),
+            ),
+            patch("app.services.run_service.link_job", AsyncMock()),
+            patch("app.queue.queue.enqueue", _enqueue),
+            patch(
+                "app.services.object_service.list_objects", AsyncMock(return_value=[])
+            ),
+            patch(
+                "app.services.pipeline_service.current_admission_budget_mb",
+                AsyncMock(return_value=10_000_000),
+            ),
+        ):
+            await pipeline_service.launch_assembly(
+                object_id=reads.id,
+                owner="local",
+                params={"assembler": "megahit", "threads": 4},
+            )
+
+        assert enqueued["payload"]["params"]["assembler"] == "megahit"
+        assert enqueued["payload"]["mate_name"] == "SRR1_2.fastq"
+        assert enqueued["payload"].get("mate_sha256") or enqueued["payload"].get(
+            "mate_path"
+        )
+
+    async def test_availability_is_probed_on_the_chosen_assembler(self):
+        """The chemistry default being installed must not excuse the choice.
+
+        Before the fix this refused nothing: `spec` was ABySS, ABySS is
+        installed, and MEGAHIT's absence surfaced only when the job ran.
+        """
+        from app.pipelines.assemblers import Assembler
+
+        reads = self._short_reads()
+
+        import dataclasses
+
+        from app.pipelines import assembler_registry
+
+        megahit_off = dataclasses.replace(
+            assembler_registry.SPECS[Assembler.MEGAHIT],
+            tool=lambda: SimpleNamespace(available=False),
+        )
+
+        with (
+            self._installed(Assembler.ABYSS),
+            patch.dict(
+                assembler_registry.SPECS, {Assembler.MEGAHIT: megahit_off}
+            ),
+            patch(
+                "app.services.object_service.get_object",
+                AsyncMock(return_value=reads),
+            ),
+            patch(
+                "app.services.object_service.list_objects", AsyncMock(return_value=[])
+            ),
+        ):
+            with pytest.raises(ValidationError) as excinfo:
+                await pipeline_service.launch_assembly(
+                    object_id=reads.id,
+                    owner="local",
+                    params={"assembler": "megahit", "threads": 4},
+                )
+
+        assert "megahit" in str(excinfo.value).lower()
+
+    async def test_an_assembler_that_cannot_take_these_reads_is_refused(self):
+        """A picker greys these out, but the API is the boundary that has to
+        actually hold: MEGAHIT is paired-layout and cannot assemble long reads.
+
+        Refused here, at launch, rather than deep in a runner after the job
+        has been queued and waited on.
+        """
+        from app.pipelines.assemblers import Assembler
+
+        reads = self._long_reads()
+
+        with (
+            self._installed(Assembler.MEGAHIT, Assembler.FLYE),
+            patch(
+                "app.services.object_service.get_object",
+                AsyncMock(return_value=reads),
+            ),
+            patch(
+                "app.services.object_service.list_objects", AsyncMock(return_value=[])
+            ),
+        ):
+            with pytest.raises(ValidationError) as excinfo:
+                await pipeline_service.launch_assembly(
+                    object_id=reads.id,
+                    owner="local",
+                    params={"assembler": "megahit", "threads": 4},
+                )
+
+        assert "megahit" in str(excinfo.value).lower()
+
+    async def test_the_default_path_is_unchanged_when_no_assembler_is_named(self):
+        """Existing behaviour, pinned. `params=None` must still route by
+        chemistry and reach the queue exactly as before the picker existed.
+        """
+        from app.pipelines.assemblers import Assembler
+
+        reads = self._long_reads()
+        enqueued = {}
+
+        async def _enqueue(job_type, **kwargs):
+            enqueued.update(kwargs)
+            return SimpleNamespace(id="job1")
+
+        with (
+            self._installed(Assembler.FLYE),
+            self._fixed_estimate(),
+            patch(
+                "app.services.object_service.get_object",
+                AsyncMock(return_value=reads),
+            ),
+            patch(
+                "app.services.pipeline_service.infer_genome_size",
+                AsyncMock(return_value=(None, None)),
+            ),
+            patch(
+                "app.services.pipeline_service._resolve_readable",
+                AsyncMock(return_value=("a" * 64, None)),
+            ),
+            patch(
+                "app.services.run_service.create_run",
+                AsyncMock(return_value=SimpleNamespace(id="run1", owner="local")),
+            ),
+            patch("app.services.run_service.link_job", AsyncMock()),
+            patch("app.queue.queue.enqueue", _enqueue),
+            patch(
+                "app.services.object_service.list_objects", AsyncMock(return_value=[])
+            ),
+            patch(
+                "app.services.pipeline_service.current_admission_budget_mb",
+                AsyncMock(return_value=10_000_000),
+            ),
+        ):
+            await pipeline_service.launch_assembly(
+                object_id=reads.id, owner="local", params=None
+            )
+
+        assert enqueued["payload"]["params"]["assembler"] == "flye"
+        assert enqueued["payload"]["params"]["mode"] == "pacbio-hifi"
