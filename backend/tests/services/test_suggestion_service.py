@@ -1117,8 +1117,17 @@ class TestAssembleCard:
         because the image ships Flye -- which is exactly how a test ends up
         reading the host machine while appearing to control it.
         """
-        with patch.object(
-            assembler_registry, "spec_for_chemistry", return_value=self._missing()
+        with (
+            patch.object(
+                assembler_registry, "spec_for_chemistry", return_value=self._missing()
+            ),
+            # Also patched through `SPECS`, because since #785 the card looks
+            # past an absent default for any other installed assembler these
+            # reads could use. Flye is the only single-layout one, so this is
+            # what actually leaves long reads with nothing to run.
+            patch.dict(
+                assembler_registry.SPECS, {Assembler.FLYE: self._missing()}
+            ),
         ):
             card = build_assemble_card(
                 _fake_obj(facts={"qc_read_chemistry": "hifi"})
@@ -1213,31 +1222,37 @@ class TestAssembleCard:
         assert "paired" in card.why.lower()
         assert "unpaired" not in card.why.lower()
 
-    def test_assemble_card_unavailable_when_abyss_is_missing(self):
+    def test_assemble_card_unavailable_when_no_short_read_assembler_exists(self):
         """The direction that fails when the patch seam breaks: the image
-        ships ABySS, so asserting availability would pass whether or not the
-        patch worked. Patch `spec_for` -- not `tools.abyss`, which a frozen
-        dataclass captured at import time."""
-        real = assembler_registry.spec_for
+        ships assemblers, so asserting availability would pass whether or not
+        the patch worked. Patch the `SPECS` entries -- not `tools.abyss`,
+        which a frozen dataclass captured at import time.
 
-        def fake_spec_for(assembler):
-            spec = real(assembler)
-            if assembler is Assembler.ABYSS:
-                return dataclasses.replace(
-                    spec, tool=None, unavailable_reason="abyss is not installed."
-                )
-            return spec
+        Every paired-layout assembler is turned off, not only ABySS. Since
+        #785 the card falls back to any installed assembler that can take
+        these reads, so turning off the chemistry's default alone no longer
+        makes assembly impossible -- it just picks SPAdes or MEGAHIT instead,
+        which is the point of that change. What this test is about is the
+        refusal when there is genuinely nothing left to run.
+        """
+
+        class _Absent:
+            available = False
 
         obj = _fake_obj(facts={"qc_read_chemistry": "short"})
         obj.name = "sample_R1.fastq.gz"
 
-        with (
-            patch.object(assembler_registry, "spec_for", fake_spec_for),
-            patch.object(
-                assembler_registry,
-                "spec_for_chemistry",
-                lambda c: fake_spec_for(Assembler.ABYSS),
-            ),
+        with patch.dict(
+            assembler_registry.SPECS,
+            {
+                assembler: dataclasses.replace(
+                    spec,
+                    tool=lambda: _Absent(),
+                    unavailable_reason=f"{assembler.value} is not installed.",
+                )
+                for assembler, spec in assembler_registry.SPECS.items()
+                if spec.tool is not None and spec.layout == "paired"
+            },
         ):
             card = build_assemble_card(obj)
 
@@ -4309,3 +4324,85 @@ class TestBinningCard:
         ):
             card = build_binning_card(self._assembly(), self._alignments(count=3))
         assert len(card.launch["body"]["candidate_alignments"]) == 3
+
+
+class TestAssembleCardFallsBackToAnInstalledAssembler:
+    """Found by opening the card against the running app, not by a fixture.
+
+    On an image without ABySS, a short-read FASTQ's assemble card read "abyss
+    is not installed" and offered no Launch -- while SPAdes and MEGAHIT were
+    both installed and both able to assemble exactly those reads. The card
+    asked `spec_for_chemistry(...).available()`, which is a question about the
+    default rather than about whether assembly is possible at all.
+
+    This is the failure mode CLAUDE.md names for tool additions: "a card whose
+    `unavailable` reason just stopped being true".
+    """
+
+    @staticmethod
+    def _short_reads():
+        obj = _fake_obj(
+            kind=FormatKind.FASTQ,
+            facts={"qc_read_chemistry": "short"},
+        )
+        # Set after construction: `_fake_obj` carries no `name`, and the
+        # paired-layout branch reads one to decide the "paired"/"unpaired"
+        # wording via `pairing.pairing_key`.
+        obj.name = "SRR1_1.fastq"
+        return obj
+
+    @staticmethod
+    def _only(*installed):
+        """Exactly these assemblers present, every other one absent."""
+        import dataclasses
+
+        class _Available:
+            available = True
+
+        class _Absent:
+            available = False
+
+        return patch.dict(
+            assembler_registry.SPECS,
+            {
+                assembler: dataclasses.replace(
+                    spec,
+                    tool=(
+                        (lambda: _Available())
+                        if assembler in installed
+                        else (lambda: _Absent())
+                    ),
+                )
+                for assembler, spec in assembler_registry.SPECS.items()
+                if spec.tool is not None
+            },
+        )
+
+    def test_the_card_launches_when_only_a_non_default_assembler_is_installed(self):
+        with self._only(Assembler.SPADES, Assembler.MEGAHIT):
+            card = build_assemble_card(self._short_reads())
+
+        assert card is not None
+        assert card.status is not CardStatus.UNAVAILABLE
+        # The reason must not name the missing default as though assembly were
+        # impossible -- that sentence is what sent the user nowhere.
+        assert "not installed" not in (card.reason or "")
+
+    def test_the_card_names_the_assembler_it_would_actually_use(self):
+        """The title and description are read as a claim about the run."""
+        with self._only(Assembler.MEGAHIT):
+            card = build_assemble_card(self._short_reads())
+
+        assert card is not None
+        blurb = f"{card.title} {card.description} {card.reason or ''}"
+        assert "abyss" not in blurb.lower()
+
+    def test_still_unavailable_when_nothing_compatible_is_installed(self):
+        """Flye is installed but cannot take short reads, so this must stay
+        unavailable rather than offering a launch that would be refused.
+        """
+        with self._only(Assembler.FLYE):
+            card = build_assemble_card(self._short_reads())
+
+        assert card is not None
+        assert card.status is CardStatus.UNAVAILABLE

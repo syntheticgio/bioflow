@@ -16,6 +16,7 @@ of that dataclass is how a frontend ends up with two renderers that drift.
 
 from collections.abc import Callable
 from dataclasses import asdict, dataclass
+from dataclasses import replace as dataclasses_replace
 from typing import Literal
 
 from app.pipelines import tools
@@ -572,7 +573,6 @@ def selectable_for_chemistry(
         return ()
 
     wanted = layout_for_chemistry(chemistry)
-    default = spec_for_chemistry(chemistry)
     rows = []
     for assembler, spec in SPECS.items():
         if not spec.available():
@@ -592,10 +592,35 @@ def selectable_for_chemistry(
                         f"{'short' if wanted == 'paired' else 'long'} reads."
                     )
                 ),
-                is_default=default is not None and default.assembler is assembler,
+                is_default=False,
                 layout=spec.layout,
             )
         )
+
+    # Which row the dialog opens on. `spec_for_chemistry` decides, and stays
+    # the single place that does -- but it answers whether or not its pick is
+    # installed, deliberately, since the refusal it produces names a tool the
+    # user could go and install. This listing holds only installed assemblers,
+    # so on an image without ABySS its short-read answer marked nothing and
+    # the dialog opened on an assembler absent from its own picker, refused at
+    # launch as not installed. Falling back to the first compatible row keeps
+    # the opening selection launchable; nothing is marked when no compatible
+    # assembler is installed, because there is then no launchable choice to
+    # open on.
+    chemistry_default = spec_for_chemistry(chemistry)
+    installed = {row.assembler for row in rows}
+    if chemistry_default is not None and chemistry_default.assembler in installed:
+        chosen = chemistry_default.assembler
+    else:
+        chosen = next(
+            (row.assembler for row in rows if row.compatible),
+            None,
+        )
+    if chosen is not None:
+        rows = [
+            dataclasses_replace(row, is_default=row.assembler is chosen)
+            for row in rows
+        ]
     return tuple(rows)
 
 

@@ -453,3 +453,52 @@ class TestSelectableAssemblers:
                 )
             }
         assert Assembler.MEGAHIT not in after
+
+    def test_an_uninstalled_default_hands_the_mark_to_a_working_assembler(self):
+        """Found by running the endpoint against the real image, which does
+        not ship ABySS.
+
+        `spec_for_chemistry` answers ABySS for short reads whether or not it is
+        installed -- deliberately, since the refusal it produces names a tool
+        the user could install. But the picker only lists installed
+        assemblers, so an uninstalled default marked nothing at all: the
+        dialog opened on an assembler absent from its own list, and the launch
+        was refused as not-installed.
+
+        So `is_default` marks the chemistry's pick when that pick is usable,
+        and otherwise the first compatible assembler that is.
+        """
+        import dataclasses
+
+        abyss_off = dataclasses.replace(
+            assembler_registry.SPECS[Assembler.ABYSS],
+            tool=lambda: SimpleNamespace(available=False),
+        )
+        with self._all_installed(), patch.dict(
+            assembler_registry.SPECS, {Assembler.ABYSS: abyss_off}
+        ):
+            listed = assembler_registry.selectable_for_chemistry(ReadChemistry.SHORT)
+
+        assert Assembler.ABYSS not in {entry.assembler for entry in listed}
+        default = [entry for entry in listed if entry.is_default]
+        assert len(default) == 1
+        assert default[0].compatible is True
+
+    def test_nothing_is_marked_default_when_nothing_compatible_is_installed(self):
+        """No compatible assembler means no launchable selection, and marking
+        an incompatible one would open the dialog on a choice that cannot run.
+        """
+        import dataclasses
+
+        off = {
+            assembler: dataclasses.replace(
+                spec, tool=lambda: SimpleNamespace(available=False)
+            )
+            for assembler, spec in assembler_registry.SPECS.items()
+            if spec.tool is not None and spec.layout == "paired"
+        }
+        with self._all_installed(), patch.dict(assembler_registry.SPECS, off):
+            listed = assembler_registry.selectable_for_chemistry(ReadChemistry.SHORT)
+
+        assert not any(entry.compatible for entry in listed)
+        assert not any(entry.is_default for entry in listed)
