@@ -1,4 +1,6 @@
 import dataclasses
+from types import SimpleNamespace
+from unittest.mock import patch
 
 from app.pipelines import assembler_registry
 from app.pipelines.align_runner import ReadChemistry
@@ -298,3 +300,156 @@ def test_spades_card_goes_unavailable_when_the_probe_is_off(monkeypatch):
     )
 
     assert assembler_registry.spec_for(Assembler.SPADES).available() is False
+
+
+class TestSelectableAssemblers:
+    """`selectable_for_chemistry` backs the dialog's assembler picker.
+
+    The picker lists every *installed* assembler and disables the ones whose
+    layout cannot take these reads, rather than hiding them -- a user who
+    wonders why MEGAHIT is absent for a Nanopore file is better served by
+    seeing it greyed out with a reason than by it not existing. So this
+    function partitions rather than filters, and `compatible` is the flag the
+    dialog disables on.
+
+    Availability is patched throughout, except where a test is *about*
+    availability. Without that these assert against whichever assemblers the
+    host image happens to ship, so they would pass or fail on the container
+    rather than on the partition logic they exist to check -- and an
+    "is compatible" assertion is exactly the shape that passes for the wrong
+    reason when the probe is the thing that moved. Patched via `SPECS`
+    entries rather than `tools.<name>`: each spec is a frozen dataclass that
+    captured its probe function at import, so the module attribute is no
+    longer what `spec.tool` refers to (see `spec_for`).
+    """
+
+    @staticmethod
+    def _all_installed():
+        """Every declared-and-installable assembler probing as present.
+
+        hifiasm is left alone: its `tool` is None, which is the fact
+        `test_a_declared_but_uninstalled_assembler_is_never_listed` checks.
+        """
+        specs = {
+            assembler: dataclasses.replace(spec, tool=lambda: SimpleNamespace(
+                available=True
+            ))
+            for assembler, spec in assembler_registry.SPECS.items()
+            if spec.tool is not None
+        }
+        return patch.dict(assembler_registry.SPECS, specs)
+
+    def test_a_declared_but_uninstalled_assembler_is_never_listed(self):
+        """hifiasm has `tool=None`, so `available()` is False without probing.
+
+        Listing it would advertise a tool this build cannot run under any
+        selection, which is a different thing from an installed tool that
+        these particular reads cannot use.
+        """
+        listed = assembler_registry.selectable_for_chemistry(ReadChemistry.SHORT)
+        assert Assembler.HIFIASM not in {entry.assembler for entry in listed}
+
+    def test_short_reads_can_pick_every_paired_assembler(self):
+        """The point of the issue: MEGAHIT and SPAdes exist, are correct, and
+        were reachable only by an API caller passing `assembler:`.
+        """
+        with self._all_installed():
+            listed = {
+                entry.assembler: entry
+                for entry in assembler_registry.selectable_for_chemistry(
+                    ReadChemistry.SHORT
+                )
+            }
+        for assembler in (Assembler.ABYSS, Assembler.SPADES, Assembler.MEGAHIT):
+            assert listed[assembler].compatible is True
+
+    def test_short_reads_see_flye_listed_but_incompatible(self):
+        """Listed, not hidden -- and carrying a reason the dialog can show."""
+        with self._all_installed():
+            listed = {
+                entry.assembler: entry
+                for entry in assembler_registry.selectable_for_chemistry(
+                    ReadChemistry.SHORT
+                )
+            }
+        assert listed[Assembler.FLYE].compatible is False
+        assert listed[Assembler.FLYE].incompatible_reason
+
+    def test_long_reads_see_the_paired_assemblers_as_incompatible(self):
+        with self._all_installed():
+            listed = {
+                entry.assembler: entry
+                for entry in assembler_registry.selectable_for_chemistry(
+                    ReadChemistry.HIFI
+                )
+            }
+        assert listed[Assembler.FLYE].compatible is True
+        for assembler in (Assembler.ABYSS, Assembler.SPADES, Assembler.MEGAHIT):
+            assert listed[assembler].compatible is False
+
+    def test_the_chemistry_default_is_marked_and_is_unique(self):
+        """The dialog opens on this one, so exactly one entry must carry it --
+        and it must agree with `spec_for_chemistry`, which is still the single
+        place the default is decided.
+        """
+        with self._all_installed():
+            listed = assembler_registry.selectable_for_chemistry(ReadChemistry.SHORT)
+        defaults = [entry.assembler for entry in listed if entry.is_default]
+        assert defaults == [Assembler.ABYSS]
+
+    def test_a_default_assembler_is_always_compatible_with_its_own_chemistry(self):
+        """A chemistry whose default was disabled in its own picker would open
+        the dialog on an unlaunchable selection.
+        """
+        for chemistry in (
+            ReadChemistry.SHORT,
+            ReadChemistry.HIFI,
+            ReadChemistry.CLR,
+            ReadChemistry.ONT_SIMPLEX,
+            ReadChemistry.ONT_DUPLEX,
+        ):
+            with self._all_installed():
+                listed = assembler_registry.selectable_for_chemistry(chemistry)
+            default = [entry for entry in listed if entry.is_default]
+            assert len(default) == 1, chemistry
+            assert default[0].compatible is True, chemistry
+
+    def test_unknown_chemistry_has_nothing_to_pick(self):
+        """`launch_assembly` refuses unknown chemistry before any picker
+        matters; listing everything as compatible here would contradict it.
+        """
+        assert assembler_registry.selectable_for_chemistry(None) == ()
+        assert assembler_registry.selectable_for_chemistry(ReadChemistry.UNKNOWN) == ()
+
+    def test_an_assembler_whose_probe_goes_off_leaves_the_picker(self):
+        """The negative direction, which the "is compatible" assertions above
+        cannot establish on their own.
+
+        CLAUDE.md's rule: the image ships most tools, so an availability
+        assertion passes whether or not the patch worked. This one fails if
+        `_all_installed` is silently a no-op, because it demands the listing
+        *change* when one probe is turned off.
+        """
+        with self._all_installed():
+            before = {
+                entry.assembler
+                for entry in assembler_registry.selectable_for_chemistry(
+                    ReadChemistry.SHORT
+                )
+            }
+        assert Assembler.MEGAHIT in before
+
+        off = dataclasses.replace(
+            assembler_registry.SPECS[Assembler.MEGAHIT],
+            tool=lambda: SimpleNamespace(available=False),
+        )
+        with self._all_installed(), patch.dict(
+            assembler_registry.SPECS, {Assembler.MEGAHIT: off}
+        ):
+            after = {
+                entry.assembler
+                for entry in assembler_registry.selectable_for_chemistry(
+                    ReadChemistry.SHORT
+                )
+            }
+        assert Assembler.MEGAHIT not in after

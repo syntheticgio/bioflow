@@ -1885,6 +1885,39 @@ async def assemble_defaults(object_id: PydanticObjectId, owner: OwnerDep) -> dic
     return await pipeline_service.default_assembly_params(obj)
 
 
+@router.get("/assemblers")
+async def list_assemblers(object_id: PydanticObjectId, owner: OwnerDep) -> dict:
+    """Which assemblers the dialog may offer for these reads.
+
+    Object-scoped, unlike the schema route below, because compatibility is a
+    property of the reads rather than of the tool alone: a paired-layout
+    assembler cannot take long reads. Returns every *installed* assembler with
+    a `compatible` flag rather than a filtered list, so the dialog can grey the
+    unusable ones out with a reason instead of silently omitting them -- see
+    `assembler_registry.SelectableAssembler`.
+
+    `is_default` marks `spec_for_chemistry`'s pick. Marking rather than
+    reordering keeps that function the single place the default is decided,
+    which #785 explicitly does not change.
+    """
+    from app.services import object_service
+
+    obj = await object_service.get_object(object_id, owner=owner)
+    chemistry = pipeline_service.read_chemistry(obj)
+    return {
+        "assemblers": [
+            {
+                "assembler": entry.assembler.value,
+                "compatible": entry.compatible,
+                "incompatible_reason": entry.incompatible_reason,
+                "is_default": entry.is_default,
+                "layout": entry.layout,
+            }
+            for entry in assembler_registry.selectable_for_chemistry(chemistry)
+        ]
+    }
+
+
 @router.get("/assemblers/{assembler}/schema")
 async def assembler_schema(assembler: str) -> dict:
     """The parameter fields for one assembler, for the dialog to render.
