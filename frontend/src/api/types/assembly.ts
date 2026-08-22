@@ -1,7 +1,33 @@
 import type { AppliedParameterSetIn } from "./parameter-set";
 import type { ParamFieldMeta } from "./pipeline";
 
-export type AssemblerName = "flye" | "hifiasm" | "spades";
+// Every member of the backend's `Assembler` enum. ABySS and MEGAHIT were
+// missing here long after both shipped -- harmless while the dialog only ever
+// rendered whatever the server picked, and wrong the moment #785 let a user
+// name one, since `AssemblyParams.assembler` is typed from this.
+export type AssemblerName =
+  | "flye"
+  | "hifiasm"
+  | "spades"
+  | "abyss"
+  | "megahit";
+
+/** One row of the assembler picker.
+ *
+ * `compatible` and `available` are different questions: the listing omits what
+ * this build cannot run at all, and flags what it can run but not on these
+ * reads. Only the second is rendered, disabled, with its reason. */
+export interface SelectableAssembler {
+  assembler: AssemblerName;
+  compatible: boolean;
+  incompatible_reason: string;
+  is_default: boolean;
+  layout: "single" | "paired";
+}
+
+export interface AssemblerListing {
+  assemblers: SelectableAssembler[];
+}
 
 export interface AssemblerSchema {
   assembler: AssemblerName;
@@ -23,6 +49,12 @@ export interface AssemblyParams {
   /** Metagenome mode (Flye's `--meta`), for a mixed-community sample rather
    *  than a single organism. Flye only -- see `mode` for SPAdes. */
   meta?: boolean;
+  /** k-mer length. ABySS only, and its one substantive knob. Absent here
+   *  until #785 gave the dialog a picker: the fields were only ever rendered
+   *  from the schema, so nothing typed named them. */
+  k?: number;
+  /** Contigs shorter than this are not written out. MEGAHIT only. */
+  min_contig_len?: number;
   /** Bases. Null when nothing in the project could say, which is the normal
    *  case for de novo work rather than a misconfiguration. */
   genome_size?: number | null;

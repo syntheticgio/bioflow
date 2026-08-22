@@ -30,6 +30,30 @@ function formatBases(n: number): string {
 }
 
 /**
+ * Which of the user's edits survive switching assembler.
+ *
+ * Only the two fields every assembler shares (`_SHARED_FIELDS` on the server:
+ * threads and genome size) carry over. Everything else is assembler-specific
+ * -- `k` for ABySS, `mode` for SPAdes and Flye, `min_contig_len` for MEGAHIT
+ * -- and the new schema's own defaults are better than a stale value from a
+ * tool that is no longer selected.
+ *
+ * `mode` is the one that would actively mislead if carried: both Flye and
+ * SPAdes have a field by that name, and their vocabularies do not overlap at
+ * all (`nano-raw` vs `isolate`), so a surviving `mode` would be silently
+ * invalid rather than merely stale.
+ */
+export function overridesSurvivingAssemblerChange(
+  overrides: Partial<AssemblyParams>,
+): Partial<AssemblyParams> {
+  const kept: Partial<AssemblyParams> = {};
+  if (overrides.threads !== undefined) kept.threads = overrides.threads;
+  if (overrides.genome_size !== undefined)
+    kept.genome_size = overrides.genome_size;
+  return kept;
+}
+
+/**
  * Launch a de novo assembly.
  *
  * The assembler and its input mode are chosen by the server from the chemistry
@@ -72,7 +96,38 @@ export function AssembleDialog({
     retry: false,
   });
 
-  const assembler = defaults?.assembler ?? "flye";
+  // Which assemblers these reads may be assembled with, and which of them the
+  // chemistry defaults to. Object-scoped because compatibility depends on the
+  // reads: a paired-layout assembler cannot take long reads.
+  const { data: selectable } = useQuery({
+    queryKey: ["pipelines", "assemblers", object.id],
+    queryFn: () => api.listAssemblers(object.id),
+  });
+
+  // Null until the user picks, so the dialog follows the server's default
+  // until then -- `defaults` and `selectable` resolve independently and either
+  // may land first, and seeding this from whichever arrived would freeze an
+  // undefined into the selection.
+  const [picked, setPicked] = useState<string | null>(null);
+
+  // `defaults.assembler` is the chemistry's choice, which is not necessarily
+  // installed: `default_assembly_params` answers ABySS for short reads on an
+  // image that does not ship it. The listing already resolves that -- it marks
+  // the first *installed compatible* assembler as default -- so its answer
+  // wins whenever the two disagree, and the heading, the schema and the
+  // selection stay the same assembler rather than the dialog claiming ABySS
+  // while its picker shows SPAdes.
+  const listedDefault = selectable?.assemblers.find((a) => a.is_default);
+  const serverDefault = defaults?.assembler;
+  const serverDefaultSelectable = selectable?.assemblers.some(
+    (a) => a.assembler === serverDefault && a.compatible,
+  );
+  const assembler =
+    picked ??
+    (serverDefaultSelectable ? serverDefault : listedDefault?.assembler) ??
+    serverDefault ??
+    "flye";
+
   const { data: schema } = useQuery({
     queryKey: ["pipelines", "assembler-schema", assembler],
     queryFn: () => api.assemblerSchema(assembler),
@@ -110,7 +165,14 @@ export function AssembleDialog({
     unknown
   > | null>(null);
 
-  const params = { ...defaults, ...overrides } as Partial<AssemblyParams>;
+  // `assembler` last: it is the one key the picker owns outright, and neither
+  // the server defaults nor a prefill from a suggestion card may override the
+  // selection the user is looking at.
+  const params = {
+    ...defaults,
+    ...overrides,
+    assembler,
+  } as Partial<AssemblyParams>;
   const chemistry = object.facts?.qc_read_chemistry as string | undefined;
 
   // Only while the user has not touched it. Once they have, the number is
@@ -220,6 +282,45 @@ export function AssembleDialog({
               </div>
             )}
           </div>
+
+          {/* Incompatible assemblers are disabled rather than omitted: a user
+              wondering why MEGAHIT is missing for a Nanopore file is better
+              served by seeing it greyed out with the reason than by it not
+              existing. Only rendered once there is a real choice to make. */}
+          {selectable && selectable.assemblers.length > 1 && (
+            <div className="trim-fields">
+              <label className="trim-wide">
+                <span>Assembler</span>
+                <select
+                  value={assembler}
+                  onChange={(e) => {
+                    setPicked(e.target.value);
+                    // Assembler-specific values do not survive the switch --
+                    // see overridesSurvivingAssemblerChange.
+                    setOverrides(overridesSurvivingAssemblerChange(overrides));
+                  }}
+                >
+                  {selectable.assemblers.map((entry) => (
+                    <option
+                      key={entry.assembler}
+                      value={entry.assembler}
+                      disabled={!entry.compatible}
+                      title={entry.incompatible_reason || undefined}
+                    >
+                      {entry.assembler}
+                      {entry.is_default ? " (default)" : ""}
+                      {entry.compatible ? "" : " — not for these reads"}
+                    </option>
+                  ))}
+                </select>
+                <small>
+                  Set from the read chemistry. Change it if you know better —
+                  MEGAHIT, for instance, completes on community samples where
+                  metaSPAdes runs out of memory.
+                </small>
+              </label>
+            </div>
+          )}
 
           {/* Rendered by hand rather than through AlignerParamFields, which is
               the only field here that needs it: the provenance line underneath

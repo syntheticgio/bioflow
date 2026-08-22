@@ -13,6 +13,7 @@ import type {
   AnnotationGenePage,
   AnnotationWindow,
   AssembleRequest,
+  AssemblerListing,
   AssemblerSchema,
   AssemblyParams,
   AlignRequest,
@@ -1083,6 +1084,15 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ job_type: jobType, params }),
     }),
+
+  /** Which assemblers may be offered for these reads, and which is default.
+   *
+   * Object-scoped, unlike `assemblerSchema`: whether an assembler suits a file
+   * depends on its read chemistry, so this cannot be a static list. */
+  listAssemblers: (objectId: string) =>
+    request<AssemblerListing>(
+      `/pipelines/assemblers?object_id=${encodeURIComponent(objectId)}`,
+    ),
 
   /** Variant calling defaults for one BAM, including the inferred caller. */
   assemblerSchema: (assembler: string) =>
