@@ -1,9 +1,10 @@
 """Object deletion: the per-object report directories written outside objects/.
 
-Compute jobs write Results artifacts to qc_reports/, bam_stats/ and vcf_stats/
-keyed by object id. Those live outside the content-addressed store, so nothing
-refcounts them and blob GC never sees them -- deletion has to remove them by
-hand or they leak permanently.
+Compute jobs write Results artifacts to qc_reports/, bam_stats/, coverage/ and
+the rest of `object_service._REPORT_ROOTS`, keyed by object id. Those live
+outside the content-addressed store, so nothing refcounts them and blob GC
+never sees them -- deletion has to remove them by hand or they leak
+permanently.
 """
 
 import pytest
@@ -22,6 +23,12 @@ _ROOT_NAMES = (
     "vcf_stats_dir",
     "annotation_stats_dir",
     "sv_stats_dir",
+    "feature_coverage_dir",
+    "variants_in_regions_dir",
+    "annotation_comparison_dir",
+    "coverage_dir",
+    "gc_bias_dir",
+    "methylation_dir",
 )
 
 
@@ -246,6 +253,30 @@ class TestReapReportDirs:
         assert not d.exists()
         assert result["removed"] >= 1
         assert result["bytes_reclaimed"] >= 2048
+
+    async def test_sweeps_every_root_in_the_shared_tuple(self):
+        """The reaper carried its own hardcoded copy of the root list, so the
+        roots added after it was written (coverage/, gc_bias/ and the rest)
+        were removed on delete but never reaped as orphans -- #787. Asserting
+        an orphan dies under *every* root is what makes the two lists provably
+        the same list.
+        """
+        from bson import ObjectId
+
+        from app.queue.handlers import reap_report_dirs
+
+        orphans = []
+        for parent in report_dirs():
+            d = parent / str(ObjectId())
+            d.mkdir(parents=True, exist_ok=True)
+            (d / "artifact.json").write_text("orphaned")
+            self.age(d)
+            orphans.append(d)
+
+        await reap_report_dirs(self.ctx())
+
+        for d in orphans:
+            assert not d.exists(), f"unreaped {d}"
 
     async def test_keeps_a_directory_whose_object_still_exists(self):
         """The check that matters: a live object's Results must survive a sweep

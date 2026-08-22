@@ -42,6 +42,12 @@ _REPORT_ROOTS = (
     settings.vcf_stats_dir,
     settings.annotation_stats_dir,
     settings.sv_stats_dir,
+    settings.feature_coverage_dir,
+    settings.variants_in_regions_dir,
+    settings.annotation_comparison_dir,
+    settings.coverage_dir,
+    settings.gc_bias_dir,
+    settings.methylation_dir,
 )
 
 
