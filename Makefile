@@ -5,14 +5,15 @@ COMPOSE := docker compose
 # Workers for the parallel test phase. Override per-invocation:
 #   make test PYTEST_WORKERS=4
 #
-# 8, not `auto`: `auto` is one worker per core, and the Docker VM this runs in
+# 12, not `auto`: `auto` is one worker per core, and the Docker VM this runs in
 # reports 24 CPUs against 12.4 GB of RAM, so `auto` sizes the run by the
-# resource that is not scarce. Measured on the full suite (6299 tests) --
-# 4: 56s, 8: 39s, 12: 36s, 16: 35s -- so 8 takes about 90% of the available
-# speedup, and everything past it buys seconds while multiplying the memory a
-# second agent's concurrent run has to fit alongside. Peak api-container
-# memory at 8 workers was 2.4 GB.
-PYTEST_WORKERS ?= 8
+# resource that is not scarce. Measured on the full suite post #756 (probe cost
+# removed):
+# 8: ~45s parallel, peak ~0.76 GB; 12: ~36s parallel, peak ~0.48 GB.
+# 12 is now meaningfully faster than 8, and concurrent runs stay under ~1 GB
+# peak, leaving headroom for a second agent on the 12.4 GB VM. Peak api-container
+# memory at 12 workers was ~0.48 GB, concurrent two runs ~0.94 GB.
+PYTEST_WORKERS ?= 12
 
 # The parallel phase excludes `heavy`; the sequential phase runs only those,
 # after it, with nothing else alive. `|| [ $$? -eq 5 ]` tolerates pytest's

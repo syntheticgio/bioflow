@@ -246,16 +246,16 @@ done
 
 # Parallel by default, in two phases: everything but `heavy` across
 # PYTEST_WORKERS workers, then the heavy-marked tests alone. Same reasoning as
-# the Makefile's -- see the PYTEST_WORKERS comment there for why 8 rather than
+# the Makefile's -- see the PYTEST_WORKERS comment there for why 12 rather than
 # `auto`, which would size the run by CPU count (24) while memory (12.4 GB) is
 # what is actually scarce.
 #
 # Lower than the Makefile's default would be defensible here, since several
 # worktree runs can be in flight at once, but they are already separated: each
 # gets its own Mongo (below) and its own test databases (per-run token, #679).
-# 8 stays for one reason -- an agent waiting on a worktree run is the case this
-# script exists to serve, and the measured cost is ~2.4 GB.
-WORKERS="${PYTEST_WORKERS:-8}"
+# 12 stays for one reason -- an agent waiting on a worktree run is the case this
+# script exists to serve, and the measured cost is ~0.48 GB peak per run.
+WORKERS="${PYTEST_WORKERS:-12}"
 
 # Unless the caller is steering execution themselves. `-m` matters as much as
 # `-n`: a caller selecting a marker may be deliberately asking for the heavy

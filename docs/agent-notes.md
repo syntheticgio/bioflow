@@ -230,12 +230,13 @@ Two full suites have been run simultaneously against a single Mongo, both
 green at their sequential counts. The worktree script's private Mongo is
 therefore belt-and-braces now rather than load-bearing.
 
-**Why 8 workers and not `auto`.** The Docker VM reports 24 CPUs against
+**Why 12 workers and not `auto`.** The Docker VM reports 24 CPUs against
 12.4 GB of RAM, so `auto` sizes the run by the resource that is not scarce.
-Measured on the full suite: 4 workers 56s, 8 workers 39s, 12 workers 36s,
-16 workers 35s. 8 takes ~90% of the available speedup; past it each worker
-buys seconds while multiplying what a second agent's concurrent run must fit
-alongside. Peak memory at 8 workers was 2.6 GB.
+Measured on the full suite post #756 (probe cost removed): 8 workers ~45s
+parallel, peak ~0.76 GB; 12 workers ~36s parallel, peak ~0.48 GB. 12 is now
+meaningfully faster than 8, and concurrent runs stay under ~1 GB peak,
+leaving headroom for a second agent on the 12.4 GB VM. Peak memory at 12
+workers was ~0.48 GB, concurrent two runs ~0.94 GB.
 
 In CI the same reasoning gives a different number: inside a container
 `os.cpu_count()` reports the *host's* cores and ignores the cgroup quota, so
