@@ -360,29 +360,34 @@ class TestLaunchReachesTheQueue:
     def _spades_for_chemistry():
         """Route these reads to SPAdes, available.
 
-        Two patches rather than one: `spec_for_chemistry` decides which
-        assembler short reads get (ABySS, which this image may not ship), and
-        `available()` probes the host. Patching the spec object is the seam
-        `assembler_registry.spec_for` documents -- the frozen dataclass
-        captured `tools.spades` at import, so patching the module attribute
-        would not be seen.
+        Patched through `SPECS` rather than only through `spec_for_chemistry`.
+        Since #785 `launch_assembly` validates availability against
+        `spec_for(parsed.assembler)` -- the assembler that will actually run --
+        so routing alone no longer decides whether SPAdes probes as installed.
+
+        This is the seam `assembler_registry.spec_for` documents: the frozen
+        dataclass captured `tools.spades` at import, so patching the module
+        attribute would not be seen. Patching only the routing passed locally
+        (this image ships SPAdes) and failed in CI (its container does not) --
+        which is the "reads the host machine while appearing to control it"
+        trap, caught here by the two environments disagreeing.
         """
+        import dataclasses
+
         from app.pipelines import assembler_registry
         from app.pipelines.assemblers import Assembler
 
-        spec = assembler_registry.spec_for(Assembler.SPADES)
-        return patch(
-            "app.pipelines.assembler_registry.spec_for_chemistry",
-            lambda chemistry: SimpleNamespace(
-                assembler=spec.assembler,
-                layout=spec.layout,
-                fields=spec.fields,
-                memory_model=spec.memory_model,
-                meta_memory_model=spec.meta_memory_model,
-                outputs=spec.outputs,
-                unavailable_reason=spec.unavailable_reason,
-                available=lambda: True,
-            ),
+        class _Available:
+            available = True
+
+        spec = dataclasses.replace(
+            assembler_registry.spec_for(Assembler.SPADES),
+            tool=lambda: _Available(),
+        )
+        return patch.multiple(
+            assembler_registry,
+            spec_for_chemistry=lambda chemistry: spec,
+            SPECS={**assembler_registry.SPECS, Assembler.SPADES: spec},
         )
 
     async def test_metaspades_without_a_mate_is_refused_at_launch(self):
