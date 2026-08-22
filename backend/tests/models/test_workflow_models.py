@@ -24,7 +24,10 @@ from app.models.workflow import (
     derive_status,
 )
 
-pytestmark = pytest.mark.asyncio(loop_scope="module")
+# Sync tests here still instantiate Beanie Documents, so the models must be
+# initialized for the whole module; only the loop scope is per-test.
+pytestmark = pytest.mark.usefixtures("beanie_models")
+asyncio_module_loop = pytest.mark.asyncio(loop_scope="module")
 
 
 class TestPortType:
@@ -62,6 +65,7 @@ class TestWorkflowNodeKind:
 
 
 class TestWorkflowDefinition:
+    @asyncio_module_loop
     async def test_a_definition_holds_nodes_and_edges(self, beanie_models):
         definition = WorkflowDefinition(
             name="trim then align",
@@ -156,6 +160,8 @@ class TestDerivedStatus:
 
 
 class TestWorkflowNodeRun:
+    pytestmark = asyncio_module_loop
+
     async def test_retry_adds_an_attempt_rather_than_overwriting(self, beanie_models):
         """The reason node runs are their own documents: a DEAD job cannot be
         un-deaded, so retry points the node at new work while its siblings
@@ -199,6 +205,7 @@ class TestWorkflowNodeRun:
 
 
 class TestWorkflowRun:
+    @asyncio_module_loop
     async def test_a_run_pins_its_definition_version(self, beanie_models):
         run = WorkflowRun(
             definition_id=PydanticObjectId(),

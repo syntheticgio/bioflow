@@ -8,10 +8,9 @@ from app.errors import ValidationError
 from app.models import DataObject, FormatInfo, FormatKind, ObjectRole, SidecarRole
 from app.services import object_service, pipeline_service, project_service
 
-pytestmark = [
-    pytest.mark.usefixtures("beanie_models"),
-    pytest.mark.asyncio(loop_scope="module"),
-]
+pytestmark = pytest.mark.usefixtures("beanie_models")
+# Applied per test: this module mixes async tests with pure sync ones.
+asyncio_module_loop = pytest.mark.asyncio(loop_scope="module")
 
 OWNER = "sv-merge-launch-owner"
 
@@ -99,6 +98,7 @@ async def _setup_snf_pair(*, same_reference: bool = True):
     return snf1, snf2, ref1, ref2
 
 
+@asyncio_module_loop
 async def test_merge_structural_variants_refuses_differing_references(monkeypatch):
     snf1, snf2, ref1, ref2 = await _setup_snf_pair(same_reference=False)
 
@@ -111,6 +111,7 @@ async def test_merge_structural_variants_refuses_differing_references(monkeypatc
     assert "Cannot merge SV callsets across differing reference assemblies" in str(exc_info.value)
 
 
+@asyncio_module_loop
 async def test_merge_structural_variants_succeeds_on_same_reference(monkeypatch):
     async def _stub_enqueue(*args, **kwargs):
         from unittest.mock import MagicMock
@@ -141,6 +142,7 @@ async def test_merge_structural_variants_succeeds_on_same_reference(monkeypatch)
     assert job is not None
 
 
+@asyncio_module_loop
 async def test_sibling_snf_callsets_finds_all_snf_sidecars_on_same_reference():
     snf1, snf2, ref1, _ = await _setup_snf_pair(same_reference=True)
 
@@ -153,6 +155,7 @@ async def test_sibling_snf_callsets_finds_all_snf_sidecars_on_same_reference():
     assert siblings == sorted(siblings)
 
 
+@asyncio_module_loop
 async def test_sibling_snf_callsets_excludes_snfs_on_different_reference():
     snf1, snf2, ref1, ref2 = await _setup_snf_pair(same_reference=False)
 
@@ -163,6 +166,7 @@ async def test_sibling_snf_callsets_excludes_snfs_on_different_reference():
     assert str(snf1.id) in siblings
 
 
+@asyncio_module_loop
 async def test_sibling_snf_callsets_returns_empty_when_not_an_snf():
     project = await project_service.create_project(
         name=f"proj-{uuid.uuid4().hex}", owner=OWNER

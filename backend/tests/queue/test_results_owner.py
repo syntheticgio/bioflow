@@ -23,10 +23,9 @@ from app.models import DataObject, ObjectRole, SidecarRole
 from app.queue import results
 from app.services import object_service, project_service, run_service
 
-pytestmark = [
-    pytest.mark.usefixtures("beanie_models"),
-    pytest.mark.asyncio(loop_scope="module"),
-]
+pytestmark = pytest.mark.usefixtures("beanie_models")
+# Applied per class: TestApplyAnalyzeSynteny holds one sync registry test.
+asyncio_module_loop = pytest.mark.asyncio(loop_scope="module")
 
 
 @pytest.fixture(autouse=True)
@@ -77,6 +76,8 @@ async def _parent(owner: str, name: str, *, role: ObjectRole | None = None) -> D
 
 
 class TestSidecarsInheritTheirParentsOwner:
+    pytestmark = asyncio_module_loop
+
     """The `owner` passed in is deliberately a *different* string here.
 
     These appliers take their owner from the parent object they resolved, not
@@ -154,6 +155,8 @@ class TestSidecarsInheritTheirParentsOwner:
 
 
 class TestDerivedOutputsInheritTheirParentsOwner:
+    pytestmark = asyncio_module_loop
+
     async def test_call_variants_writes_the_vcf_under_the_bams_owner(self):
         """A VCF ingested as "local" against a profile-owned BAM would not just
         be mislabelled -- ingest refuses the project outright, and the applier
@@ -267,6 +270,8 @@ class TestDerivedOutputsInheritTheirParentsOwner:
 
 
 class TestDownloadsTakeTheOwnerFromTheJob:
+    pytestmark = asyncio_module_loop
+
     """The two appliers with no parent object to read an owner off.
 
     A download produces the *first* object in its chain: nothing it ingests is
@@ -339,6 +344,8 @@ class TestDownloadsTakeTheOwnerFromTheJob:
 
 
 class TestTheExecutorSuppliesTheOwner:
+    pytestmark = asyncio_module_loop
+
     """The one production caller of `apply` is `JobExecutor._apply_result`.
 
     Every other test in this file calls `results.apply` directly, which means
@@ -395,6 +402,8 @@ class TestTheExecutorSuppliesTheOwner:
 
 
 class TestApplyAssessMisassemblies:
+    pytestmark = asyncio_module_loop
+
     """`_apply_assess_misassemblies` -- facts merged onto the assembly QUAST
     scored, read-only like completeness's applier."""
 
@@ -486,6 +495,7 @@ class TestApplyAnalyzeSynteny:
         assert "analyze_synteny" in results._APPLIERS
         assert results._APPLIERS["analyze_synteny"] is results._apply_analyze_synteny
 
+    @asyncio_module_loop
     async def test_facts_are_merged_onto_the_object(self):
         owner = "results-synteny-a"
         assembly = await _parent(owner, "draft.fasta")
@@ -514,6 +524,7 @@ class TestApplyAnalyzeSynteny:
         assert alignment["reference_name"] == "GCF_000146045.2"
         assert alignment["segments"] == [["chrI", 0, 5000, "contig_1", 0, 5000, "+"]]
 
+    @asyncio_module_loop
     async def test_preserves_existing_facts_on_the_object(self):
         """Merged, not replaced -- contiguity facts already on the object
         from ingest-time `_parse_fasta` must survive a synteny run landing
@@ -534,6 +545,7 @@ class TestApplyAnalyzeSynteny:
         assert refreshed.facts["sequence_n50"] == 200000
         assert refreshed.facts["synteny_alignment"] == {"segments": []}
 
+    @asyncio_module_loop
     async def test_missing_object_is_logged_not_raised(self):
         """A deleted object between job launch and job completion must not
         crash the applier -- the same posture every other applier in this
@@ -546,6 +558,7 @@ class TestApplyAnalyzeSynteny:
             owner="nobody",
         )
 
+    @asyncio_module_loop
     async def test_empty_facts_is_a_no_op(self):
         """No facts means the applier has nothing to write -- skip the write
         rather than merge an empty dict and bump updated_at for nothing."""
@@ -562,6 +575,8 @@ class TestApplyAnalyzeSynteny:
 
 
 class TestApplyAssessAssemblyErrors:
+    pytestmark = asyncio_module_loop
+
     """`_apply_assess_assembly_errors` -- CRAQ's facts merge onto the scored
     assembly exactly like misassemblies, plus an opt-in ingest of the
     corrected FASTA when chimera breaking (`-b`) produced one."""
@@ -730,6 +745,8 @@ def _meryl_db_dir(*, num_files: int = 3) -> Path:
 
 
 class TestApplyAssessAssemblyQV:
+    pytestmark = asyncio_module_loop
+
     """`_apply_assess_assembly_qv` -- Merqury's facts merge onto the scored
     assembly, plus an opt-in ingest of the freshly built meryl database as
     sidecars on the READ object (not the assembly)."""
@@ -940,6 +957,8 @@ class TestApplyAssessAssemblyQV:
 
 
 class TestApplyClassifyReads:
+    pytestmark = asyncio_module_loop
+
     async def test_applies_bin_taxonomy_facts(self):
         owner = "results-classify-a"
         bin_obj = await _parent(owner, "bin.001.fasta")

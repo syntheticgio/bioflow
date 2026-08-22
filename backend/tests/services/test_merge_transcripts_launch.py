@@ -18,10 +18,9 @@ from app.errors import ValidationError
 from app.models import ObjectRole
 from app.services import object_service, pipeline_service, project_service
 
-pytestmark = [
-    pytest.mark.usefixtures("beanie_models"),
-    pytest.mark.asyncio(loop_scope="module"),
-]
+pytestmark = pytest.mark.usefixtures("beanie_models")
+# Applied per test: this module mixes async tests with pure sync ones.
+asyncio_module_loop = pytest.mark.asyncio(loop_scope="module")
 
 OWNER = "merge-transcripts-launch-owner"
 
@@ -63,6 +62,7 @@ async def _setup_assemblies(*, count: int = 3, project=None):
     return project, objects
 
 
+@asyncio_module_loop
 async def test_refuses_fewer_than_two_inputs():
     project, [single] = await _setup_assemblies(count=1)
     with pytest.raises(ValidationError, match="At least two"):
@@ -73,6 +73,7 @@ async def test_refuses_fewer_than_two_inputs():
         )
 
 
+@asyncio_module_loop
 async def test_refuses_empty_input_list():
     project = await project_service.create_project(
         name=f"proj-{uuid.uuid4().hex}", owner=OWNER
@@ -83,6 +84,7 @@ async def test_refuses_empty_input_list():
         )
 
 
+@asyncio_module_loop
 async def test_refuses_a_non_assembled_transcript_input():
     project = await project_service.create_project(
         name=f"proj-{uuid.uuid4().hex}", owner=OWNER
@@ -103,6 +105,7 @@ async def test_refuses_a_non_assembled_transcript_input():
         )
 
 
+@asyncio_module_loop
 async def test_refuses_inputs_from_another_project():
     _, [a1, a2] = await _setup_assemblies(count=2)
     other = await project_service.create_project(
@@ -116,6 +119,7 @@ async def test_refuses_inputs_from_another_project():
         )
 
 
+@asyncio_module_loop
 async def test_succeeds_with_two_assemblies(monkeypatch):
     from unittest.mock import MagicMock
 

@@ -11,18 +11,19 @@ import pytest_asyncio
 from app.models.resource_limits import ResourceLimits
 from app.services import resource_limit_service
 
-pytestmark = [
-    pytest.mark.usefixtures("beanie_models"),
-    pytest.mark.asyncio(loop_scope="module"),
-]
+pytestmark = pytest.mark.usefixtures("beanie_models")
+# Applied per class: TestResolveMemBudget is pure sync.
+asyncio_module_loop = pytest.mark.asyncio(loop_scope="module")
 
 
-@pytest_asyncio.fixture(autouse=True, loop_scope="module")
+@pytest_asyncio.fixture(loop_scope="module")
 async def clean():
     await ResourceLimits.find_all().delete()
 
 
 class TestLoad:
+    pytestmark = [asyncio_module_loop, pytest.mark.usefixtures("clean")]
+
     async def test_load_creates_the_document_on_first_read(self):
         """Upsert-on-read, matching AiRouting: there is exactly one, and a
         missing one is indistinguishable from a fresh install."""
@@ -57,10 +58,8 @@ class TestResolveMemBudget:
     """A stored limit resolved against what the machine actually has.
 
     Pure, so the clamping rules are testable without a worker or a host probe.
-    These are plain sync tests; the module's asyncio pytestmark (needed by
-    TestLoad above) applies to them too and pytest-asyncio warns about it on
-    every run. Harmless -- verified the bodies still execute for real, not
-    silently skipped -- and not worth a file split for a cosmetic warning.
+    These are plain sync tests and carry no asyncio mark: the mark TestLoad
+    needs is applied to that class rather than to the module.
     """
 
     def test_no_stored_limit_uses_the_machine_budget(self):
