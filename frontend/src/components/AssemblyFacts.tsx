@@ -289,7 +289,15 @@ export function AssemblyFacts({ facts, objectId, projectId }: Props) {
       <dl className="kv">
         {count !== undefined && (
           <>
-            <dt>Sequences</dt>
+            {/* Two registry keys, not one: a counted total and an
+                extrapolated one are different claims, and the card is where
+                that difference is stated. */}
+            <dt>
+              Sequences
+              <InfoMarker
+                metric={isExact ? "sequence_count" : "sequence_count_estimate"}
+              />
+            </dt>
             <dd>
               {isExact ? count.toLocaleString() : `~${count.toLocaleString()}`}
               {!isExact && (
@@ -300,18 +308,18 @@ export function AssemblyFacts({ facts, objectId, projectId }: Props) {
         )}
         {totalBases !== undefined && (
           <>
-            <dt>Total bases</dt>
+            <dt>Total bases <InfoMarker metric="total_bases" /></dt>
             <dd>{formatBases(totalBases)}</dd>
           </>
         )}
         {longest !== undefined && shortest !== undefined && (
           <>
-            <dt>Longest</dt>
+            <dt>Longest <InfoMarker metric="sequence_longest" /></dt>
             <dd>
               <span className="mono">{longest.name}</span> ·{" "}
               {formatBases(longest.length)}
             </dd>
-            <dt>Shortest</dt>
+            <dt>Shortest <InfoMarker metric="sequence_shortest" /></dt>
             <dd>
               <span className="mono">{shortest.name}</span> ·{" "}
               {formatBases(shortest.length)}
@@ -364,6 +372,7 @@ export function AssemblyFacts({ facts, objectId, projectId }: Props) {
                 : sampling === "strided"
                   ? "GC content (sampled across file)"
                   : "GC content (sampled)"}
+              <InfoMarker metric="gc_content_percent" />
             </dt>
             <dd>
               {gc}%
@@ -470,37 +479,37 @@ export function AssemblyFacts({ facts, objectId, projectId }: Props) {
           <dl className="kv">
             {ncbiSequences !== undefined && (
               <>
-                <dt>Sequences</dt>
+                <dt>Sequences <InfoMarker metric="ncbi_sequence_count" /></dt>
                 <dd>{ncbiSequences.toLocaleString()}</dd>
               </>
             )}
             {ncbiTotal !== undefined && (
               <>
-                <dt>Total bases</dt>
+                <dt>Total bases <InfoMarker metric="ncbi_total_length" /></dt>
                 <dd>{formatBases(ncbiTotal)}</dd>
               </>
             )}
             {ncbiGc !== undefined && (
               <>
-                <dt>GC content</dt>
+                <dt>GC content <InfoMarker metric="ncbi_gc_percent" /></dt>
                 <dd>{ncbiGc}%</dd>
               </>
             )}
             {assemblyLevel !== undefined && (
               <>
-                <dt>Assembly level</dt>
+                <dt>Assembly level <InfoMarker metric="assembly_level" /></dt>
                 <dd>{assemblyLevel}</dd>
               </>
             )}
             {ncbiTaxId !== undefined && (
               <>
-                <dt>NCBI taxonomy ID</dt>
+                <dt>NCBI taxonomy ID <InfoMarker metric="tax_id" /></dt>
                 <dd>{ncbiTaxId}</dd>
               </>
             )}
             {assemblyDate !== undefined && (
               <>
-                <dt>Release date</dt>
+                <dt>Release date <InfoMarker metric="assembly_date" /></dt>
                 <dd>{new Date(assemblyDate + "T12:00:00Z").toLocaleDateString()}</dd>
               </>
             )}
@@ -542,7 +551,7 @@ export function AssemblyFacts({ facts, objectId, projectId }: Props) {
           <dl className="kv">
             {completePct !== undefined && (
               <>
-                <dt>Complete</dt>
+                <dt>Complete <InfoMarker metric="assembly_completeness_complete_pct" /></dt>
                 <dd>
                   {completePct}%
                   {completenessTotal !== undefined && (
@@ -556,25 +565,25 @@ export function AssemblyFacts({ facts, objectId, projectId }: Props) {
             )}
             {singlePct !== undefined && (
               <>
-                <dt>Single-copy</dt>
+                <dt>Single-copy <InfoMarker metric="assembly_completeness_single_pct" /></dt>
                 <dd>{singlePct}%</dd>
               </>
             )}
             {duplicatedPct !== undefined && (
               <>
-                <dt>Duplicated</dt>
+                <dt>Duplicated <InfoMarker metric="assembly_completeness_duplicated_pct" /></dt>
                 <dd>{duplicatedPct}%</dd>
               </>
             )}
             {fragmentedPct !== undefined && (
               <>
-                <dt>Fragmented</dt>
+                <dt>Fragmented <InfoMarker metric="assembly_completeness_fragmented_pct" /></dt>
                 <dd>{fragmentedPct}%</dd>
               </>
             )}
             {missingPct !== undefined && (
               <>
-                <dt>Missing</dt>
+                <dt>Missing <InfoMarker metric="assembly_completeness_missing_pct" /></dt>
                 <dd>{missingPct}%</dd>
               </>
             )}
@@ -613,13 +622,13 @@ export function AssemblyFacts({ facts, objectId, projectId }: Props) {
           <dl className="kv">
             {misassemblyTotal !== undefined && (
               <>
-                <dt>Misassemblies</dt>
+                <dt>Misassemblies <InfoMarker metric="assembly_misassembly_total" /></dt>
                 <dd>{misassemblyTotal.toLocaleString()}</dd>
               </>
             )}
             {genomeFractionPct !== undefined && (
               <>
-                <dt>Genome fraction</dt>
+                <dt>Genome fraction <InfoMarker metric="assembly_reference_genome_fraction_pct" /></dt>
                 <dd>{genomeFractionPct}%</dd>
               </>
             )}
@@ -659,7 +668,7 @@ export function AssemblyFacts({ facts, objectId, projectId }: Props) {
           <dl className="kv">
             {errorAqi !== undefined && (
               <>
-                <dt>AQI</dt>
+                <dt>AQI <InfoMarker metric="assembly_error_aqi" /></dt>
                 <dd>
                   {errorAqi.toFixed(1)}{" "}
                   <span style={{ color: "var(--text-faint)" }}>
@@ -670,25 +679,25 @@ export function AssemblyFacts({ facts, objectId, projectId }: Props) {
             )}
             {errorRAqi !== undefined && (
               <>
-                <dt>R-AQI (regional)</dt>
+                <dt>R-AQI (regional) <InfoMarker metric="assembly_error_r_aqi" /></dt>
                 <dd>{errorRAqi.toFixed(1)}</dd>
               </>
             )}
             {errorSAqi !== undefined && (
               <>
-                <dt>S-AQI (structural)</dt>
+                <dt>S-AQI (structural) <InfoMarker metric="assembly_error_s_aqi" /></dt>
                 <dd>{errorSAqi.toFixed(1)}</dd>
               </>
             )}
             {errorCre !== undefined && (
               <>
-                <dt>Regional errors (CRE)</dt>
+                <dt>Regional errors (CRE) <InfoMarker metric="assembly_error_cre_count" /></dt>
                 <dd>{errorCre.toLocaleString()}</dd>
               </>
             )}
             {errorCse !== undefined && (
               <>
-                <dt>Structural errors (CSE)</dt>
+                <dt>Structural errors (CSE) <InfoMarker metric="assembly_error_cse_count" /></dt>
                 <dd>{errorCse.toLocaleString()}</dd>
               </>
             )}
@@ -754,7 +763,7 @@ export function AssemblyFacts({ facts, objectId, projectId }: Props) {
           <dl className="kv">
             {assemblyQv !== undefined && (
               <>
-                <dt>QV</dt>
+                <dt>QV <InfoMarker metric="assembly_qv" /></dt>
                 <dd>
                   {assemblyQv.toFixed(1)}
                   {assemblyQvErrorRate !== undefined && (
@@ -768,7 +777,7 @@ export function AssemblyFacts({ facts, objectId, projectId }: Props) {
             )}
             {assemblyQvCompletenessPct !== undefined && (
               <>
-                <dt>k-mer completeness</dt>
+                <dt>k-mer completeness <InfoMarker metric="assembly_qv_completeness_pct" /></dt>
                 <dd>{assemblyQvCompletenessPct}%</dd>
               </>
             )}
@@ -795,25 +804,25 @@ export function AssemblyFacts({ facts, objectId, projectId }: Props) {
           <dl className="kv">
             {kmerSpectra.genome_size_est !== undefined && (
               <>
-                <dt>Estimated genome size</dt>
+                <dt>Estimated genome size <InfoMarker metric="ui.kmer_genome_size_est" /></dt>
                 <dd>{formatBases(kmerSpectra.genome_size_est)}</dd>
               </>
             )}
             {typeof kmerSpectra.heterozygosity === "number" && (
               <>
-                <dt>Heterozygosity</dt>
+                <dt>Heterozygosity <InfoMarker metric="ui.kmer_heterozygosity" /></dt>
                 <dd>{(kmerSpectra.heterozygosity * 100).toPrecision(3)}%</dd>
               </>
             )}
             {kmerSpectra.total_kmers !== undefined && (
               <>
-                <dt>Total k-mers</dt>
+                <dt>Total k-mers <InfoMarker metric="ui.kmer_total_kmers" /></dt>
                 <dd>{kmerSpectra.total_kmers.toLocaleString()}</dd>
               </>
             )}
             {kmerSpectra.distinct_kmers !== undefined && (
               <>
-                <dt>Distinct k-mers</dt>
+                <dt>Distinct k-mers <InfoMarker metric="ui.kmer_distinct_kmers" /></dt>
                 <dd>{kmerSpectra.distinct_kmers.toLocaleString()}</dd>
               </>
             )}
@@ -837,7 +846,7 @@ export function AssemblyFacts({ facts, objectId, projectId }: Props) {
           <dl className="kv">
             {continuityGci !== undefined && (
               <>
-                <dt>GCI</dt>
+                <dt>GCI <InfoMarker metric="assembly_continuity_gci" /></dt>
                 <dd>
                   {continuityGci.toFixed(1)}{" "}
                   <span style={{ color: "var(--text-faint)" }}>
@@ -849,7 +858,7 @@ export function AssemblyFacts({ facts, objectId, projectId }: Props) {
             {continuityObservedN50 !== undefined &&
               continuityExpectedN50 !== undefined && (
                 <>
-                  <dt>N50</dt>
+                  <dt>N50 <InfoMarker metric="ui.continuity_n50" /></dt>
                   <dd>
                     {formatBases(continuityObservedN50)} observed /{" "}
                     {formatBases(continuityExpectedN50)} expected
@@ -859,7 +868,7 @@ export function AssemblyFacts({ facts, objectId, projectId }: Props) {
             {continuityObservedContigs !== undefined &&
               continuityExpectedContigs !== undefined && (
                 <>
-                  <dt>Contigs</dt>
+                  <dt>Contigs <InfoMarker metric="ui.continuity_contigs" /></dt>
                   <dd>
                     {continuityObservedContigs.toLocaleString()} observed /{" "}
                     {continuityExpectedContigs.toLocaleString()} expected
@@ -868,7 +877,7 @@ export function AssemblyFacts({ facts, objectId, projectId }: Props) {
               )}
             {continuityMapQual !== undefined && (
               <>
-                <dt>Mapping quality threshold (-mq)</dt>
+                <dt>Mapping quality threshold (-mq) <InfoMarker metric="assembly_continuity_map_qual" /></dt>
                 <dd>{continuityMapQual}</dd>
               </>
             )}

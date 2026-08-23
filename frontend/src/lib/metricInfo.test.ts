@@ -130,3 +130,61 @@ describe("Stat headline coverage", () => {
     expect(total).toBeGreaterThan(5);
   });
 });
+
+/**
+ * The reference Quality tab renders `AssemblyFacts`, not `FactsTable`, so the
+ * `LABELS` partition above never sees a single one of its rows. It shipped
+ * with markers on four of its thirty-seven and nothing noticed (#796): every
+ * other row -- the NCBI comparison, BUSCO's five percentages, CRAQ's AQI
+ * family, Merqury's QV, meryl's spectrum, GCI's observed-vs-expected pairs --
+ * is a figure that needs saying what it measures far more than N50 does.
+ *
+ * Scanned from source rather than enumerated, for the same reason the Stat
+ * scan is: a `<dt>` added without a marker renders perfectly and silently.
+ */
+describe("AssemblyFacts row coverage", () => {
+  const source = Object.values(
+    import.meta.glob("../components/AssemblyFacts.tsx", {
+      query: "?raw",
+      import: "default",
+      eager: true,
+    }) as Record<string, string>,
+  )[0];
+
+  // Each `<dt>…</dt>`, including the ones written across several lines for a
+  // conditional label.
+  const rows = (source ?? "").match(/<dt>[\s\S]*?<\/dt>/g) ?? [];
+
+  const label = (row: string) =>
+    row
+      .replace(/<[^>]*>/g, " ")
+      .replace(/\s+/g, " ")
+      .trim()
+      .slice(0, 60);
+
+  it("puts an InfoMarker on every row", () => {
+    const bare = rows.filter((r) => !r.includes("<InfoMarker")).map(label);
+    expect(bare).toEqual([]);
+  });
+
+  it("points every marker at a real entry", () => {
+    // Both spellings: a fixed `metric="k"` and the conditional
+    // `metric={cond ? "a" : "b"}` the sequence-count row needs.
+    const unknown: string[] = [];
+    for (const row of rows) {
+      const keys = [
+        ...(row.match(/metric=\{?[^}>]*?"([^"]+)"/g) ?? []),
+      ].flatMap((m) => [...m.matchAll(/"([^"]+)"/g)].map((x) => x[1]));
+      for (const key of keys) {
+        if (!(key in METRIC_INFO)) unknown.push(key);
+      }
+    }
+    expect(unknown).toEqual([]);
+  });
+
+  it("finds the rows it is meant to be checking", () => {
+    // Guards the two above against passing vacuously if the file is renamed
+    // or the markup shape changes.
+    expect(rows.length).toBeGreaterThan(30);
+  });
+});
