@@ -259,7 +259,7 @@ async def set_routing(body: RoutingIn) -> RoutingOut:
     unknown = set(body.slots) - valid_slots
     if unknown:
         raise HTTPException(
-            status.HTTP_422_UNPROCESSABLE_ENTITY, f"Unknown task slots: {sorted(unknown)}"
+            status.HTTP_422_UNPROCESSABLE_CONTENT, f"Unknown task slots: {sorted(unknown)}"
         )
 
     # Every referenced provider must exist. Writing a dangling id would give a
@@ -267,7 +267,7 @@ async def set_routing(body: RoutingIn) -> RoutingOut:
     for provider_id in {*body.slots.values(), *( [body.default] if body.default else [] )}:
         if await provider_service.get(provider_id) is None:
             raise HTTPException(
-                status.HTTP_422_UNPROCESSABLE_ENTITY, f"No such provider: {provider_id}"
+                status.HTTP_422_UNPROCESSABLE_CONTENT, f"No such provider: {provider_id}"
             )
 
     routing = await AiRouting.load()
