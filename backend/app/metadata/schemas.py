@@ -109,6 +109,10 @@ COMMON_FIELDS: tuple[FieldDef, ...] = (
             "Saccharomyces cerevisiae",
             "Escherichia coli",
         ),
+        help="The species the sample came from, in binomial form. It decides "
+             "which reference an alignment should use, and the expected GC "
+             "content QC compares against. The list is suggestions -- any "
+             "organism can be typed in.",
         group="Sample",
         suggested=True,
         open_vocabulary=True,
@@ -127,8 +131,16 @@ COMMON_FIELDS: tuple[FieldDef, ...] = (
         group="Sample",
     ),
     FieldDef("sex", "Sex", type=FieldType.ENUM,
-             options=("female", "male", "unknown"), group="Sample"),
-    FieldDef("collection_date", "Collection date", type=FieldType.DATE, group="Sample"),
+             options=("female", "male", "unknown"),
+             help="The sample donor's sex. Worth recording because it changes "
+                  "what to expect on the sex chromosomes: coverage there is a "
+                  "standard sanity check on a whole-genome run.",
+             group="Sample"),
+    FieldDef("collection_date", "Collection date", type=FieldType.DATE,
+             help="When the biological sample was taken, not when it was "
+                  "sequenced -- the gap between the two is what long storage "
+                  "or a repeat run looks like in the record.",
+             group="Sample"),
     FieldDef(
         "molecule_type",
         "Molecule type",
@@ -165,13 +177,20 @@ COMMON_FIELDS: tuple[FieldDef, ...] = (
         type=FieldType.ENUM,
         options=("WGS", "WES", "RNA-seq", "scRNA-seq", "ATAC-seq", "ChIP-seq",
                  "Bisulfite-seq", "Amplicon", "Targeted panel"),
+        help="What the experiment was measuring. It is the single field that "
+             "decides which pipeline suits the file -- whole-genome and "
+             "RNA-seq reads look alike until this says otherwise. The list is "
+             "suggestions; an unlisted assay is stored as typed.",
         group="Experiment",
         suggested=True,
         open_vocabulary=True,
     ),
     FieldDef("batch", "Batch", help="Sequencing or processing batch.",
              group="Experiment"),
-    FieldDef("notes", "Notes", group="Experiment"),
+    FieldDef("notes", "Notes",
+             help="Anything about this file worth telling the next person to "
+                  "open it, where no other field fits.",
+             group="Experiment"),
 
     # --- Public archive accessions ---
     # Entering a run or experiment accession here and re-ingesting triggers a
@@ -190,11 +209,30 @@ COMMON_FIELDS: tuple[FieldDef, ...] = (
         help="e.g. SRX8321150. Used if no run accession is set.",
         group="Archive",
     ),
-    FieldDef("sra_sample", "SRA sample", group="Archive"),
-    FieldDef("sra_study", "SRA study", group="Archive"),
-    FieldDef("bioproject", "BioProject", help="e.g. PRJNA631678.", group="Archive"),
-    FieldDef("biosample", "BioSample", help="e.g. SAMN14886310.", group="Archive"),
-    FieldDef("study_title", "Study title", group="Archive"),
+    FieldDef("sra_sample", "SRA sample",
+             help="e.g. SRS6702123. The archive's own identifier for the "
+                  "biological sample, which several runs can share. Filled by "
+                  "the NCBI lookup rather than used to trigger it.",
+             group="Archive"),
+    FieldDef("sra_study", "SRA study",
+             help="e.g. SRP263061. The archive's identifier for the study all "
+                  "these runs belong to. Filled by the NCBI lookup.",
+             group="Archive"),
+    FieldDef("bioproject", "BioProject",
+             help="e.g. PRJNA631678. NCBI's identifier for the research "
+                  "project a set of studies belongs to -- the broadest of the "
+                  "archive accessions.",
+             group="Archive"),
+    FieldDef("biosample", "BioSample",
+             help="e.g. SAMN14886310. NCBI's identifier for the physical "
+                  "sample, which is what ties several runs back to one piece "
+                  "of biological material.",
+             group="Archive"),
+    FieldDef("study_title", "Study title",
+             help="The submitted title of the study this file came from, as "
+                  "the archive holds it. Usually the fastest way to remember "
+                  "what a downloaded accession actually is.",
+             group="Archive"),
 )
 
 
@@ -206,16 +244,27 @@ FASTQ_FIELDS: tuple[FieldDef, ...] = (
         "Library prep",
         type=FieldType.ENUM,
         options=("TruSeq", "Nextera", "NEBNext", "KAPA", "SMART-seq", "10x"),
+        help="The library preparation kit or protocol. It determines which "
+             "adapter sequence is in the reads, so it is what tells trimming "
+             "what to look for. Kit names are a lab's own vocabulary -- an "
+             "unlisted one is stored as typed.",
         group="Library",
         suggested=True,
         open_vocabulary=True,
     ),
-    FieldDef("library_id", "Library ID", group="Library"),
+    FieldDef("library_id", "Library ID",
+             help="Your identifier for the prepared library. Two files sharing "
+                  "one is what makes duplicate reads across them expected "
+                  "rather than a finding.",
+             group="Library"),
     FieldDef(
         "read_type",
         "Read type",
         type=FieldType.ENUM,
         options=("single-end", "paired-end"),
+        help="Whether each fragment was read from one end or both. It decides "
+             "how the reads are handed to an aligner, and paired files are "
+             "expected to arrive as a matched R1 and R2 pair.",
         group="Library",
         suggested=True,
     ),
@@ -223,6 +272,10 @@ FASTQ_FIELDS: tuple[FieldDef, ...] = (
              help="Usually inferred from the filename; override if wrong.",
              group="Library"),
     FieldDef("insert_size", "Insert size", type=FieldType.INTEGER, unit="bp",
+             help="The expected distance between the two ends of a pair, "
+                  "fragment length rather than read length. An insert shorter "
+                  "than twice the read length means the mates overlap, which "
+                  "some tools exploit and others cannot handle.",
              group="Library"),
     FieldDef(
         "platform",
@@ -258,9 +311,20 @@ FASTQ_FIELDS: tuple[FieldDef, ...] = (
         suggested=True,
         open_vocabulary=True,
     ),
-    FieldDef("run_id", "Run ID", group="Sequencing"),
-    FieldDef("flowcell", "Flowcell", group="Sequencing"),
-    FieldDef("lane", "Lane", type=FieldType.INTEGER, group="Sequencing"),
+    FieldDef("run_id", "Run ID",
+             help="The sequencer's identifier for the run this file came off. "
+                  "It is how a batch effect gets traced back to one run.",
+             group="Sequencing"),
+    FieldDef("flowcell", "Flowcell",
+             help="The flowcell identifier. Together with the lane it is the "
+                  "physical origin of the reads, which is what a per-tile "
+                  "quality problem is localised to.",
+             group="Sequencing"),
+    FieldDef("lane", "Lane", type=FieldType.INTEGER,
+             help="Which lane of the flowcell these reads came from. One bad "
+                  "lane in an otherwise good run is a real and recurring "
+                  "failure, and this is what makes it attributable.",
+             group="Sequencing"),
 )
 
 ALIGNMENT_FIELDS: tuple[FieldDef, ...] = (
@@ -281,18 +345,35 @@ ALIGNMENT_FIELDS: tuple[FieldDef, ...] = (
         type=FieldType.ENUM,
         options=("BWA-MEM", "BWA-MEM2", "Bowtie2", "STAR", "HISAT2", "minimap2",
                  "DRAGEN"),
+        help="Which program aligned the reads. Aligners differ in how they "
+             "score multi-mapping reads and set MAPQ, so comparing mapping "
+             "rates across two of them is comparing two different questions.",
         group="Alignment",
         suggested=True,
         open_vocabulary=True,
     ),
-    FieldDef("aligner_version", "Aligner version", group="Alignment"),
+    FieldDef("aligner_version", "Aligner version",
+             help="The aligner's version string. Alignment output is not "
+                  "identical across versions, so this is part of what makes a "
+                  "run reproducible.",
+             group="Alignment"),
     FieldDef("duplicates_marked", "Duplicates marked", type=FieldType.BOOLEAN,
+             help="Whether PCR and optical duplicates have been flagged in the "
+                  "file. Callers that skip flagged reads count the same "
+                  "fragment once instead of several times, so an unmarked file "
+                  "can turn one molecule into apparent support for a variant.",
              group="Alignment"),
     FieldDef("bqsr_applied", "BQSR applied", type=FieldType.BOOLEAN,
              help="Base quality score recalibration.", group="Alignment"),
     FieldDef("mean_coverage", "Mean coverage", type=FieldType.NUMBER, unit="x",
+             help="Average depth across the target region -- how many reads "
+                  "cover a typical base. A mean hides unevenness, so a good "
+                  "mean over a badly covered genome is a real and common case.",
              group="Quality"),
     FieldDef("percent_mapped", "Mapped reads", type=FieldType.NUMBER, unit="%",
+             help="The share of reads that aligned to the reference at all. A "
+                  "low value usually means contamination or the wrong "
+                  "reference rather than poor sequencing.",
              group="Quality"),
 )
 
@@ -302,6 +383,10 @@ VARIANT_FIELDS: tuple[FieldDef, ...] = (
         "Reference build",
         type=FieldType.ENUM,
         options=("GRCh38", "GRCh37/hg19", "T2T-CHM13", "GRCm39", "GRCm38/mm10"),
+        help="Which genome build these coordinates are on. A position means "
+             "nothing without it, and coordinates do not carry between builds "
+             "without a liftover -- which is why it is asked rather than "
+             "assumed.",
         group="Variants",
         suggested=True,
         open_vocabulary=True,
@@ -312,30 +397,50 @@ VARIANT_FIELDS: tuple[FieldDef, ...] = (
         type=FieldType.ENUM,
         options=("GATK HaplotypeCaller", "GATK Mutect2", "DeepVariant", "FreeBayes",
                  "bcftools", "Strelka2", "DRAGEN"),
+        help="Which program made these calls. Callers disagree most on indels "
+             "and in low-coverage regions, so this is needed to read a "
+             "call set's false-positive profile.",
         group="Variants",
         suggested=True,
         open_vocabulary=True,
     ),
-    FieldDef("caller_version", "Caller version", group="Variants"),
+    FieldDef("caller_version", "Caller version",
+             help="The variant caller's version string. Calls change between "
+                  "versions, so this is part of what makes a call set "
+                  "reproducible.",
+             group="Variants"),
     FieldDef(
         "variant_type",
         "Variant type",
         type=FieldType.ENUM,
         options=("germline", "somatic", "joint-genotyped", "structural", "CNV"),
+        help="What kind of calls the file holds. It decides how the records "
+             "should be read: a somatic call set carries allele fractions "
+             "rather than genotypes, and filtering a somatic file by "
+             "germline expectations discards the findings.",
         group="Variants",
         suggested=True,
     ),
     FieldDef("filtered", "Filtered", type=FieldType.BOOLEAN,
              help="Whether low-quality calls have already been removed.",
              group="Variants"),
-    FieldDef("annotated_with", "Annotation", help="e.g. VEP, SnpEff, ANNOVAR.",
+    FieldDef("annotated_with", "Annotation",
+             help="e.g. VEP, SnpEff, ANNOVAR. Which tool added the functional "
+                  "consequence fields. They disagree on transcript choice, so "
+                  "the same variant can be called high-impact by one and "
+                  "harmless by another.",
              group="Variants"),
 )
 
 REFERENCE_FIELDS: tuple[FieldDef, ...] = (
     # Free text rather than an enum: reference builds are open-ended, including
     # custom assemblies and patch releases that no fixed list would cover.
-    FieldDef("reference_build", "Build", group="Reference", suggested=True),
+    FieldDef("reference_build", "Build",
+             help="The name of this assembly build, e.g. GRCh38 or a custom "
+                  "one. Free text rather than a list, because patch releases "
+                  "and in-house assemblies are the normal case here. Every "
+                  "coordinate produced against this file inherits it.",
+             group="Reference", suggested=True),
     FieldDef("source", "Source", help="e.g. Ensembl release 110, UCSC, NCBI RefSeq.",
              group="Reference", suggested=True),
     FieldDef("assembly_accession", "Assembly accession",
@@ -352,7 +457,11 @@ REFERENCE_FIELDS: tuple[FieldDef, ...] = (
              help="Which indexes have been built, e.g. BWA, bowtie2, STAR.",
              group="Reference", suggested=True),
     FieldDef("masked", "Masked", type=FieldType.BOOLEAN,
-             help="Repeat-masked sequence.", group="Reference"),
+             help="Whether repeats are masked, hard (replaced with N) or soft "
+                  "(lower-cased). Aligners treat the two differently, and a "
+                  "hard-masked reference cannot align reads from the masked "
+                  "regions at all.",
+             group="Reference"),
 
     # Filled by the NCBI assembly lookup rather than by hand, so none are
     # suggested -- they appear once enrichment has run.
@@ -361,7 +470,10 @@ REFERENCE_FIELDS: tuple[FieldDef, ...] = (
              group="Reference"),
     FieldDef("assembly_level", "Assembly level", type=FieldType.ENUM,
              options=("Complete Genome", "Chromosome", "Scaffold", "Contig"),
-             help="How finished the assembly is.", group="Reference"),
+             help="How finished the assembly is, from a set of unordered "
+                  "contigs up to a complete genome. It sets what the "
+                  "contiguity numbers should look like.",
+             group="Reference"),
     FieldDef("assembly_date", "Release date", type=FieldType.DATE,
              help="When NCBI published this assembly.", group="Reference"),
     FieldDef("paired_accession", "Paired accession",
@@ -374,7 +486,11 @@ REFERENCE_FIELDS: tuple[FieldDef, ...] = (
 # distinction and no scaffold N50, and asking about them would imply it is a
 # genome -- the exact confusion the PROTEIN role exists to prevent.
 SEQUENCE_SET_FIELDS: tuple[FieldDef, ...] = (
-    FieldDef("organism", "Organism", group="Sequences", suggested=True),
+    FieldDef("organism", "Organism",
+             help="The species these sequences belong to. Free text here, "
+                  "unlike the sample-level field, because a sequence set is "
+                  "often named for a strain or assembly rather than a species.",
+             group="Sequences", suggested=True),
     FieldDef("assembly_accession", "Assembly accession",
              help="The assembly these sequences were derived from, "
                   "e.g. GCF_000002445.2.",
@@ -387,12 +503,24 @@ SEQUENCE_SET_FIELDS: tuple[FieldDef, ...] = (
 )
 
 INTERVAL_FIELDS: tuple[FieldDef, ...] = (
-    FieldDef("reference_build", "Reference build", group="Intervals", suggested=True),
+    FieldDef("reference_build", "Reference build",
+             help="Which genome build these intervals are on. Intervals are "
+                  "coordinates and nothing else, so applying them against a "
+                  "different build silently selects the wrong regions.",
+             group="Intervals", suggested=True),
     FieldDef("interval_type", "Interval type", type=FieldType.ENUM,
              options=("capture targets", "exons", "genes", "regions of interest",
                       "blacklist"),
+             help="What these regions represent, which decides whether they "
+                  "are somewhere to look or somewhere to avoid -- capture "
+                  "targets restrict an analysis, a blacklist excludes from "
+                  "one, and confusing the two inverts the result.",
              group="Intervals", open_vocabulary=True),
-    FieldDef("source", "Source", group="Intervals"),
+    FieldDef("source", "Source",
+             help="Where the intervals came from, e.g. a capture kit's "
+                  "manufacturer BED or an ENCODE blacklist release. Interval "
+                  "sets are revised, so naming the release matters.",
+             group="Intervals"),
 )
 
 
