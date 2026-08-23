@@ -2,34 +2,9 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { api } from "../api/client";
-import type { DeletionPreview } from "../api/types";
 import { assertDeletionPreview } from "../api/validators";
-import { formatBytes } from "../lib/format";
+import { describeContents } from "../lib/deletionSummary";
 import { notify } from "../stores/messageStore";
-
-/** "3 sub-projects, 47 files (2.1 GB), and 12 pipeline runs".
- *
- *  Zero-valued clauses are dropped, so an empty project produces an empty
- *  string and the caller falls back to the bare "Delete X?" wording. */
-function describeContents(p: DeletionPreview): string {
-  const parts: string[] = [];
-  if (p.child_project_count > 0) {
-    parts.push(
-      `${p.child_project_count} sub-project${p.child_project_count === 1 ? "" : "s"}`,
-    );
-  }
-  if (p.object_count > 0) {
-    parts.push(
-      `${p.object_count} file${p.object_count === 1 ? "" : "s"} (${formatBytes(p.total_bytes)})`,
-    );
-  }
-  if (p.run_count > 0) {
-    parts.push(`${p.run_count} pipeline run${p.run_count === 1 ? "" : "s"}`);
-  }
-  if (parts.length === 0) return "";
-  if (parts.length === 1) return parts[0];
-  return `${parts.slice(0, -1).join(", ")}, and ${parts[parts.length - 1]}`;
-}
 
 export function ProjectDangerZone({
   projectId,
