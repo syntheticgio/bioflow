@@ -519,6 +519,11 @@ async def test_provision_private_key_uses_real_import_private_key():
          patch("app.api.v1.nodes._VERIFY_SETTLE_SECONDS", 0), \
          patch("app.api.v1.nodes.asyncssh.scp", AsyncMock()):
         conn = connect_mock.return_value
+        # asyncssh's close() is synchronous, so spec it as a plain Mock: the
+        # executor's finally block calls conn.close() without await, and an
+        # auto-generated AsyncMock close would return a coroutine nobody
+        # awaits, warning on garbage collection (#788).
+        conn.close = MagicMock()
         conn.run = AsyncMock(return_value=type("R", (), {
             "exit_status": 0, "stdout": "", "stderr": "",
         })())
