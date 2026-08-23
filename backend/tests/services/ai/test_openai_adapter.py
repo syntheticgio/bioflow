@@ -232,6 +232,11 @@ class _BodyIO:
     def read(self):
         return self._data
 
+    def close(self):
+        # HTTPError.fp is a real file object; the GC cleanup path calls
+        # .close() on it, and a stub without one warns on collection.
+        pass
+
 
 class TestListModels:
     def test_returns_sorted_ids(self, adapter, monkeypatch):
