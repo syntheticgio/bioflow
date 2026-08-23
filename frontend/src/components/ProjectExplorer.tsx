@@ -10,6 +10,7 @@ import { useUploads } from "../hooks/useUploads";
 import { QualityBadge } from "./QualityBadge";
 import { BioIcon, FileIcon, readPlatformFor } from "../icons/BioIcon";
 import { NewProjectModal } from "./NewProjectModal";
+import { DeleteProjectModal } from "./DeleteProjectModal";
 import { ProjectQcSummary } from "./ProjectQcSummary";
 import { NcbiDownloadDialog } from "./NcbiDownloadDialog";
 import { UniProtDownloadDialog } from "./UniProtDownloadDialog";
@@ -46,7 +47,6 @@ function useSelection() {
 
 function RootView() {
   const navigate = useNavigate();
-  const qc = useQueryClient();
   const { sel, select } = useSelection();
   const [showModal, setShowModal] = useState(false);
   const [filter, setFilter] = useState("");
@@ -67,14 +67,12 @@ function RootView() {
       )
     : projects;
 
-  const del = useMutation({
-    mutationFn: (id: string) => api.deleteProject(id),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["projects"] });
-      notify.success("Project deleted");
-    },
-    onError: (e: Error) => notify.error(e.message),
-  });
+  // Deleting is a two-step: the row action opens a dialog that first reports
+  // what the delete would destroy, then cascades. The mutation used to live
+  // here and delete without cascade, which 409'd on any non-empty project.
+  const [deleting, setDeleting] = useState<{ id: string; name: string } | null>(
+    null,
+  );
 
   return (
     <div className="panel panel-left">
@@ -162,7 +160,7 @@ function RootView() {
               title="Delete project"
               onClick={(e) => {
                 e.stopPropagation();
-                if (confirm(`Delete project "${p.name}"?`)) del.mutate(p.id);
+                setDeleting({ id: p.id, name: p.name });
               }}
             >
               ×
@@ -172,6 +170,13 @@ function RootView() {
       </div>
 
       {showModal && <NewProjectModal onClose={() => setShowModal(false)} />}
+      {deleting && (
+        <DeleteProjectModal
+          projectId={deleting.id}
+          projectName={deleting.name}
+          onClose={() => setDeleting(null)}
+        />
+      )}
     </div>
   );
 }
