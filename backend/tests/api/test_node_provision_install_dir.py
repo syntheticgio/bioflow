@@ -27,6 +27,21 @@ pytestmark = [
 ]
 
 
+@pytest.fixture(autouse=True)
+def _routable_primary_hostname():
+    """A primary address a node could reach, so provisioning gets past write_env.
+
+    Inside a container `_primary_hostname()` discovers the container's own
+    Docker-network address and now refuses it (#803). Without this, every test
+    here fails at `write_env` with that refusal instead of reaching the remote
+    commands whose command strings they exist to assert on.
+    """
+    from app.api.v1 import nodes as mod
+
+    with patch.object(mod.settings, "primary_hostname", "192.168.1.50"):
+        yield
+
+
 class _Result:
     """Stand-in for asyncssh's process result."""
 

@@ -1,6 +1,8 @@
 """Compute node status: which machines are connected and what they are doing."""
 
 import asyncio
+import ipaddress
+import os
 import platform
 import re
 import secrets
@@ -275,11 +277,92 @@ def _rewrite_host(url: str, host: str) -> str:
 
 # --- Provisioning helpers ---
 
+class UnroutablePrimaryHost(Exception):
+    """Discovery produced an address a remote node could not reach us at."""
+
+
+# Hostnames that are never the primary as seen from another machine. These are
+# what `socket.gethostname()` returns inside a container often enough to matter.
+_UNROUTABLE_NAMES = frozenset({"localhost", "localhost.localdomain", "ip6-localhost"})
+
+
+def _is_routable_from_other_hosts(host: str) -> bool:
+    """Whether `host` could plausibly identify this machine to a remote node.
+
+    Only addresses are judged. A non-address name is accepted: we cannot
+    resolve it the way the node's resolver would, and rejecting a name that
+    happens to work would break provisioning that currently succeeds.
+
+    Docker bridge addresses are the case #803 was filed for. They are ordinary
+    RFC-1918 addresses -- a bridge on 172.19/16 is indistinguishable from a
+    LAN on 172.19/16 -- so private ranges cannot simply be rejected: on this
+    single-LAN tool the primary's real address is almost always private. What
+    *is* safe to reject is the set of addresses that are meaningless off-box
+    by definition, regardless of network layout.
+    """
+    if host.strip().lower() in _UNROUTABLE_NAMES:
+        return False
+    try:
+        addr = ipaddress.ip_address(host)
+    except ValueError:
+        return True
+    return not (
+        addr.is_loopback
+        or addr.is_link_local
+        or addr.is_unspecified
+        or addr.is_multicast
+        or addr.is_reserved
+    )
+
+
+# Present in every Docker container, absent on the host. Verified against this
+# project's own api container and the host it runs on.
+_CONTAINER_MARKER = "/.dockerenv"
+
+
+def _is_container_internal(host: str) -> bool:
+    """Whether `host` is this *container's* address rather than the machine's.
+
+    The UDP-connect discovery returns whichever address the kernel would use
+    to reach the internet. On the host that is the LAN address we want; inside
+    a container it is the container's Docker-network address, which is what
+    #803 shipped into node .env files.
+
+    Both are private addresses, so the address alone cannot distinguish them.
+    What does is *where the code is running*: if we are in a container, a
+    private discovered address is a bridge address, because a container does
+    not have the host's LAN address on any of its interfaces.
+
+    A public discovered address is left alone in either case -- that is a
+    machine with a routable address, and it is reachable as-is.
+    """
+    if not os.path.exists(_CONTAINER_MARKER):
+        return False
+    try:
+        addr = ipaddress.ip_address(host)
+    except ValueError:
+        return False
+    return addr.is_private
+
+
 def _primary_hostname() -> str:
     """The primary's externally-routable hostname.
 
-    Uses PRIMARY_HOSTNAME config if set; otherwise discovers the LAN IP
-    via a UDP socket connect. Falls back to socket.gethostname().
+    Uses PRIMARY_HOSTNAME config if set -- an explicit setting is an
+    instruction and is never second-guessed, since the user may be pointing
+    nodes at an address whose routing we cannot see from in here.
+
+    Otherwise the LAN IP is discovered via a UDP socket connect, and *checked*
+    before it is handed to a node. Running inside the API container, that
+    trick returns the container's Docker bridge address; written into a node's
+    .env as MONGO_URL it resolves to the node's own bridge network, so the
+    worker crash-loops against a Mongo that is not ours (#803). Provisioning
+    reported success throughout, because every step it verified had genuinely
+    worked.
+
+    Raises `UnroutablePrimaryHost` rather than returning a value the caller
+    would have to remember to check: the whole failure was a bad address being
+    used as though it were good.
     """
     if settings.primary_hostname:
         return settings.primary_hostname
@@ -289,9 +372,24 @@ def _primary_hostname() -> str:
         s.connect(("1.1.1.1", 1))
         ip = s.getsockname()[0]
         s.close()
-        return ip
+        candidate = ip
     except (TimeoutError, OSError):
-        return socket.gethostname()
+        candidate = socket.gethostname()
+
+    if not _is_routable_from_other_hosts(candidate):
+        raise UnroutablePrimaryHost(
+            f"Discovered the primary's address as {candidate!r}, which no "
+            "other machine can reach. Set PRIMARY_HOSTNAME to this machine's "
+            "LAN address (or DNS name) and provision the node again."
+        )
+    if _is_container_internal(candidate):
+        raise UnroutablePrimaryHost(
+            f"Discovered the primary's address as {candidate!r}, which is this "
+            "container's own Docker network address and means nothing on "
+            "another machine. Set PRIMARY_HOSTNAME to this machine's LAN "
+            "address (or DNS name) and provision the node again."
+        )
+    return candidate
 
 
 def _build_connection_urls(host: str) -> dict[str, str]:
@@ -465,6 +563,9 @@ async def _execute_remote_commands(
 # cannot write) all kill the process on startup.
 _VERIFY_SETTLE_SECONDS = 5
 _VERIFY_TIMEOUT_SECONDS = 30
+# Any restart within the settle window means the worker is not staying up.
+# A healthy worker starts once and stays; this is not a tolerance budget.
+_VERIFY_MAX_RESTARTS = 1
 
 
 async def _verify_node_operational(conn, install_dir: str, host: str) -> str | None:
@@ -482,6 +583,12 @@ async def _verify_node_operational(conn, install_dir: str, host: str) -> str | N
     to enroll: a worker that starts fine but cannot reach the primary's Mongo
     is a *different* failure with a different fix, and reporting it as "the
     worker did not start" would send the user to the wrong machine.
+
+    The state alone is not enough, though. `restart: unless-stopped` returns a
+    container that dies on startup to `running` immediately, so a crash-loop
+    reads as healthy at every sampling instant -- the node behind #803 sat at
+    55 restarts, state `running`, and provisioning called it enrolled. The
+    restart count is what tells the two apart.
     """
     await asyncio.sleep(_VERIFY_SETTLE_SECONDS)
 
@@ -511,7 +618,52 @@ async def _verify_node_operational(conn, install_dir: str, host: str) -> str | N
             f"(state: {', '.join(states)}). This usually means it crashed on "
             f"startup -- check `docker compose logs worker` on {host}."
         )
-    return None
+
+    return await _check_worker_not_restarting(conn, install_dir, host)
+
+
+async def _check_worker_not_restarting(conn, install_dir: str, host: str) -> str | None:
+    """Fail a worker that is `running` only because Docker keeps restarting it.
+
+    Returns None when the restart counts look healthy *or cannot be read*: the
+    readability of `docker inspect` is a property of the node's Docker, not of
+    the worker, so treating unreadable output as a crash-loop would fail nodes
+    that are fine. The state check above stays the load-bearing signal; this
+    only adds a failure it cannot see.
+    """
+    result = await asyncio.wait_for(
+        conn.run(
+            f"docker compose -f {install_dir}/docker-compose.yml ps -q worker "
+            "| xargs -r docker inspect --format '{{.RestartCount}}'",
+            check=False,
+        ),
+        timeout=_VERIFY_TIMEOUT_SECONDS,
+    )
+    if result.exit_status != 0:
+        return None
+
+    counts = []
+    for line in (result.stdout or "").splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            counts.append(int(line))
+        except ValueError:
+            return None
+    if not counts:
+        return None
+
+    worst = max(counts)
+    if worst < _VERIFY_MAX_RESTARTS:
+        return None
+    return (
+        f"The worker on {host} is restarting repeatedly ({worst} restarts) "
+        "rather than staying up. It starts, fails, and is restarted by "
+        "Docker, so it reports as running while doing no work. Check "
+        f"`docker compose logs worker` on {host} -- a worker that cannot "
+        "reach the primary's Mongo or Redis fails this way."
+    )
 
 
 # --- Provisioning executor ---
@@ -587,7 +739,16 @@ async def _provision_node(task_id: str, req: ProvisionRequest) -> None:
             # empty strings -- yielding a syntactically valid compose file
             # with no image and no volumes.
             compose_contents = _render_node_compose()
-            primary_host = _primary_hostname()
+            # Fails here, before anything is written to the node: an address
+            # the node cannot reach produces a worker that starts, crash-loops
+            # against the wrong Mongo, and never enrolls -- while every step
+            # provisioning checks reports success (#803). Caught explicitly so
+            # the user gets the remedy, not a stack trace from the catch-all.
+            try:
+                primary_host = _primary_hostname()
+            except UnroutablePrimaryHost as e:
+                task.phase = "write_env"
+                return await _fail(str(e))
             urls = _build_connection_urls(primary_host)
             env_contents = _render_node_env(
                 mongo_url=urls["mongo_url"],

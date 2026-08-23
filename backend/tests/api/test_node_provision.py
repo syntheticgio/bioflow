@@ -19,6 +19,28 @@ pytestmark = pytest.mark.usefixtures("beanie_models")
 # Applied per test: this module mixes async API tests with pure sync ones.
 asyncio_module_loop = pytest.mark.asyncio(loop_scope="module")
 
+# ---- fixtures ----
+
+
+@pytest.fixture(autouse=True)
+def _routable_primary_hostname():
+    """Give every test a primary address a node could actually reach.
+
+    These tests run inside a container, where `_primary_hostname()` discovers
+    the container's own Docker-network address and now refuses it (#803). That
+    refusal is the fix working: without a configured PRIMARY_HOSTNAME there is
+    no address worth writing into a node's .env.
+
+    Pinning it here rather than patching `_primary_hostname` keeps the real
+    function in the path for the executor tests -- the tests that specifically
+    exercise discovery override this with their own `primary_hostname` patch.
+    """
+    from app.api.v1 import nodes as mod
+
+    with patch.object(mod.settings, "primary_hostname", "192.168.1.50"):
+        yield
+
+
 # ---- helpers ----
 
 def _verify_key_mock() -> AsyncMock:
@@ -805,3 +827,301 @@ async def test_provision_fails_when_the_worker_exits_after_starting():
     assert task.status == "failed"
     assert task.phase == "verify"
     assert "started and then stopped" in task.error
+
+
+# ---- unroutable primary address (#803) ----
+
+def test_primary_hostname_rejects_docker_bridge_address():
+    """A container-internal address is not a routable primary hostname.
+
+    The production failure behind #803: `_primary_hostname` ran inside the API
+    container, the UDP-connect trick succeeded, and it returned the Docker
+    bridge address (172.19.0.6). That went into the node's .env as MONGO_URL,
+    where it resolved to the *node's own* bridge network -- so every
+    provisioned worker crash-looped against the wrong Mongo.
+
+    The two pre-existing tests covered PRIMARY_HOSTNAME being set and the
+    socket raising. Neither covered the path that actually runs: the socket
+    succeeding and handing back an address that is useless off-box.
+    """
+    from app.api.v1 import nodes as mod
+    from app.api.v1.nodes import UnroutablePrimaryHost, _primary_hostname
+
+    class _FakeSocket:
+        def __init__(self, *a, **kw):
+            pass
+
+        def settimeout(self, _):
+            pass
+
+        def connect(self, _):
+            pass
+
+        def getsockname(self):
+            return ("172.19.0.6", 0)
+
+        def close(self):
+            pass
+
+    with patch.object(mod.settings, "primary_hostname", ""), \
+         patch.object(mod.socket, "socket", _FakeSocket), \
+         patch.object(mod.os.path, "exists", return_value=True):
+        with pytest.raises(UnroutablePrimaryHost) as excinfo:
+            _primary_hostname()
+
+    # The message has to name the address and the setting that fixes it --
+    # this surfaces in the provisioning UI, where the user cannot see logs.
+    assert "172.19.0.6" in str(excinfo.value)
+    assert "PRIMARY_HOSTNAME" in str(excinfo.value)
+
+
+def test_primary_hostname_accepts_lan_address():
+    """A real LAN address discovered by the socket is still used."""
+    from app.api.v1 import nodes as mod
+    from app.api.v1.nodes import _primary_hostname
+
+    class _FakeSocket:
+        def __init__(self, *a, **kw):
+            pass
+
+        def settimeout(self, _):
+            pass
+
+        def connect(self, _):
+            pass
+
+        def getsockname(self):
+            return ("192.168.1.50", 0)
+
+        def close(self):
+            pass
+
+    with patch.object(mod.settings, "primary_hostname", ""), \
+         patch.object(mod.socket, "socket", _FakeSocket), \
+         patch.object(mod.os.path, "exists", return_value=False):
+        assert _primary_hostname() == "192.168.1.50"
+
+
+def test_primary_hostname_rejects_loopback():
+    """Loopback is as unroutable from another machine as a bridge address."""
+    from app.api.v1 import nodes as mod
+    from app.api.v1.nodes import UnroutablePrimaryHost, _primary_hostname
+
+    class _FakeSocket:
+        def __init__(self, *a, **kw):
+            pass
+
+        def settimeout(self, _):
+            pass
+
+        def connect(self, _):
+            pass
+
+        def getsockname(self):
+            return ("127.0.0.1", 0)
+
+        def close(self):
+            pass
+
+    with patch.object(mod.settings, "primary_hostname", ""), \
+         patch.object(mod.socket, "socket", _FakeSocket):
+        with pytest.raises(UnroutablePrimaryHost):
+            _primary_hostname()
+
+
+def test_primary_hostname_rejects_unroutable_gethostname_fallback():
+    """The gethostname fallback is checked too, not trusted blindly.
+
+    `socket.gethostname()` inside a container is typically the container ID,
+    which resolves nowhere off-box. Returning it produced the same broken
+    .env as the bridge address, one step further down.
+    """
+    from app.api.v1 import nodes as mod
+    from app.api.v1.nodes import UnroutablePrimaryHost, _primary_hostname
+
+    with patch.object(mod.settings, "primary_hostname", ""), \
+         patch.object(mod.socket, "socket", side_effect=OSError("no net")), \
+         patch.object(mod.socket, "gethostname", return_value="localhost"):
+        with pytest.raises(UnroutablePrimaryHost):
+            _primary_hostname()
+
+
+def test_configured_primary_hostname_is_never_second_guessed():
+    """An explicit PRIMARY_HOSTNAME is honoured even if it looks private.
+
+    The user may deliberately point nodes at a bridge-range address on a
+    routed network we cannot see from here. Config is an instruction, not a
+    hint -- only *discovery* is distrusted.
+    """
+    from app.api.v1 import nodes as mod
+    from app.api.v1.nodes import _primary_hostname
+
+    with patch.object(mod.settings, "primary_hostname", "172.19.0.6"):
+        assert _primary_hostname() == "172.19.0.6"
+
+
+def test_container_rejects_even_plausible_lan_address():
+    """Inside a container, a 192.168/16 address is still a bridge address.
+
+    Docker's default pools sit in 172.16/12, but a user-configured pool can
+    put the bridge anywhere in RFC-1918 -- so "looks like a home LAN" is not
+    evidence the address belongs to the host. A container never holds the
+    host's LAN address on its own interfaces, which is what makes the
+    in-container case decidable at all.
+    """
+    from app.api.v1 import nodes as mod
+    from app.api.v1.nodes import UnroutablePrimaryHost, _primary_hostname
+
+    class _FakeSocket:
+        def __init__(self, *a, **kw):
+            pass
+
+        def settimeout(self, _):
+            pass
+
+        def connect(self, _):
+            pass
+
+        def getsockname(self):
+            return ("192.168.1.50", 0)
+
+        def close(self):
+            pass
+
+    with patch.object(mod.settings, "primary_hostname", ""), \
+         patch.object(mod.socket, "socket", _FakeSocket), \
+         patch.object(mod.os.path, "exists", return_value=True):
+        with pytest.raises(UnroutablePrimaryHost):
+            _primary_hostname()
+
+
+def test_container_keeps_public_discovered_address():
+    """A public address is reachable as-is, container or not.
+
+    Uses a genuinely global address rather than a documentation range
+    (203.0.113/24, 198.51.100/24): `ipaddress` classifies those as private,
+    so they would exercise the rejection path and prove nothing here.
+    """
+    from app.api.v1 import nodes as mod
+    from app.api.v1.nodes import _primary_hostname
+
+    class _FakeSocket:
+        def __init__(self, *a, **kw):
+            pass
+
+        def settimeout(self, _):
+            pass
+
+        def connect(self, _):
+            pass
+
+        def getsockname(self):
+            return ("8.8.8.8", 0)
+
+        def close(self):
+            pass
+
+    with patch.object(mod.settings, "primary_hostname", ""), \
+         patch.object(mod.socket, "socket", _FakeSocket), \
+         patch.object(mod.os.path, "exists", return_value=True):
+        assert _primary_hostname() == "8.8.8.8"
+
+
+@asyncio_module_loop
+async def test_provision_fails_when_primary_address_is_unroutable():
+    """Provisioning stops before writing a .env the node could never use.
+
+    The #803 regression: this ran to completion and reported "Node enrolled ✓"
+    while the worker crash-looped. The failure must surface as a failed task
+    carrying the remedy, not as a success.
+    """
+    from app.api.v1 import nodes as mod
+
+    task_id = "unroutable-primary"
+    req = mod.ProvisionRequest(
+        node_name="test-node",
+        host="192.168.1.237",
+        username="someone",
+        password="pw",
+        storage_location="/data/scratch",
+    )
+
+    conn = MagicMock()
+    conn.close = MagicMock()
+    conn.run = AsyncMock(return_value=MagicMock(exit_status=0, stdout="", stderr=""))
+
+    with patch.object(mod.asyncssh, "connect", AsyncMock(return_value=conn)), \
+         patch.object(
+             mod,
+             "_primary_hostname",
+             side_effect=mod.UnroutablePrimaryHost("boom: set PRIMARY_HOSTNAME"),
+         ):
+        await mod._provision_node(task_id, req)
+
+    task = await NodeProvisionTask.find_one(NodeProvisionTask.task_id == task_id)
+    assert task is not None
+    assert task.status == "failed"
+    assert task.phase == "write_env"
+    assert "PRIMARY_HOSTNAME" in task.error
+
+
+@asyncio_module_loop
+async def test_verify_node_operational_detects_a_crash_looping_worker():
+    """A restarting worker reports `running` and must still fail (#803).
+
+    `restart: unless-stopped` puts a container that dies on startup straight
+    back into `running`, so whenever the state check samples it, it is up.
+    The real node sat at 55 restarts and state `running` while every boot died
+    reaching Mongo -- and provisioning reported "Node enrolled ✓".
+
+    The restart count is what separates a healthy worker from a crash-looping
+    one, since both are `running` when observed.
+    """
+    from app.api.v1.nodes import _verify_node_operational
+
+    conn = _FakeConn([
+        _FakeResult(0, stdout="running\nrunning\n"),
+        _FakeResult(0, stdout="55\n55\n"),
+    ])
+
+    with patch("app.api.v1.nodes._VERIFY_SETTLE_SECONDS", 0):
+        problem = await _verify_node_operational(conn, "~/.bioflow", "10.0.0.7")
+
+    assert problem is not None
+    assert "restart" in problem.lower()
+    # Must point at the node holding the logs, not at the primary.
+    assert "10.0.0.7" in problem
+
+
+@asyncio_module_loop
+async def test_verify_node_operational_allows_a_worker_that_never_restarted():
+    """The healthy case still passes once restart counts are consulted."""
+    from app.api.v1.nodes import _verify_node_operational
+
+    conn = _FakeConn([
+        _FakeResult(0, stdout="running\nrunning\n"),
+        _FakeResult(0, stdout="0\n0\n"),
+    ])
+
+    with patch("app.api.v1.nodes._VERIFY_SETTLE_SECONDS", 0):
+        assert await _verify_node_operational(conn, "~/.bioflow", "h") is None
+
+
+@asyncio_module_loop
+async def test_verify_node_operational_ignores_unreadable_restart_counts():
+    """An unusable restart count must not invent a failure.
+
+    Whether `docker inspect` can be read here is a property of the node's
+    Docker, not of the worker. Treating unreadable output as a crash-loop
+    would fail provisioning on nodes that are actually fine -- the state
+    check remains the load-bearing signal.
+    """
+    from app.api.v1.nodes import _verify_node_operational
+
+    conn = _FakeConn([
+        _FakeResult(0, stdout="running\n"),
+        _FakeResult(1, stdout="", stderr="permission denied"),
+    ])
+
+    with patch("app.api.v1.nodes._VERIFY_SETTLE_SECONDS", 0):
+        assert await _verify_node_operational(conn, "~/.bioflow", "h") is None
