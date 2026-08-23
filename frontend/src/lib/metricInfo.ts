@@ -882,6 +882,172 @@ export const METRIC_INFO: Record<string, MetricInfo> = {
       "Ten bands with edges at 100, 250, 500 bp and so on up to 100 kb, plus an overflow band above that. Length is the feature's own span, so a gene row's introns are included in it.",
   },
 
+  // ---- Assembly QC panels (AssemblyFacts) ---------------------------------
+  // Keyed by fact key where the row reads one, and `ui.` where the row is a
+  // composite ("42 observed / 51 expected") that no single fact key names.
+  ncbi_sequence_count: {
+    term: "Sequences (published)",
+    description:
+      "How many sequence records NCBI lists for the published assembly this file claims to be. It is the published figure rather than a measurement of this file, and the two sit together so a file named for a whole assembly that holds one chromosome is visible.",
+    computed:
+      "Read from NCBI's record for the accession, counted as scaffolds rather than contigs: the two differ sharply for a chromosome-level assembly, and comparing against contigs would invent a divergence.",
+  },
+  ncbi_total_length: {
+    term: "Total bases (published)",
+    description:
+      "The published assembly's total length according to NCBI. A gap of more than 1% from this file's own total is flagged below the table, because it usually means the file is a subset or a different assembly version.",
+  },
+  ncbi_gc_percent: {
+    term: "GC content (published)",
+    description:
+      "The GC percentage NCBI reports for the published assembly. Read it against the measured value above: a large gap suggests the file is not the assembly it is named for.",
+  },
+  assembly_level: {
+    term: "Assembly level",
+    description:
+      "How finished NCBI considers the published assembly — contig, scaffold, chromosome or complete genome. It sets what the contiguity numbers should look like, since a chromosome-level assembly should carry an N50 near a chromosome length.",
+  },
+  tax_id: {
+    term: "NCBI taxonomy ID",
+    description:
+      "The NCBI taxonomy identifier for the organism this assembly belongs to. It is the unambiguous form of the species name, which matters wherever common names and synonyms disagree.",
+  },
+  assembly_date: {
+    term: "Release date",
+    description:
+      "When this version of the assembly was released by NCBI. Assemblies are revised, and coordinates from an older version do not carry over to a newer one without a liftover.",
+  },
+
+  assembly_completeness_complete_pct: {
+    term: "Complete",
+    description:
+      "The percentage of the lineage's expected single-copy marker genes found intact in this assembly. It measures gene space, not base-level accuracy, so an assembly can score highly here and still be error-prone.",
+    computed:
+      "Reported by the completeness tool named in the section heading, against the lineage it also names. The single-copy and duplicated percentages below are the two halves of this figure.",
+  },
+  assembly_completeness_single_pct: {
+    term: "Single-copy",
+    description:
+      "The share of expected markers found exactly once, which is what a correctly collapsed assembly should show. This is the part of the complete figure that carries no duplication concern.",
+  },
+  assembly_completeness_duplicated_pct: {
+    term: "Duplicated",
+    description:
+      "The share of expected markers found more than once. In a haploid assembly this usually means retained haplotypes rather than real gene duplication, so a high value points at purging rather than at biology.",
+  },
+  assembly_completeness_fragmented_pct: {
+    term: "Fragmented",
+    description:
+      "The share of expected markers found only in part, typically split across a contig break. A high value means the assembly is breaking inside genes, which costs annotation more than it costs the total size.",
+  },
+  assembly_completeness_missing_pct: {
+    term: "Missing",
+    description:
+      "The share of expected markers not found at all. Some absence is normal, because the marker set is built for a whole lineage — read this against assemblies of related organisms rather than against zero.",
+  },
+
+  assembly_misassembly_total: {
+    term: "Misassemblies",
+    description:
+      "How many places this assembly disagrees with the reference in a way a small local difference cannot explain: relocations, translocations and inversions. They are candidate assembly errors, but a genuinely rearranged genome produces them too.",
+    computed:
+      "Counted by the tool named in the section heading, against the reference it also names. A different reference gives a different count, which is why the reference is named rather than assumed.",
+  },
+  assembly_reference_genome_fraction_pct: {
+    term: "Genome fraction",
+    description:
+      "The percentage of the reference genome covered by aligned parts of this assembly. What is missing is sequence the reference has and this assembly does not — either genuinely absent, or assembled too poorly to align.",
+  },
+
+  assembly_error_aqi: {
+    term: "AQI",
+    description:
+      "CRAQ's overall assembly quality indicator, combining the regional and structural scores below. It is reference-free: the evidence is how the reads that built the assembly map back onto it, not agreement with another genome.",
+    computed:
+      "Reported by CRAQ, with its published quality band shown beside the value. Absent rather than zero on a short-read-only run, where the structural half cannot be measured at all.",
+  },
+  assembly_error_r_aqi: {
+    term: "R-AQI (regional)",
+    description:
+      "The regional half of the AQI, driven by small local disagreements between the reads and the assembly. Short reads measure this well, so it is the trustworthy half of the score on a short-read-only run.",
+  },
+  assembly_error_s_aqi: {
+    term: "S-AQI (structural)",
+    description:
+      "The structural half of the AQI, driven by large-scale breakpoints. It needs long reads to mean anything, which is why it is absent rather than zero when none were supplied.",
+  },
+  assembly_error_cre_count: {
+    term: "Regional errors (CRE)",
+    description:
+      "How many clipped-region errors CRAQ found: local spots where mapped reads consistently break off, which typically marks a small insertion, deletion or substitution error in the assembled sequence.",
+  },
+  assembly_error_cse_count: {
+    term: "Structural errors (CSE)",
+    description:
+      "How many clipped-structural errors CRAQ found: larger breakpoints suggesting the assembly joined sequence that does not belong together. Long reads are what make these detectable at all.",
+  },
+
+  assembly_qv: {
+    term: "QV",
+    description:
+      "Merqury's consensus quality value — base-level accuracy on the Phred scale, so QV40 means about one error per 10,000 bases. It is reference-free, measured against the reads the assembly was built from rather than against another genome.",
+    computed:
+      "From k-mers present in the assembly but absent from the read set, which are taken to be assembly errors. Reads from a different individual make real biology look like error, which is why the read set is named above the table.",
+  },
+  assembly_qv_completeness_pct: {
+    term: "k-mer completeness",
+    description:
+      "The percentage of reliable read k-mers that also appear in the assembly. It is the complement of QV: QV asks whether what the assembly contains is right, this asks how much of the read evidence made it in at all.",
+  },
+
+  "ui.kmer_genome_size_est": {
+    term: "Estimated genome size",
+    description:
+      "Genome size inferred from the reads alone, before any assembly. It is the yardstick the assembly's own total length should be read against, since an assembly far larger than this usually means retained haplotypes.",
+    computed:
+      "From the position of the coverage peak in meryl's k-mer histogram. Absent when the histogram has no clear peak, which happens on low-coverage or error-heavy read sets.",
+  },
+  "ui.kmer_heterozygosity": {
+    term: "Heterozygosity",
+    description:
+      "The estimated rate at which the sequenced individual's two haplotypes differ, from the reads alone. High heterozygosity is what makes an assembler emit both haplotypes as separate contigs and inflate the assembly size.",
+    computed:
+      "From the size of the heterozygous peak relative to the homozygous peak in the k-mer histogram.",
+  },
+  "ui.kmer_total_kmers": {
+    term: "Total k-mers",
+    description:
+      "How many k-mers were counted across the read set in total, counting every repeated occurrence. Divided by the distinct count below, it is roughly the sequencing depth of the read set.",
+  },
+  "ui.kmer_distinct_kmers": {
+    term: "Distinct k-mers",
+    description:
+      "How many different k-mer sequences the reads contain. Far more distinct k-mers than the estimated genome size means a heavy sequencing-error tail, since a k-mer seen once is usually an error rather than sequence.",
+  },
+
+  assembly_continuity_gci: {
+    term: "GCI",
+    description:
+      "The genome continuity index: how continuous the assembly is judged by long reads mapping across it, rather than by how long its contigs are. A gapless assembly scores near 100. Unlike CRAQ's AQI the score has no published quality bands, so only the benchmark range is shown beside it, never a classification.",
+    computed:
+      "Reported by GCI from long-read alignments. A single aligner undercounts issues in repetitive regions, which is why the aligners used are named below the table.",
+  },
+  "ui.continuity_n50": {
+    term: "N50, observed vs expected",
+    description:
+      "The assembly's own N50 beside the N50 it would have if every position GCI judges unsupported were treated as a break. A large drop between the two means the contiguity the contig lengths advertise is not backed by read evidence.",
+  },
+  "ui.continuity_contigs": {
+    term: "Contigs, observed vs expected",
+    description:
+      "The assembly's contig count beside the count implied by breaking it at every unsupported position. The gap between them is how many of its joins the long reads do not support.",
+  },
+  assembly_continuity_map_qual: {
+    term: "Mapping quality threshold",
+    description:
+      "The minimum alignment mapping quality GCI counted as evidence. A higher threshold discards ambiguous alignments in repeats and so makes the score stricter; it is reported because it changes the result.",
+  },
+
   // ---- Bin taxonomy (Kraken2) -------------------------------------------
   bin_taxon_label: {
     term: "Taxonomic label",
