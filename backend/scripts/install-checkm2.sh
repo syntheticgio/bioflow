@@ -27,14 +27,15 @@
 # dependency the design doc expected to be the blocker -- is fine: bioconda
 # publishes it for linux-aarch64.
 #
-# pip is not an escape hatch either: CheckM2 hard-pins scikit-learn==0.23.2,
-# which has no aarch64 wheel and source-builds against numpy==1.17.3 (2019),
-# which does not build under Python 3.12.
+# tensorflow is the sole blocker: the other pins that control run resolved --
+# scikit-learn 1.6.1, python >3.12, DIAMOND 2.1.11 -- are all published for
+# linux-aarch64. (An earlier revision of this comment claimed a hard pin on
+# scikit-learn==0.23.2; that predates the 1.1.0 release and was wrong.)
 #
-# Unpinning those dependencies WOULD install, and is deliberately not done:
-# CheckM2 scores by loading a pickled scikit-learn/Keras model, and crossing a
-# 0.23 -> 1.x scikit-learn and a 2.5 -> 2.21 tensorflow gap is the case that
-# yields numbers rather than errors. A silently wrong completeness score is
+# Unpinning tensorflow WOULD install, and is deliberately not done: CheckM2
+# scores by loading a pickled scikit-learn/Keras model, and widening that pin
+# to a version the model was never saved against is the case that yields
+# numbers rather than errors. A silently wrong completeness score is
 # worse than an honest "not available on this architecture", which is what
 # tools.checkm2() reports instead. See
 # docs/superpowers/specs/2026-08-20-checkm2-bin-qc-design.md.
