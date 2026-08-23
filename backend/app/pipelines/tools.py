@@ -953,15 +953,16 @@ def checkm2() -> Tool:
     installs and imports cleanly. DIAMOND, the dependency the design doc
     expected to be the blocker, is fine: bioconda publishes it for aarch64.
 
-    pip is not an escape hatch either: CheckM2 hard-pins `scikit-learn==0.23.2`,
-    which has no aarch64 wheel and source-builds against `numpy==1.17.3` (2019),
-    which does not build under Python 3.12.
+    tensorflow is the sole blocker. CheckM2's other pins -- scikit-learn 1.6.1,
+    python >3.12, DIAMOND 2.1.11 -- are all published for aarch64. (An earlier
+    revision of this comment claimed a hard pin on `scikit-learn==0.23.2`; that
+    predates the 1.1.0 release and was wrong.)
 
-    Unpinning those dependencies would install, but CheckM2 scores by loading a
-    pickled scikit-learn/Keras model -- crossing a 0.23 -> 1.x scikit-learn and
-    a 2.5 -> 2.21 tensorflow gap is the case that yields numbers rather than
-    errors, and a silently wrong completeness score is worse than an honest
-    skip. See docs/superpowers/specs/2026-08-20-checkm2-bin-qc-design.md.
+    Unpinning tensorflow would install, but CheckM2 scores by loading a pickled
+    scikit-learn/Keras model -- widening that pin to a version the model was
+    never saved against is the case that yields numbers rather than errors, and
+    a silently wrong completeness score is worse than an honest skip. See
+    docs/superpowers/specs/2026-08-20-checkm2-bin-qc-design.md.
     """
     tool = _probe("checkm2", settings.checkm2_path, ["--version"])
     if tool.error and is_arm64():
