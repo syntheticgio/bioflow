@@ -137,7 +137,10 @@ export interface ReferenceOption {
   /** "remote" means picking this reference downloads it first. */
   locality: Locality;
   indexes: IndexStatus;
-  index_ids: Record<string, string>;  // aligner name → sidecar object id, for download links
+  /** Aligner name (plus "fai") → sidecar object id, for download links.
+   * Only built indexes appear; optional so a payload without it degrades to
+   * a missing download link rather than a crash. */
+  index_ids?: Record<string, string>;
 }
 
 /** One additional read set for an alignment launch: an R1 and, when paired,

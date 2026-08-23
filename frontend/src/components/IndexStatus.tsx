@@ -77,6 +77,10 @@ export function IndexStatus({ object }: { object: DataObject }) {
     (name) => !NON_ALIGNER_INDEXES.has(name),
   ) as AlignerName[];
 
+  // Defaulted rather than indexed straight off `entry`: a payload without
+  // `index_ids` made this a read off undefined, which threw and took the
+  // whole metadata tab down rather than just dropping a download link.
+  const indexIds = entry.index_ids ?? {};
   const annotationList = annotations?.annotations ?? [];
   const starAnnotated = entry.indexes.star_annotated === true;
 
@@ -94,9 +98,9 @@ export function IndexStatus({ object }: { object: DataObject }) {
               <span className={built ? "index-built" : "index-missing"}>
                 {built ? "✓ built" : usable ? "not built" : "unavailable here"}
               </span>
-              {built && entry.index_ids[name] && (
+              {built && indexIds[name] && (
                 <a
-                  href={api.objectDownloadUrl(entry.index_ids[name])}
+                  href={api.objectDownloadUrl(indexIds[name])}
                   className="btn"
                   style={{ padding: "1px 8px", fontSize: 11, textDecoration: "none" }}
                   download
