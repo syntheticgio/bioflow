@@ -2580,6 +2580,9 @@ async def list_references(project_id: PydanticObjectId, owner: OwnerDep) -> dict
                 # that sits waiting on gigabytes of transfer.
                 "locality": o.locality.value,
                 "indexes": await pipeline_service.reference_index_status(o),
+                # A sibling of `indexes`, not a key inside it: the panel reads
+                # `indexes`' keys as the list of aligners to render.
+                "index_ids": await pipeline_service.reference_index_ids(o),
             }
             for o in references
         ]

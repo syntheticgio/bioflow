@@ -1295,7 +1295,7 @@ def _check_reference(obj: DataObject) -> None:
         )
 
 
-async def reference_index_status(reference: DataObject) -> dict:
+async def reference_index_status(reference: DataObject) -> dict[str, bool]:
     """Which indexes a reference already has.
 
     Keyed by content: sidecars attach to the reference object, and the same
@@ -1305,13 +1305,33 @@ async def reference_index_status(reference: DataObject) -> dict:
     `star_annotated` rides alongside `star` rather than replacing it: the two
     are built from different sidecar roles and a reference can carry either,
     neither, or both -- see `aligners.SidecarRole.STAR_ANNOTATED_INDEX`.
+
+    Booleans only. The download-link ids come from `reference_index_ids`, kept
+    separate because callers enumerate this map's keys as aligner names -- a
+    nested dict in here rendered as a junk aligner row in the UI.
     """
     from app.services import object_service
 
     sidecars = await object_service.list_sidecars(reference.id, owner=reference.owner)
     have = {s.sidecar_role for s in sidecars if s.sidecar_role}
-    # Map each built index to its sidecar object id so the frontend can offer
-    # download buttons. A role not in the map simply has no download link.
+    return {
+        aligner.value: aligners.INDEX_ROLE[aligner] in have for aligner in Aligner
+    } | {
+        "fai": SidecarRole.FAI in have,
+        "star_annotated": SidecarRole.STAR_ANNOTATED_INDEX in have,
+    }
+
+
+async def reference_index_ids(reference: DataObject) -> dict[str, str]:
+    """Each built index's sidecar object id, so the UI can link a download.
+
+    Keyed the same way as `reference_index_status` -- aligner name, plus
+    "fai" -- but a role with no sidecar is simply absent rather than false,
+    since there is nothing to link to.
+    """
+    from app.services import object_service
+
+    sidecars = await object_service.list_sidecars(reference.id, owner=reference.owner)
     role_to_aligner = {v: k.value for k, v in aligners.INDEX_ROLE.items()}
     index_ids: dict[str, str] = {}
     for s in sidecars:
@@ -1319,13 +1339,7 @@ async def reference_index_status(reference: DataObject) -> dict:
             index_ids[role_to_aligner[s.sidecar_role]] = str(s.id)
         elif s.sidecar_role == SidecarRole.FAI:
             index_ids["fai"] = str(s.id)
-    return {
-        aligner.value: aligners.INDEX_ROLE[aligner] in have for aligner in Aligner
-    } | {
-        "fai": SidecarRole.FAI in have,
-        "star_annotated": SidecarRole.STAR_ANNOTATED_INDEX in have,
-        "index_ids": index_ids,
-    }
+    return index_ids
 
 
 async def align_envelope(
