@@ -94,6 +94,14 @@ services:
       # the request Host header.
       NODE_CONNECTION_MONGO_URL: ${MONGO_URL:-mongodb://mongo:27017/biopipe?replicaSet=rs0&directConnection=true}
       NODE_CONNECTION_REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+      # This machine's LAN address, as a compute node must dial it to reach
+      # Mongo, Redis and the API. Must come from outside the container: the
+      # API can only discover its own Docker-network address, which is
+      # meaningless on another machine, and writing that into a node's .env
+      # produced a worker that crash-looped forever while provisioning
+      # reported success (#803). Unset is safe -- provisioning refuses to
+      # enroll a node rather than guessing.
+      PRIMARY_HOSTNAME: ${PRIMARY_HOSTNAME:-}
     volumes:
       - ${BIOINFO_HOME:-/Volumes/FastDataExtension/BioinfoHelper}:/data
       # The api never *runs* a sibling container -- the worker does -- but it
