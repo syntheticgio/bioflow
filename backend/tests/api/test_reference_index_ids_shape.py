@@ -13,6 +13,7 @@ test_remote_object_endpoints.py for why.
 """
 
 import pytest
+import pytest_asyncio
 
 from app.api.v1.pipelines import list_references
 from app.models import FormatKind, ObjectRole, SidecarRole
@@ -26,11 +27,15 @@ pytestmark = [
 ]
 
 
-async def _reference_with_bwa_index():
+@pytest_asyncio.fixture(scope="module", loop_scope="module")
+async def reference_with_bwa_index():
     """A reference carrying one built aligner index and its .fai.
 
     Both are needed: the crash only reaches `entry.index_ids[name]` when a
     row is actually built, so a bare reference would pass either shape.
+
+    Module-scoped and shared: the project name is unique per owner, so
+    building this per test collided once both ran against one database.
     """
     project = await project_service.create_project(
         name="index-ids-shape", owner=TEST_OWNER
@@ -55,8 +60,8 @@ async def _reference_with_bwa_index():
     return project, reference, index, fai
 
 
-async def test_index_ids_is_a_sibling_of_indexes():
-    project, reference, index, fai = await _reference_with_bwa_index()
+async def test_index_ids_is_a_sibling_of_indexes(reference_with_bwa_index):
+    project, reference, index, fai = reference_with_bwa_index
 
     payload = await list_references(project.id, TEST_OWNER)
     entry = next(
@@ -69,10 +74,10 @@ async def test_index_ids_is_a_sibling_of_indexes():
     }
 
 
-async def test_indexes_holds_only_booleans():
+async def test_indexes_holds_only_booleans(reference_with_bwa_index):
     """`Object.keys(entry.indexes)` is how the panel enumerates aligners, so a
     non-boolean key there becomes a rendered row."""
-    project, reference, _index, _fai = await _reference_with_bwa_index()
+    project, reference, _index, _fai = reference_with_bwa_index
 
     payload = await list_references(project.id, TEST_OWNER)
     entry = next(
