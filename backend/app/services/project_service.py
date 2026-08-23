@@ -152,8 +152,13 @@ async def delete_project(
     ).count()
 
     if not cascade and (object_count or child_count):
+        # Worded for a person, because it reaches one: the API detail is in
+        # `details` and the docs, but this string is what the UI surfaces in a
+        # toast. Telling a user to "pass cascade=true" names a query parameter
+        # they have no way to set from the app.
         raise ConflictError(
-            "Project is not empty. Delete its contents first, or pass cascade=true.",
+            "This project still has contents. Deleting it will also delete "
+            "everything inside it.",
             details={"object_count": object_count, "child_project_count": child_count},
         )
 
