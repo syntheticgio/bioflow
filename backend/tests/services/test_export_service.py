@@ -11,7 +11,7 @@ from beanie import PydanticObjectId
 from app.config import settings
 from app.models import Blob, BlobState, JobRunTiming, RunKind, SourceInfo, SourceMode
 from app.models.timing import RunMachine
-from app.services import export_service, run_service
+from app.services import export_service, object_service, run_service
 from app.storage.paths import blob_path
 from tests.services.helpers import TEST_OWNER, make_blob, make_object, make_project
 
@@ -28,19 +28,42 @@ def test_exports_dir_is_under_bioinfo_home():
 
 
 def test_export_format_constants():
-    assert export_service.BIOFLOW_EXPORT_VERSION == 2
+    assert export_service.BIOFLOW_EXPORT_VERSION == 3
     assert export_service.DEFAULT_BLOB_THRESHOLD_BYTES == 100 * 1024 * 1024
+
+
+# object_service owns the full list of per-object report roots; the export
+# service labels a subset of them for the archive. These tests are the
+# partition guard: a root added to one side must be classified on the other,
+# or the import (and this test) fails.
+class TestReportArtifactRoots:
+    def test_every_report_root_is_exported_or_deliberately_excluded(self):
+        attrs = set(object_service._REPORT_ROOT_ATTRS)
+        categorized = set(export_service._REPORT_ROOT_CATEGORIES)
+        excluded = export_service._REPORT_ROOTS_NOT_EXPORTED
+        # Nothing silently missed.
+        assert attrs == categorized | excluded
+        # Nothing double-classified as both exported and excluded.
+        assert not (categorized & excluded)
+
+    def test_report_artifact_roots_cover_exactly_the_exported_attrs(self):
+        exported = {
+            attr
+            for attr in object_service._REPORT_ROOT_ATTRS
+            if attr not in export_service._REPORT_ROOTS_NOT_EXPORTED
+        }
+        assert {attr for _, attr in export_service.REPORT_ARTIFACT_ROOTS} == exported
+
+    def test_every_exported_root_resolves_to_a_path(self):
+        for category, attr in export_service.REPORT_ARTIFACT_ROOTS:
+            assert category
+            assert isinstance(getattr(settings, attr), Path)
 
 
 @pytest.fixture
 def report_roots(tmp_path: Path, monkeypatch):
     monkeypatch.setattr(settings, "bioinfo_home", tmp_path)
-    return {
-        "qc_reports_dir": settings.qc_reports_dir,
-        "bam_stats_dir": settings.bam_stats_dir,
-        "vcf_stats_dir": settings.vcf_stats_dir,
-        "annotation_stats_dir": settings.annotation_stats_dir,
-    }
+    return {attr: getattr(settings, attr) for attr in object_service._REPORT_ROOT_ATTRS}
 
 
 @pytest.mark.usefixtures("beanie_models")
@@ -203,6 +226,32 @@ class TestCollectReportArtifacts:
                 object_id=object_id,
                 source_path=artifact.source_path,
                 payload=payload,
+            )
+
+    async def test_collects_files_under_every_report_root(self, report_roots):
+        """#790: a root present in object_service but absent from
+        REPORT_ARTIFACT_ROOTS silently dropped out of every export. Write one
+        file per root and require each root to contribute an artifact, so a
+        root added later is covered by this test automatically."""
+        project = await make_project("export-report-artifacts-all-roots")
+        obj = await make_object(project, "all.roots.fastq.gz")
+        object_id = str(obj.id)
+
+        for category, attr in export_service.REPORT_ARTIFACT_ROOTS:
+            self._write(report_roots[attr] / object_id / f"{category}.tsv", b"derived")
+
+        artifacts = export_service.collect_report_artifacts([obj])
+
+        assert sorted(a.category for a in artifacts) == sorted(
+            category for category, _ in export_service.REPORT_ARTIFACT_ROOTS
+        )
+        for artifact in artifacts:
+            self._assert_artifact(
+                artifact,
+                category=artifact.category,
+                object_id=object_id,
+                source_path=artifact.source_path,
+                payload=b"derived",
             )
 
     async def test_skips_missing_roots_and_orphan_object_ids(
@@ -753,7 +802,7 @@ class TestExportProject:
         assert f"blobs/{blob_digest}" in names
         assert f"reports/qc/{object_id}/fastp.html" in names
         assert f"reports/qc/{object_id}/multiqc.html" not in names
-        assert manifest_json["bioflow_export_version"] == 2
+        assert manifest_json["bioflow_export_version"] == export_service.BIOFLOW_EXPORT_VERSION
         assert manifest_json["artifact_count"] == 3
         assert manifest_json["report_artifact_count"] == 2
         assert manifest_json["included_artifact_count"] == 2

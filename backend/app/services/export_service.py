@@ -35,11 +35,13 @@ from app.models import (
     Project,
     RunJob,
 )
-from app.services import project_service, run_service
+from app.services import object_service, project_service, run_service
 
 # Bumped when the archive layout changes in a way a reader must notice.
 # Preserved ObjectIds plus this stamp are what a future importer needs.
-BIOFLOW_EXPORT_VERSION = 2
+# 3: REPORT_ARTIFACT_ROOTS now carries every per-object root, so the
+# category names an importer must map are wider than in 2.
+BIOFLOW_EXPORT_VERSION = 3
 
 # Blobs at or below this size have their bytes packed into the archive;
 # larger ones are listed in the manifest as excluded. A collaborator wants
@@ -47,11 +49,36 @@ BIOFLOW_EXPORT_VERSION = 2
 DEFAULT_BLOB_THRESHOLD_BYTES = 100 * 1024 * 1024
 
 
-REPORT_ARTIFACT_ROOTS: tuple[tuple[str, str], ...] = (
-    ("qc", "qc_reports_dir"),
-    ("bam_stats", "bam_stats_dir"),
-    ("vcf_stats", "vcf_stats_dir"),
-    ("annotation_stats", "annotation_stats_dir"),
+# Archive category for each per-object report root, keyed by the settings
+# attribute name from object_service._REPORT_ROOT_ATTRS. Every attribute in
+# that tuple must appear here or in _REPORT_ROOTS_NOT_EXPORTED; a root added
+# upstream without a category here raises KeyError at import -- loud, on
+# purpose -- and the partition test in test_export_service.py keeps the two
+# sides of the split in step.
+_REPORT_ROOT_CATEGORIES: dict[str, str] = {
+    "qc_reports_dir": "qc",
+    "bam_stats_dir": "bam_stats",
+    "vcf_stats_dir": "vcf_stats",
+    "annotation_stats_dir": "annotation_stats",
+    "sv_stats_dir": "sv_stats",
+    "feature_coverage_dir": "feature_coverage",
+    "variants_in_regions_dir": "variants_in_regions",
+    "annotation_comparison_dir": "annotation_comparison",
+    "coverage_dir": "coverage",
+    "gc_bias_dir": "gc_bias",
+    "methylation_dir": "methylation",
+}
+# Roots deliberately absent from the export archive. Empty today: every
+# per-object root holds derived results a collaborator reading the archive
+# would want. A root lands here (not in a silent omission) only when it is
+# keyed by something an export cannot scope.
+_REPORT_ROOTS_NOT_EXPORTED: frozenset[str] = frozenset()
+# (category, settings attribute) pairs, in _REPORT_ROOT_ATTRS order. Resolved
+# via getattr at call time so a re-pointed bioinfo_home is honoured.
+REPORT_ARTIFACT_ROOTS: tuple[tuple[str, str], ...] = tuple(
+    (_REPORT_ROOT_CATEGORIES[attr], attr)
+    for attr in object_service._REPORT_ROOT_ATTRS
+    if attr not in _REPORT_ROOTS_NOT_EXPORTED
 )
 
 
