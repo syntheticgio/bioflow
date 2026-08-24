@@ -27,7 +27,6 @@ import { ComparisonView } from "./ComparisonView";
 import { AssemblyGraph } from "./AssemblyGraph";
 import { ChromosomeStrip } from "./ChromosomeStrip";
 import { FactsColumns } from "./FactsColumns";
-import { NodeSelector } from "./NodeSelector";
 import { QcDialog } from "./QcDialog";
 import { countVisibleFacts, FactsTable } from "./FactsTable";
 import { assemblyLabel, FileHeadlineStats, fileStats } from "./FileHeadline";
@@ -679,11 +678,11 @@ function ObjectDetail({ id }: { id: string }) {
     onError: (e: Error) => notify.error(e.message),
   });
 
-  // No dialog: QC takes no parameters, so a button that opened a form with
-  // nothing in it would be a step for its own sake.
-  const [targetNode, setTargetNode] = useState("");
+  // Launches straight away on the default node: this drives the Actions-tab
+  // button, where QC takes no parameters worth a form. The QC tab's prompt
+  // opens QcDialog instead, which is where a node gets chosen.
   const runQC = useMutation({
-    mutationFn: () => api.launchQC(id, targetNode || undefined),
+    mutationFn: () => api.launchQC(id),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["jobs"] });
       // QC is what un-gates the align card, so leaving this stale would keep
@@ -949,40 +948,32 @@ function ObjectDetail({ id }: { id: string }) {
                       style={{
                         marginBottom: 12,
                         display: "flex",
+                        // Wraps so the button drops below the text on a
+                        // narrow panel rather than running off the edge.
+                        flexWrap: "wrap",
                         alignItems: "center",
                         justifyContent: "space-between",
                         gap: 12,
                       }}
                     >
-                      <span>
+                      <span style={{ flex: "1 1 16rem", minWidth: 0 }}>
                         No QC has been run on this file yet. Read chemistry,
                         adapter content and the quality distribution all come
                         from it — and several pipeline suggestions stay disabled
                         without it.
                       </span>
-                      <div
-                        style={{
-                          display: "flex",
-                          alignItems: "center",
-                          gap: 8,
-                        }}
+                      {/* No node selector here: the QC dialog this opens asks
+                          which node to run on, so a second one only invites
+                          picking twice. */}
+                      <button
+                        type="button"
+                        className="btn primary"
+                        style={{ flexShrink: 0 }}
+                        onClick={() => setShowQcDialog(true)}
+                        disabled={runQC.isPending || qcActive}
                       >
-                        <NodeSelector
-                          value={targetNode}
-                          onChange={setTargetNode}
-                        />
-                        <button
-                          type="button"
-                          className="btn primary"
-                          style={{ flexShrink: 0 }}
-                          onClick={() => setShowQcDialog(true)}
-                          disabled={runQC.isPending || qcActive}
-                        >
-                          {runQC.isPending || qcActive
-                            ? "Running QC…"
-                            : "Run QC"}
-                        </button>
-                      </div>
+                        {runQC.isPending || qcActive ? "Running QC…" : "Run QC"}
+                      </button>
                     </div>
                   ) : null
                 }
