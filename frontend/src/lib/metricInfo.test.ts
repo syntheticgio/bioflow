@@ -1,6 +1,70 @@
 import { describe, expect, it } from "vitest";
-import { LABELS } from "../components/FactsTable";
+import { LABELS, SUPPRESSED, groupKeys } from "../components/FactsTable";
 import { METRIC_INFO, NO_INFO_NEEDED, infoFor } from "./metricInfo";
+
+/**
+ * The partition below is keyed on `LABELS`, which is the hole #797 came
+ * through: an unlabelled fact is not missing from the table, it renders with
+ * a title-cased fallback of its own key. So it looks finished -- "Ai summary",
+ * "Sra download source" -- while being invisible to a coverage check that only
+ * ever walks keys someone already thought to label. Four AI-summary facts and
+ * three SRA ones shipped that way.
+ *
+ * These are the keys the backend writes into `facts` for surfaces the generic
+ * table renders. Listed by hand because the backend is Python and this suite
+ * cannot import it; the point is not that the list is exhaustive but that
+ * every key on it has been decided about, rather than defaulting into the
+ * anonymous "Other" bucket.
+ */
+const BACKEND_FACT_KEYS = [
+  // app/queue/results.py, from the summariser.
+  "ai_summary",
+  "ai_summary_at",
+  "ai_summary_model",
+  "ai_summary_fingerprint",
+  // app/queue/results.py, stamped by an SRA download.
+  "sra_downloaded_from",
+  "sra_download_source",
+  "sra_platform",
+];
+
+describe("emitted facts reach the table deliberately", () => {
+  it("labels every emitted fact, rather than title-casing its key", () => {
+    const unlabelled = BACKEND_FACT_KEYS.filter(
+      (key) => !(key in LABELS) && !SUPPRESSED.has(key),
+    );
+    expect(unlabelled).toEqual([]);
+  });
+
+  it("explains every emitted fact, or records why it needs none", () => {
+    const unexplained = BACKEND_FACT_KEYS.filter(
+      (key) =>
+        !SUPPRESSED.has(key) &&
+        !(key in METRIC_INFO) &&
+        !NO_INFO_NEEDED.has(key),
+    );
+    expect(unexplained).toEqual([]);
+  });
+
+  it("does not leave emitted facts in the catch-all group", () => {
+    // "Other" is the honest fallback for a fact nobody has classified yet,
+    // and that is exactly what makes it the thing to assert against: a fact
+    // sitting there has no group note saying where the number came from.
+    const other = groupKeys(BACKEND_FACT_KEYS).find((g) => g.title === "Other");
+    expect(other?.keys ?? []).toEqual([]);
+  });
+
+  it("tells the reader the AI summary is generated, not measured", () => {
+    // The one row on the page that is prose from a language model rather than
+    // a number off the file. If its card ever stops saying so, it reads as
+    // another measurement.
+    const info = METRIC_INFO.ai_summary;
+    expect(info).toBeDefined();
+    expect(`${info.description} ${info.computed ?? ""}`).toMatch(
+      /language model/i,
+    );
+  });
+});
 
 /**
  * The registry is hand-maintained and keyed by something another module
