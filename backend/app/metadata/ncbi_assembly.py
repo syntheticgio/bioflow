@@ -30,7 +30,13 @@ DATASETS = "https://api.ncbi.nlm.nih.gov/datasets/v2alpha"
 # Bounded like the parser's MAX_STORED_CONTIGS: the strip draws at most 24 bars
 # and lists the remainder from the stored lengths, so labels past this window
 # would have nothing to label.
-MAX_STORED_LABELS = 50
+#
+# Counted in *records*, not map entries -- each record contributes two keys
+# (RefSeq and GenBank), so a cap on entries labels only half as many sequences
+# as it appears to. Sized for a large assembled-molecule set: wheat has 21
+# chromosomes plus organelles, and this leaves room for the unplaced scaffolds
+# that follow them.
+MAX_STORED_LABELS = 128
 
 # GCA (GenBank) or GCF (RefSeq), nine digits, dot, version. Anchored at a word
 # boundary so `MYGCA_000000001.1` does not match but a path separator or an
@@ -271,13 +277,30 @@ def parse_sequence_reports(payload: dict) -> dict[str, str]:
         return {}
 
     labels: dict[str, str] = {}
-    # sort_order is the assembly's own ordering, so a truncated map keeps the
-    # leading sequences rather than an arbitrary slice.
+    # Assembled molecules first, then sort_order within each group.
+    #
+    # sort_order alone is the assembly's own ordering, which interleaves each
+    # chromosome with the scaffolds unlocalized to it. On GRCh38.p14 that
+    # spends the whole budget inside chromosome 1 -- chr1, its nine
+    # HSCHR1_*_UNLOCALIZED scaffolds, then patches -- so chromosomes 2 through
+    # Y are never reached and the strip falls back to accession digits for all
+    # of them. Chromosomes are what the strip is for, so they are labelled
+    # first and a truncated map drops scaffolds instead.
     records = [r for r in reports if isinstance(r, dict)]
-    records.sort(key=lambda r: _int(r.get("sort_order")) or 0)
+    records.sort(
+        key=lambda r: (
+            _text(r.get("role")) != "assembled-molecule",
+            _int(r.get("sort_order")) or 0,
+        )
+    )
 
+    # Counted in labelled records, not len(labels): each record writes both its
+    # RefSeq and GenBank accession, so counting entries would halve the real
+    # budget. A record that yields no label or no accession is not charged
+    # against it either -- it labels nothing, so it costs nothing.
+    kept = 0
     for record in records:
-        if len(labels) >= MAX_STORED_LABELS:
+        if kept >= MAX_STORED_LABELS:
             break
         role = _text(record.get("role"))
         if role == "assembled-molecule":
@@ -286,10 +309,14 @@ def parse_sequence_reports(payload: dict) -> dict[str, str]:
             label = _text(record.get("sequence_name")) or _text(record.get("chr_name"))
         if not label:
             continue
+        wrote = False
         for key in ("refseq_accession", "genbank_accession"):
             accession = _text(record.get(key))
             if accession:
                 labels[accession] = label
+                wrote = True
+        if wrote:
+            kept += 1
 
     return labels
 
