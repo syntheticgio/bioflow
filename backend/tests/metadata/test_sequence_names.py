@@ -20,9 +20,21 @@ def _load(name: str) -> dict:
     return json.loads((FIXTURES / name).read_text())
 
 
+# RefSeq accessions for GRCh38 chromosomes 1-22, X, Y and the mitochondrion,
+# in the order a karyotype lists them.
+_HUMAN_CHROMOSOME_ACCESSIONS = [f"NC_{n:06d}.{v}" for n, v in
+    [(1,11),(2,12),(3,12),(4,12),(5,10),(6,12),(7,14),(8,11),(9,12),(10,11),
+     (11,10),(12,12),(13,11),(14,9),(15,10),(16,10),(17,11),(18,10),(19,10),
+     (20,11),(21,9),(22,11),(23,11),(24,10)]] + ["NC_012920.1"]
+
+
 YEAST = "ncbi_seqreports_GCF_000146045.2.json"
 ASPERGILLUS = "ncbi_seqreports_GCF_000002445.2.json"
 HUMAN = "ncbi_seqreports_GCF_000001405.40_slice.json"
+# The real GRCh38 record distribution: every assembled molecule, plus the
+# chr1 scaffold/patch/alt family that starves the label budget. The _slice
+# fixture above is seven records and cannot reproduce that.
+HUMAN_FULL = "ncbi_seqreports_GCF_000001405.40_human.json"
 
 
 class TestParseSequenceReports:
@@ -57,6 +69,44 @@ class TestParseSequenceReports:
         assert labels["NC_000001.11"] == "1"
         assert labels["NT_187361.1"] == "HSCHR1_CTG1_UNLOCALIZED"
         assert labels["NC_012920.1"] == "MT"
+
+    def test_every_human_chromosome_is_labelled(self):
+        """The #836 regression.
+
+        `sort_order` is the chromosome number, not a global rank: all 44 chr1
+        scaffolds, patches and alts report `sort_order: 1`. Sorting on it alone
+        spends the whole label budget inside chromosome 1, and chromosomes 2-22,
+        X and Y fall through to the accession-digit fallback -- which renders
+        NC_000023.11 as "23" and NC_000024.10 as "24".
+        """
+        labels = ncbi_assembly.parse_sequence_reports(_load(HUMAN_FULL))
+        expected = [str(n) for n in range(1, 23)] + ["X", "Y", "MT"]
+        assert [labels.get(a) for a in _HUMAN_CHROMOSOME_ACCESSIONS] == expected
+
+    def test_assembled_molecules_outrank_scaffolds_for_the_budget(self):
+        """A chromosome must never lose its label to a patch of another one."""
+        payload = {
+            "reports": [
+                {
+                    "chr_name": "1",
+                    "sequence_name": f"HSCHR1_CTG{i}",
+                    "role": "unlocalized-scaffold",
+                    "sort_order": 1,
+                    "refseq_accession": f"NT_{i:06d}.1",
+                }
+                for i in range(80)
+            ]
+            + [
+                {
+                    "chr_name": "X",
+                    "role": "assembled-molecule",
+                    "sort_order": 23,
+                    "refseq_accession": "NC_000023.11",
+                }
+            ]
+        }
+        labels = ncbi_assembly.parse_sequence_reports(payload)
+        assert labels["NC_000023.11"] == "X"
 
     def test_caps_the_map(self):
         """Bounded like sequence_lengths: the strip draws 24 bars and lists the
@@ -184,25 +234,28 @@ class TestEnrichmentStoresLabels:
             accession="GCF_000146045.2", assembly_name="R64"
         )
 
-    def test_labels_land_in_facts(self):
-        labels = {"NC_001133.9": "I"}
+    def test_labels_and_roles_land_in_facts(self):
+        """Both facts come from one response: `sequence_labels` stays written
+        for readers that predate `sequence_roles`."""
+        roles = {"NC_001133.9": {"label": "I", "core": True, "order": 0}}
         with (
             patch("app.metadata.ncbi_assembly.lookup", return_value=self._meta()),
-            patch("app.metadata.ncbi_assembly.lookup_sequence_names", return_value=labels),
+            patch("app.metadata.ncbi_assembly.lookup_sequence_roles", return_value=roles),
         ):
             result = enrich.enrich_from_assembly(
                 filename="GCF_000146045.2_R64_genomic.fna",
                 existing_metadata={},
                 format_kind=FormatKind.FASTA,
             )
-        assert result.facts["sequence_labels"] == labels
+        assert result.facts["sequence_roles"] == roles
+        assert result.facts["sequence_labels"] == {"NC_001133.9": "I"}
 
     def test_a_failed_name_lookup_leaves_the_rest_intact(self):
         """The names are a bonus. Losing them must not cost the stats that the
         assembly lookup already succeeded in fetching."""
         with (
             patch("app.metadata.ncbi_assembly.lookup", return_value=self._meta()),
-            patch("app.metadata.ncbi_assembly.lookup_sequence_names", return_value=None),
+            patch("app.metadata.ncbi_assembly.lookup_sequence_roles", return_value=None),
         ):
             result = enrich.enrich_from_assembly(
                 filename="GCF_000146045.2_R64_genomic.fna",
@@ -210,13 +263,14 @@ class TestEnrichmentStoresLabels:
                 format_kind=FormatKind.FASTA,
             )
         assert "sequence_labels" not in result.facts
+        assert "sequence_roles" not in result.facts
         assert result.facts["ncbi_assembly_name"] == "R64"
 
     def test_a_raising_name_lookup_does_not_break_ingest(self):
         with (
             patch("app.metadata.ncbi_assembly.lookup", return_value=self._meta()),
             patch(
-                "app.metadata.ncbi_assembly.lookup_sequence_names",
+                "app.metadata.ncbi_assembly.lookup_sequence_roles",
                 side_effect=RuntimeError("boom"),
             ),
         ):
@@ -226,4 +280,67 @@ class TestEnrichmentStoresLabels:
                 format_kind=FormatKind.FASTA,
             )
         assert "sequence_labels" not in result.facts
+        assert "sequence_roles" not in result.facts
         assert result.facts["ncbi_assembly_name"] == "R64"
+
+
+class TestParseSequenceRoles:
+    """The richer per-sequence map behind "show only the core chromosomes".
+
+    `parse_sequence_reports` answers "what is this sequence called"; this
+    answers "is this sequence one of the chromosomes". The strip needs both:
+    the first to caption a bar, the second to decide whether to draw one.
+    """
+
+    def test_marks_human_chromosomes_as_assembled_molecules(self):
+        roles = ncbi_assembly.parse_sequence_roles(_load(HUMAN_FULL))
+        core = [a for a in _HUMAN_CHROMOSOME_ACCESSIONS if roles.get(a, {}).get("core")]
+        assert core == _HUMAN_CHROMOSOME_ACCESSIONS
+
+    def test_excludes_scaffolds_patches_and_alts(self):
+        roles = ncbi_assembly.parse_sequence_roles(_load(HUMAN_FULL))
+        assert roles["NT_187361.1"]["core"] is False
+        assert sum(1 for v in roles.values() if v["core"]) > 0
+        # Every non-core record is still present -- the overflow list needs them.
+        assert len(roles) > sum(1 for v in roles.values() if v["core"])
+
+    def test_keeps_the_assembly_ordering(self):
+        """Bars are drawn in karyotype order (1..22, X, Y, MT), not by length:
+        chr11 is longer than chr10 and would otherwise swap places."""
+        roles = ncbi_assembly.parse_sequence_roles(_load(HUMAN_FULL))
+        core = sorted(
+            (v["order"], a) for a, v in roles.items() if v["core"] and a.startswith("NC_")
+        )
+        assert [a for _, a in core] == _HUMAN_CHROMOSOME_ACCESSIONS[:24] + [
+            "NC_012920.1"
+        ]
+
+    def test_yeast_is_entirely_core(self):
+        """A complete small assembly has nothing to hide."""
+        roles = ncbi_assembly.parse_sequence_roles(_load(YEAST))
+        assert all(v["core"] for v in roles.values())
+
+    def test_carries_the_label_alongside_the_role(self):
+        roles = ncbi_assembly.parse_sequence_roles(_load(YEAST))
+        assert roles["NC_001133.9"]["label"] == "I"
+        assert roles["BK006935.2"]["label"] == "I"
+
+    def test_caps_assembled_molecules(self):
+        reports = [
+            {
+                "chr_name": str(i),
+                "refseq_accession": f"NC_{i:06d}.1",
+                "role": "assembled-molecule",
+                "sort_order": i,
+            }
+            for i in range(500)
+        ]
+        roles = ncbi_assembly.parse_sequence_roles({"reports": reports})
+        core = sum(1 for v in roles.values() if v["core"])
+        assert core <= ncbi_assembly.MAX_ASSEMBLED_MOLECULES
+
+    def test_survives_malformed_payloads(self):
+        assert ncbi_assembly.parse_sequence_roles({}) == {}
+        assert ncbi_assembly.parse_sequence_roles({"reports": None}) == {}
+        assert ncbi_assembly.parse_sequence_roles({"reports": [None, 3, "x"]}) == {}
+        assert ncbi_assembly.parse_sequence_roles({"reports": [{"chr_name": "I"}]}) == {}

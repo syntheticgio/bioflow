@@ -27,9 +27,9 @@ log = get_logger(__name__)
 
 DATASETS = "https://api.ncbi.nlm.nih.gov/datasets/v2alpha"
 
-# Bounded like the parser's MAX_STORED_CONTIGS: the strip draws at most 24 bars
-# and lists the remainder from the stored lengths, so labels past this window
-# would have nothing to label.
+# Bounded like the parser's MAX_STORED_CONTIGS: the strip draws the assembly's
+# chromosomes and lists the remainder from the stored lengths, so labels past
+# this window would have nothing to label.
 #
 # Counted in *records*, not map entries -- each record contributes two keys
 # (RefSeq and GenBank), so a cap on entries labels only half as many sequences
@@ -37,6 +37,61 @@ DATASETS = "https://api.ncbi.nlm.nih.gov/datasets/v2alpha"
 # chromosomes plus organelles, and this leaves room for the unplaced scaffolds
 # that follow them.
 MAX_STORED_LABELS = 128
+
+# The role NCBI gives a sequence that is a chromosome (or an organelle) of the
+# assembly proper, as opposed to a patch, an alt locus, or an unplaced piece.
+# This is the curated "what a textbook shows" set: 25 records for GRCh38, 22
+# for wheat's 91,589, 1 for E. coli.
+ASSEMBLED_MOLECULE = "assembled-molecule"
+
+# Rank among the records that are *not* chromosomes, for the overflow list.
+# Sequence that is genuinely part of the assembly outranks the patch and alt
+# records, which are alternate representations of sequence already drawn: with
+# a bounded budget, "and N more" is more useful listing real unplaced sequence
+# than 24 fix-patches of chromosome 1.
+_NON_CORE_RANK = {
+    "unlocalized-scaffold": 0,
+    "unplaced-scaffold": 0,
+    "alt-scaffold": 1,
+    "fix-patch": 2,
+    "novel-patch": 2,
+}
+_NON_CORE_RANK_DEFAULT = 3
+
+# How much of the label budget an assembled molecule is allowed to displace.
+# No real assembly has more than a few dozen -- 26 is the largest observed
+# (zebrafish) -- so this is a guard against a pathological report, not a
+# design limit.
+MAX_ASSEMBLED_MOLECULES = 64
+
+
+def _order_key(record: dict) -> tuple:
+    """Sort records so an assembly's chromosomes come first, then in its order.
+
+    `sort_order` is *the chromosome number*, not a global rank. Every scaffold,
+    patch and alt locus on chromosome 1 also reports `sort_order: 1` -- GRCh38
+    has 44 such records. Sorting on it alone and then truncating spends the
+    whole budget inside chromosome 1, so chromosomes 2-22, X and Y get no label
+    at all (issue #836).
+
+    Role first therefore, and only then the assembly's own ordering. The
+    sequence name breaks remaining ties so the result does not depend on the
+    order NCBI happened to serialize the records in.
+    """
+    role = _text(record.get("role"))
+    order = _int(record.get("sort_order"))
+    core = role == ASSEMBLED_MOLECULE
+    return (
+        0 if core else 1,
+        # Chromosomes keep the assembly's ordering; everything else is ranked
+        # by how much it is worth listing (see _NON_CORE_RANK).
+        0 if core else _NON_CORE_RANK.get(role or "", _NON_CORE_RANK_DEFAULT),
+        # Organelles carry no sort_order. A missing one sorts last, not first:
+        # a karyotype reads 1..22, X, Y, MT, and `or 0` would open with MT.
+        (1, 0) if order is None else (0, order),
+        _text(record.get("sequence_name")) or "",
+    )
+
 
 # GCA (GenBank) or GCF (RefSeq), nine digits, dot, version. Anchored at a word
 # boundary so `MYGCA_000000001.1` does not match but a path separator or an
@@ -277,22 +332,12 @@ def parse_sequence_reports(payload: dict) -> dict[str, str]:
         return {}
 
     labels: dict[str, str] = {}
-    # Assembled molecules first, then sort_order within each group.
-    #
-    # sort_order alone is the assembly's own ordering, which interleaves each
-    # chromosome with the scaffolds unlocalized to it. On GRCh38.p14 that
-    # spends the whole budget inside chromosome 1 -- chr1, its nine
-    # HSCHR1_*_UNLOCALIZED scaffolds, then patches -- so chromosomes 2 through
-    # Y are never reached and the strip falls back to accession digits for all
-    # of them. Chromosomes are what the strip is for, so they are labelled
-    # first and a truncated map drops scaffolds instead.
+    # Chromosomes first, then the assembly's own ordering, so a truncated map
+    # keeps every chromosome rather than one chromosome's worth of scaffolds.
+    # `_order_key` is shared with `parse_sequence_roles`, so the two cannot
+    # disagree about what comes first.
     records = [r for r in reports if isinstance(r, dict)]
-    records.sort(
-        key=lambda r: (
-            _text(r.get("role")) != "assembled-molecule",
-            _int(r.get("sort_order")) or 0,
-        )
-    )
+    records.sort(key=_order_key)
 
     # Counted in labelled records, not len(labels): each record writes both its
     # RefSeq and GenBank accession, so counting entries would halve the real
@@ -319,6 +364,75 @@ def parse_sequence_reports(payload: dict) -> dict[str, str]:
             kept += 1
 
     return labels
+
+
+def parse_sequence_roles(payload: dict) -> dict[str, dict]:
+    """Map every sequence accession to its label, whether it is core, and its rank.
+
+    `parse_sequence_reports` answers "what is this sequence called". This
+    answers the question the chromosome strip actually asks: *which of these
+    sequences are the chromosomes* -- the set a textbook figure of the species
+    would show.
+
+    That judgement is not inferred here. NCBI curates it per assembly as
+    `role == "assembled-molecule"`, and it holds across the tree with no
+    tuning: 25 records for GRCh38's 705, 22 for wheat's 91,589, 17 for yeast,
+    8 for Drosophila, 1 for E. coli. Organelles carry the same role, so a
+    mitochondrion and a chloroplast are kept -- which is right, a textbook
+    shows those too.
+
+    Non-core records are still returned. The strip lists them behind "and N
+    more", and dropping them here would lose the only length-independent
+    ordering they have.
+
+    `order` is the assembly's own ordering, so the strip can draw 1..22, X, Y,
+    MT rather than sorting by length -- chr11 is longer than chr10 and would
+    otherwise swap places.
+
+    Never raises, exactly like `parse_sequence_reports`: a schema change yields
+    a smaller map, never a failed ingest.
+    """
+    reports = _obj(payload).get("reports")
+    if not isinstance(reports, list):
+        return {}
+
+    records = [r for r in reports if isinstance(r, dict)]
+    records.sort(key=_order_key)
+
+    out: dict[str, dict] = {}
+    core_seen = 0
+    stored = 0
+    for position, record in enumerate(records):
+        # Records, not keys: each contributes both its RefSeq and its GenBank
+        # accession, so a key-counted budget would store half as many.
+        if stored >= MAX_STORED_LABELS:
+            break
+        role = _text(record.get("role"))
+        core = role == ASSEMBLED_MOLECULE
+        if core:
+            # A guard against a pathological report, not a design limit; past
+            # it a record is kept but no longer drawn as a chromosome.
+            if core_seen >= MAX_ASSEMBLED_MOLECULES:
+                core = False
+            else:
+                core_seen += 1
+        if core:
+            label = _text(record.get("chr_name")) or _text(record.get("sequence_name"))
+        else:
+            label = _text(record.get("sequence_name")) or _text(record.get("chr_name"))
+        if not label:
+            continue
+        entry = {"label": label, "core": core, "order": position}
+        added = False
+        for key in ("refseq_accession", "genbank_accession"):
+            accession = _text(record.get(key))
+            if accession:
+                out[accession] = entry
+                added = True
+        if added:
+            stored += 1
+
+    return out
 
 
 def lookup(accession: str) -> AssemblyMetadata | None:
@@ -385,6 +499,37 @@ def lookup_sequence_names(accession: str) -> dict[str, str] | None:
         return None
 
     return labels or None
+
+
+def lookup_sequence_roles(accession: str) -> dict[str, dict] | None:
+    """Fetch per-sequence roles for an assembly, or None.
+
+    Same endpoint and same never-raises contract as `lookup_sequence_names`;
+    the richer parse is what the chromosome strip needs to draw only the core
+    chromosomes.
+
+    None means the lookup did not happen or produced nothing usable. That is
+    deliberately distinct from an empty-but-successful answer: a draft assembly
+    with no sequence promoted to chromosome is a legitimate result, and the
+    strip must fall back to length ranking rather than drawing no bars.
+    """
+    if not is_valid_accession(accession):
+        return None
+    accession = accession.strip().upper()
+
+    try:
+        body = _get(f"{DATASETS}/genome/accession/{accession}/sequence_reports")
+        if body is None:
+            return None
+        roles = parse_sequence_roles(json.loads(body))
+    except (ValueError, TypeError) as e:
+        log.warning("sequence_roles_parse_failed", accession=accession, error=str(e))
+        return None
+    except Exception as e:  # noqa: BLE001 - a lookup must never fail an ingest
+        log.warning("sequence_roles_error", accession=accession, error=str(e))
+        return None
+
+    return roles or None
 
 
 def component_availability(accession: str) -> list | None:
