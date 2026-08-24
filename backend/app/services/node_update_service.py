@@ -24,6 +24,7 @@ node runs.
 """
 
 import asyncio
+import re
 from datetime import UTC, datetime
 
 import asyncssh
@@ -38,9 +39,105 @@ log = get_logger(__name__)
 
 INSTALL_DIR = "~/.bioflow"
 
+# The .env keys whose value is an address the *primary* owns. Everything
+# else in that file belongs to the node (its name, storage location, pinned
+# tag, replica count) and is none of this module's business.
+_CONNECTION_KEYS = ("MONGO_URL", "REDIS_URL", "PRIMARY_API_URL")
+
 _VERIFY_TIMEOUT_SECONDS = 120
 _DRAIN_TIMEOUT_SECONDS = 900
 _POLL_INTERVAL_SECONDS = 5
+
+
+def _refresh_env_urls(env_text: str, host: str) -> str:
+    """Repoint the node's connection URLs at `host`, leaving all else alone.
+
+    A node's .env is written once, at provisioning. Its MONGO_URL therefore
+    freezes whatever the primary's address was that day -- and #803 shipped a
+    release where that address could be the API *container's* Docker bridge
+    IP, which on the node resolves to some unrelated container or to nothing
+    at all. The worker then fails `_assert_replica_set` against a standalone
+    mongod ("this node belongs to a set named 'None'") and `restart:
+    unless-stopped` loops it forever (#822).
+
+    #803 stopped provisioning from writing such an address. It could not
+    repair the nodes already carrying one, because nothing ever rewrote a
+    node's .env after provisioning -- so those nodes crash-loop until somebody
+    re-provisions them by hand. The same trap springs, for the same reason, on
+    any node that outlives a change to the primary's LAN address.
+
+    Rewriting only these three keys, rather than re-rendering the whole file,
+    is deliberate: the update path does not know the node's name, storage
+    location, pinned tag or replica count, and re-rendering would silently
+    reset them to defaults -- unpinning a pinned node in particular.
+    """
+    from app.api.v1.nodes import _rewrite_host
+
+    def _repoint(match: re.Match[str]) -> str:
+        key, value = match.group("key"), match.group("value")
+        # _rewrite_host only replaces the Docker service names, so it cannot
+        # repair a URL that already holds a literal (wrong) address. Swapping
+        # the authority's host in place handles both, and leaves the scheme,
+        # any credentials, the port and the path/query untouched.
+        repointed = re.sub(
+            r"(?P<before>://(?:[^/@]*@)?)(?P<host>[^/:?@]+)",
+            lambda m: f"{m.group('before')}{host}",
+            _rewrite_host(value, host),
+            count=1,
+        )
+        return f"{key}={repointed}"
+
+    return re.sub(
+        rf"^(?P<key>{'|'.join(_CONNECTION_KEYS)})=(?P<value>.*)$",
+        _repoint,
+        env_text,
+        flags=re.MULTILINE,
+    )
+
+
+async def _repair_node_env(conn, log_ctx: str) -> bool:
+    """Rewrite the node's .env so its URLs point at this primary.
+
+    Best-effort by design. A primary that cannot determine its own routable
+    address, or a node whose .env cannot be read, is not a reason to abandon
+    an update: the image pull is still worth having, and the existing .env may
+    be perfectly correct. Returns whether a change was written.
+    """
+    from app.api.v1.nodes import UnroutablePrimaryHost, _primary_hostname
+
+    try:
+        host = _primary_hostname()
+    except UnroutablePrimaryHost as e:
+        log.warning("node_env_repair_skipped", node=log_ctx, reason=str(e))
+        return False
+
+    result = await asyncio.wait_for(
+        conn.run(f"cat {INSTALL_DIR}/.env", check=False), timeout=15
+    )
+    if result.exit_status != 0:
+        log.warning("node_env_unreadable", node=log_ctx)
+        return False
+
+    current = result.stdout or ""
+    repaired = _refresh_env_urls(current, host)
+    if repaired == current:
+        return False
+
+    # Same quoted-heredoc reasoning as provisioning: the delimiter is quoted so
+    # the remote shell expands nothing, and the file lands byte-for-byte.
+    write = await asyncio.wait_for(
+        conn.run(
+            f"cat > {INSTALL_DIR}/.env << 'HERMESEOF'\n{repaired}\nHERMESEOF",
+            check=False,
+        ),
+        timeout=15,
+    )
+    if write.exit_status != 0:
+        log.warning("node_env_write_failed", node=log_ctx)
+        return False
+
+    log.info("node_env_repaired", node=log_ctx, host=host)
+    return True
 
 
 async def run_update(task_id: str, node: Node, drain: bool) -> None:
@@ -138,6 +235,15 @@ async def run_update(task_id: str, node: Node, drain: bool) -> None:
                 timeout=_DRAIN_TIMEOUT_SECONDS + 60,
             )
             await _await_drained(node.node_id)
+
+        # ---- repair the .env before restarting ----
+        #
+        # Ordered here on purpose: after the drain, so nothing is rewritten
+        # under a worker that is still finishing jobs, and before `up -d`, so
+        # the restart is what picks the corrected URLs up. Rewriting it after
+        # the restart would leave the worker running the stale address until
+        # some later update happened to restart it again (#822).
+        await _repair_node_env(conn, node.node_id)
 
         # ---- restart ----
         #
