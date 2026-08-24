@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import mastheadImg from "./assets/broadhead-masthead.png";
+import { LAUNCHER_VERSION_LABEL } from "./version";
 import { fetchOptionalTools, installOptionalTool, type OptionalTool } from "./commands";
 
 interface Props {
@@ -119,7 +120,7 @@ export function PrefetchStep({ port, onDone }: Props) {
         <div className="masthead-rule-thick" />
         <div className="status-line">
           <span>First run · optional tools</span>
-          <span>Launcher 0.1.0</span>
+          <span>{LAUNCHER_VERSION_LABEL}</span>
         </div>
         <div className="masthead-rule-thin" />
       </header>
