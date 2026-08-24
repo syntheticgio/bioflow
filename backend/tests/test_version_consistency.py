@@ -13,13 +13,19 @@ from app.version import __version__
 # tests/ -> backend/ -> repo root
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
-SEMVER = re.compile(r"^\d+\.\d+\.\d+$")
+# Matches ops/release.sh's VERSION_RE: the release methodology cuts
+# `X.Y.Z-alpha` and `X.Y.Z-beta` before the bare production version, so a
+# bare-triple-only pattern here fails the whole suite for the entire time
+# the repo sits on a pre-release (which is most of it).
+SEMVER = re.compile(r"^\d+\.\d+\.\d+(-alpha|-beta)?$")
 
 
 def test_version_file_exists_and_is_semver():
     raw = (REPO_ROOT / "VERSION").read_text()
     assert raw.endswith("\n"), "VERSION must end with a newline"
-    assert SEMVER.match(raw.strip()), f"VERSION is not MAJOR.MINOR.PATCH: {raw!r}"
+    assert SEMVER.match(raw.strip()), (
+        f"VERSION is not MAJOR.MINOR.PATCH, optionally -alpha or -beta: {raw!r}"
+    )
 
 
 def test_generated_module_matches_version_file():
