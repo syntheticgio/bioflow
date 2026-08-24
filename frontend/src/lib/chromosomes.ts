@@ -25,6 +25,42 @@ export interface Bar {
    *  assembly lookup found one. Absent on references ingested before labels
    *  were fetched, and on any locally-assembled file. */
   label?: string;
+  /** Whether NCBI calls this an assembled molecule -- a chromosome or an
+   *  organelle of the assembly proper, rather than a scaffold, patch or alt
+   *  locus. Absent when the assembly was never looked up. */
+  core?: boolean;
+  /** The assembly's own ordering, so bars can read 1..22, X, Y, MT rather
+   *  than longest-first. Absent alongside `core`. */
+  order?: number;
+}
+
+/** One sequence's entry in `facts.sequence_roles`, as the backend writes it. */
+interface SequenceRole {
+  label: string;
+  core: boolean;
+  order: number;
+}
+
+/**
+ * Read `facts.sequence_roles`, tolerating everything a fact can turn out to be.
+ *
+ * Facts are whatever ingest happened to write, across several generations of
+ * the schema, so every field is re-checked rather than trusted.
+ */
+function readRoles(value: unknown): Record<string, SequenceRole> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+  const out: Record<string, SequenceRole> = {};
+  for (const [name, entry] of Object.entries(value as Record<string, unknown>)) {
+    if (!entry || typeof entry !== "object" || Array.isArray(entry)) continue;
+    const e = entry as Record<string, unknown>;
+    if (typeof e.label !== "string" || typeof e.core !== "boolean") continue;
+    out[name] = {
+      label: e.label,
+      core: e.core,
+      order: typeof e.order === "number" ? e.order : 0,
+    };
+  }
+  return out;
 }
 
 /** Below this, a sequence is not a chromosome or a large scaffold. */
@@ -45,9 +81,16 @@ const MAX_STORED_CONTIGS = 50;
  *  the smallest genome worth drawing -- HIV-1 at 9.7 kb. */
 const SMALL_GENOME_MIN_BP = 8_000;
 
-/** Bars drawn before the rest move to the overflow picker. Chosen so a human
- *  assembly shows its 24 primary chromosomes and yeast shows all 17. */
+/** Bars drawn before the rest move to the overflow picker, when nothing tells
+ *  us which sequences are chromosomes. Chosen so a human assembly shows its 24
+ *  primary chromosomes and yeast shows all 17. */
 const MAX_BARS = 24;
+
+/** The same cut when NCBI *did* tell us. Higher because the set is already the
+ *  assembly's own chromosomes rather than a length-ranked guess: this is a
+ *  guard against a pathological report, not a design limit. The largest real
+ *  count observed is 26 (zebrafish). */
+const MAX_BARS_WITH_ROLES = 64;
 
 /** An accession body without a RefSeq prefix: either INSDC's two-letters-plus-
  *  six-digits (`CP012345`, `BK006935`) or a WGS contig's four letters plus at
@@ -172,6 +215,7 @@ export function classifyChromosomes(
     !Array.isArray(facts.sequence_labels)
       ? (facts.sequence_labels as Record<string, string>)
       : {};
+  const roles = readRoles(facts.sequence_roles);
 
   if (!names.length && !lengthCount) return { kind: "nothing" };
   if (!lengthCount) return { kind: "needs-qc" };
@@ -185,11 +229,16 @@ export function classifyChromosomes(
   // sequences" or a short overflow list may reflect what got stored, not
   // what the file actually contains.
   const entries: Bar[] = Object.entries(lengths).map(([name, length]) => {
-    const label = labels[name];
+    const role = roles[name];
+    // sequence_roles carries its own label and supersedes sequence_labels,
+    // which is derived from it. A reference ingested before roles existed has
+    // only the latter.
+    const label = role ? role.label : labels[name];
     return {
       name,
       length: Number(length) || 0,
       ...(typeof label === "string" && label ? { label } : {}),
+      ...(role ? { core: role.core, order: role.order } : {}),
     };
   });
   const trueCount =
@@ -225,9 +274,33 @@ export function classifyChromosomes(
   }
 
   // Ranked by length, not file order: chromosome numbers cannot be recovered
-  // from an accession like NC_001133.9 without an NCBI lookup this design
-  // does without, and ranking is what makes the top-24 cut meaningful.
-  const ranked = [...entries].sort((a, b) => b.length - a.length);
+  // from an accession like NC_001133.9 without an NCBI lookup, so length is
+  // the only ordering available when the assembly was never looked up.
+  const byLength = [...entries].sort((a, b) => b.length - a.length);
+
+  // When NCBI told us which sequences are the assembly's chromosomes, draw
+  // exactly those -- the set a textbook figure of the species would show --
+  // and list the rest. That is 25 bars for GRCh38's 705 sequences and 22 for
+  // wheat's 91,589, with no per-species knowledge and no arbitrary cut.
+  //
+  // A file whose roles are all non-core is a draft assembly with nothing
+  // promoted to chromosome. It falls through to the length ranking below
+  // rather than drawing an empty strip.
+  const core = entries.filter((e) => e.core);
+  if (core.length) {
+    // The assembly's own order, so bars read 1..22, X, Y, MT. chr11 is longer
+    // than chr10, so length ordering would swap them.
+    const byOrder = [...core].sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+    const rest = byLength.filter((e) => !e.core);
+    return {
+      kind: "drawable",
+      bars: byOrder.slice(0, MAX_BARS_WITH_ROLES),
+      overflow: [...byOrder.slice(MAX_BARS_WITH_ROLES), ...rest],
+      linkable: entries.some((b) => isNcbiNucleotideAccession(b.name)),
+    };
+  }
+
+  const ranked = byLength;
 
   return {
     kind: "drawable",
