@@ -60,18 +60,74 @@ class TestParseSequenceReports:
 
     def test_caps_the_map(self):
         """Bounded like sequence_lengths: the strip draws 24 bars and lists the
-        rest, so labels past the cap have nothing to label."""
+        rest, so labels past the cap have nothing to label.
+
+        The cap counts records, not entries. Each record here carries both
+        accessions, so the map is twice the record budget.
+        """
         reports = [
             {
                 "chr_name": str(i),
                 "refseq_accession": f"NC_{i:06d}.1",
+                "genbank_accession": f"CM{i:06d}.1",
                 "role": "assembled-molecule",
                 "sort_order": i,
             }
-            for i in range(200)
+            for i in range(400)
         ]
         labels = ncbi_assembly.parse_sequence_reports({"reports": reports})
-        assert len(labels) <= ncbi_assembly.MAX_STORED_LABELS
+        assert len(labels) == ncbi_assembly.MAX_STORED_LABELS * 2
+
+    def test_labels_every_chromosome_before_any_scaffold(self):
+        """The GRCh38.p14 regression: chromosomes 2-Y went unlabelled.
+
+        NCBI's sort_order interleaves each chromosome with the scaffolds
+        unlocalized to it, so a budget spent in file order is exhausted inside
+        chromosome 1 -- leaving the strip to fall back to accession digits
+        ("664", "665") for every chromosome after it.
+        """
+        reports = []
+        for chrom in range(1, 24):
+            reports.append(
+                {
+                    "chr_name": str(chrom),
+                    "refseq_accession": f"NC_{chrom:06d}.11",
+                    "genbank_accession": f"CM{chrom:06d}.2",
+                    "role": "assembled-molecule",
+                    "sort_order": chrom,
+                }
+            )
+            # The interleaving that caused the bug: 40 scaffolds per chromosome
+            # sitting between it and the next one.
+            for s in range(40):
+                reports.append(
+                    {
+                        "chr_name": str(chrom),
+                        "sequence_name": f"HSCHR{chrom}_CTG{s}_UNLOCALIZED",
+                        "genbank_accession": f"KI{chrom:03d}{s:03d}.1",
+                        "role": "unlocalized-scaffold",
+                        "sort_order": chrom,
+                    }
+                )
+
+        labels = ncbi_assembly.parse_sequence_reports({"reports": reports})
+
+        for chrom in range(1, 24):
+            assert labels.get(f"CM{chrom:06d}.2") == str(chrom)
+            assert labels.get(f"NC_{chrom:06d}.11") == str(chrom)
+
+    def test_a_record_with_no_accession_does_not_spend_the_budget(self):
+        """It labels nothing, so it must not displace a record that does."""
+        reports = [{"chr_name": "junk", "role": "assembled-molecule"}] * 400
+        reports.append(
+            {
+                "chr_name": "1",
+                "genbank_accession": "CM000663.2",
+                "role": "assembled-molecule",
+            }
+        )
+        labels = ncbi_assembly.parse_sequence_reports({"reports": reports})
+        assert labels["CM000663.2"] == "1"
 
     def test_survives_malformed_payloads(self):
         """Same never-raises contract as parse_report."""
