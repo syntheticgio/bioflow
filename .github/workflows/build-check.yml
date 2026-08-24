@@ -1,4 +1,5 @@
-# Verifies code quality and build integrity on every PR into main.
+# Verifies code quality and build integrity on every PR into main or into a
+# release-stage branch (alpha/**, beta/**, release/**).
 #
 # Five jobs:
 #   changes            — detects whether the PR touches anything besides
@@ -23,9 +24,19 @@
 
 name: Build check
 
+# Release-stage branches are included deliberately (#818). Fixes found during
+# alpha go in by PR *into* alpha/X.Y.Z, and beta takes bug fixes the same way
+# (see the release methodology in CLAUDE.md) -- so those PRs land on the branch
+# that is about to be tagged and shipped. Gated on `main` alone they ran only
+# cla-check: no build, no tests, no commit validation, on the code closest to
+# release. The branch names are the ones ops/release.sh creates.
 on:
   pull_request:
-    branches: [main]
+    branches:
+      - main
+      - 'alpha/**'
+      - 'beta/**'
+      - 'release/**'
   workflow_dispatch:
     inputs:
       skip_frontend:
