@@ -4,6 +4,7 @@ import { api } from "../api/client";
 import type { MetadataField, MetadataSchema, ObjectRole } from "../api/types";
 import { accessionUrl } from "../lib/format";
 import { notify } from "../stores/messageStore";
+import { InfoMarker } from "./InfoMarker";
 
 interface Props {
   value: Record<string, unknown>;
@@ -298,20 +299,13 @@ function FieldInput({
           color: "var(--text-dim)",
           marginBottom: 2,
         }}
-        title={field.help ?? undefined}
       >
         {field.label}
         {field.unit && (
           <span style={{ color: "var(--text-faint)" }}> ({field.unit})</span>
         )}
         {field.help && (
-          <span
-            title={field.help}
-            style={{ color: "var(--text-faint)", cursor: "help" }}
-            aria-label={field.help}
-          >
-            {" "}ⓘ
-          </span>
+          <InfoMarker info={{ term: field.label, description: field.help }} />
         )}
         {externalUrl && (
           <a
