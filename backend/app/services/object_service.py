@@ -33,22 +33,28 @@ from app.storage.home import require_home
 
 log = get_logger(__name__)
 
+# The per-object report roots, named by their settings attribute. The
+# attribute names -- not the resolved Paths -- are the single source of
+# truth: consumers that must honour a re-pointed bioinfo_home (the export
+# service) resolve them at call time, and the export's category map plus its
+# exhaustiveness test key off these stable strings.
+_REPORT_ROOT_ATTRS = (
+    "qc_reports_dir",
+    "bam_stats_dir",
+    "vcf_stats_dir",
+    "annotation_stats_dir",
+    "sv_stats_dir",
+    "feature_coverage_dir",
+    "variants_in_regions_dir",
+    "annotation_comparison_dir",
+    "coverage_dir",
+    "gc_bias_dir",
+    "methylation_dir",
+)
 # Report roots shared by remove, copy, and reap. Every function that iterates
 # per-object report directories must use this tuple so a new root cannot be
 # added to some call sites and silently skipped by others.
-_REPORT_ROOTS = (
-    settings.qc_reports_dir,
-    settings.bam_stats_dir,
-    settings.vcf_stats_dir,
-    settings.annotation_stats_dir,
-    settings.sv_stats_dir,
-    settings.feature_coverage_dir,
-    settings.variants_in_regions_dir,
-    settings.annotation_comparison_dir,
-    settings.coverage_dir,
-    settings.gc_bias_dir,
-    settings.methylation_dir,
-)
+_REPORT_ROOTS = tuple(getattr(settings, attr) for attr in _REPORT_ROOT_ATTRS)
 
 
 async def get_object(object_id: PydanticObjectId, *, owner: str) -> DataObject:
