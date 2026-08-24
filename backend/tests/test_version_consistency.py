@@ -13,10 +13,11 @@ from app.version import __version__
 # tests/ -> backend/ -> repo root
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
-# Matches ops/release.sh's VERSION_RE: the release methodology cuts
-# `X.Y.Z-alpha` and `X.Y.Z-beta` before the bare production version, so a
-# bare-triple-only pattern here fails the whole suite for the entire time
-# the repo sits on a pre-release (which is most of it).
+# Mirrors VERSION_RE in ops/release.sh: a pre-release cut writes
+# `X.Y.Z-alpha` / `X.Y.Z-beta` into VERSION, so requiring bare
+# MAJOR.MINOR.PATCH here reds the suite for the whole alpha and beta
+# stages. Other suffixes (-rc, build metadata, a leading v) stay rejected,
+# which is the part that catches a hand-edit.
 SEMVER = re.compile(r"^\d+\.\d+\.\d+(-alpha|-beta)?$")
 
 
