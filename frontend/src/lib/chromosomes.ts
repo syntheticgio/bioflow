@@ -11,7 +11,16 @@
  * and cannot silently drop one.
  */
 export type ChromosomeView =
-  | { kind: "drawable"; bars: Bar[]; overflow: Bar[]; linkable: boolean }
+  | {
+      kind: "drawable";
+      bars: Bar[];
+      overflow: Bar[];
+      linkable: boolean;
+      /** The parser stored only its first MAX_STORED_CONTIGS sequences, so
+       *  chromosomes past that window are missing from the strip entirely.
+       *  A real GRCh38 GCA file draws 18 of its 24 this way. */
+      truncated?: boolean;
+    }
   /** Names parsed, lengths never measured -- an object ingested before
    *  `sequence_lengths` was added. Re-running QC populates it. */
   | { kind: "needs-qc" }
@@ -297,6 +306,9 @@ export function classifyChromosomes(
       bars: byOrder.slice(0, MAX_BARS_WITH_ROLES),
       overflow: [...byOrder.slice(MAX_BARS_WITH_ROLES), ...rest],
       linkable: entries.some((b) => isNcbiNucleotideAccession(b.name)),
+      // Only meaningful once roles are known: without them there is no way to
+      // say whether a missing sequence was a chromosome or a scaffold.
+      ...(trueCount > entries.length ? { truncated: true } : {}),
     };
   }
 
