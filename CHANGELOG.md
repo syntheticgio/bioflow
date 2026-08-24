@@ -5,6 +5,2152 @@ All notable changes to BioFlow, generated from Conventional Commits by
 the first paragraph of the body where one exists; only `feat` and `fix`
 reach the notes. See AGENTS.md "Release notes" for the contract.
 
+## [0.6.0-alpha] - 2026-08-24
+
+
+
+
+### 🚀 Features
+
+- *(ui)* choose the assembler in the assemble dialog
+The dialog rendered whichever assembler `default_assembly_params` chose
+and offered no way to change it, so SPAdes and MEGAHIT -- both
+installed, probed, resource-modelled and tested -- were reachable…
+
+- *(pipelines)* assemble short-read communities with MEGAHIT
+
+- *(pipelines)* score metagenome bins with CheckM2
+A bin is a hypothesis. MetaBAT2 will emit forty of them from noise, and
+nothing about a FASTA says whether it is a near-complete genome or a pile of
+misassigned contigs. CheckM2 gives each bin a compl…
+
+- *(pipelines)* bin a metagenome assembly into per-organism genomes
+A metagenome assembly is one FASTA holding contigs from many organisms at
+once. The unit a biologist wants -- a MAG, one organism's draft genome --
+does not exist until binning separates them, and not…
+
+- *(pipelines)* add metaSPAdes (--meta) for short-read communities
+SPAdes ships with a metagenome mode this app never exposed, so a mixed
+short-read community could not be assembled at all.
+
+- *(taxonomy)* support taxonomic labeling on FASTA contigs and bins (#730)
+
+- *(ui)* compare BUSCO, quality and depth charts between objects
+Stage 2 of the object-comparison work: after the Nx overlay (stage 1),
+extend the comparison view to overlay three more charts that two objects
+of the same kind can carry -- BUSCO completeness bars, p…
+
+- *(pipelines)* implement variants-in-regions, annotation comparison, and sequence extraction
+Implement Stages 2, 3, and 4 of #632 for seqkit/bedtools user features:
+- Stage 2: variants in regions (bedtools intersect between VCF and Annotation)
+- Stage 3: annotation comparison (bedtools jaccar…
+
+- *(ui)* overlay Nx curves for two-object comparison
+Stage 1 of #645: the narrowest useful comparison. Add a comparability
+table (comparableCharts.ts) keyed on facts, a ?sel=object:A&cmp=object:B
+route that overlays two assemblies' Nx curves on shared a…
+
+- *(pipelines)* merge N StringTie transcript assemblies
+Add stringtie --merge as a project-level operation: pick N per-sample
+assembled-transcript GTFs, get one non-redundant annotation. It is the
+standard prerequisite for quantifying a multi-sample RNA-se…
+
+- *(pipelines)* haplotag a phased VCF onto its alignment with whatsHap
+reads the PS tags a phased VCF already carries and stamps them onto the
+reads of one alignment, producing a haplotagged BAM (not a VCF, unlike
+phase/polyphase).
+
+- *(pipelines)* add metaFlye (--meta) for community assembly
+Flye is installed, probed, and registered, but had no metagenome mode
+exposed -- assembling a mixed-community sample was not possible at
+all. Adds a `meta` ParamField to FLYE_SPEC, wired through to `-…
+
+- *(frontend)* add the unlabelled per-contig GC-vs-coverage blobplot
+
+- *(pipelines)* store the capped per-contig blobplot report
+
+- *(pipelines)* aggregate the GC-depth join per contig with a length cap
+
+- *(pipelines)* add Filtlong long-read filtering tool
+
+- *(frontend)* show the GC-vs-coverage bias curve on BAM results
+Renders the gc_bias job's mean-depth-by-GC-bin curve as a line/area chart
+on the BAM results panel, gated on gc_bias_status/gc_bias_curve the same
+way CoverageDepth is gated on its own fact. Closes ou…
+
+- *(pipelines)* register gc_bias in the canvas and running-now registries
+gc_bias already had a provenance_walker._NO_NARRATIVE_STEP entry from
+an earlier task; this adds the two remaining registrations so the
+canvas node type and running-job Launch-button greyout work for …
+
+- *(pipelines)* offer the gc_bias card with three named refusals
+Adds build_gc_bias_card to the Actions-tab suggestion pipeline, gated
+on FormatKind.BAM like build_coverage_card and on a resolved
+alignment_target like build_consensus_card. Independently mirrors
+lau…
+
+- *(api)* expose the gc_bias launch route
+
+- *(pipelines)* launch gc_bias with three named refusal reasons
+Resolves the BAM's alignment target, its reference's gc_tracks, and the
+BAM's own windowed coverage report entirely in the launcher, since the
+gc_bias handler runs in a thread and cannot reach the dat…
+
+- *(pipelines)* compute and store the GC-bias curve for a BAM
+
+- *(pipelines)* join reference GC against alignment depth by window
+Pure join/aggregation module: gc_tracks and mosdepth already tile every
+contig on the same window grid, so the join is a (contig, window index)
+key lookup with no resampling. Aggregation weights each …
+
+- *(pipelines)* summarize ONT base modifications from BAM tags with modkit
+
+- *(pipelines)* register modkit for ONT base-modification calling
+Adds the modkit probe and TOOL_META entry (#631, stage 0). Installed
+from bioconda's linux-aarch64 build rather than ONT's x86-64-only
+GitHub release binaries -- verified against bioconda's repodata b…
+
+- *(ops)* add interactive test-timing helper script
+Lets a developer pick backend, frontend, ruff, or all via an arrow-key
+TUI, runs the suite through the isolation this repo already has
+(run-worktree-tests.sh / docker compose exec / the web container)…
+
+- *(pipelines)* retain samtools stats and QUAST report.tsv for MultiQC
+Closes the two gaps #624 deferred: MultiQC's samtools and QUAST modules
+found nothing to summarize because neither raw output survived past its
+job's workdir.
+
+- *(pipelines)* add Liftoff annotation transfer for eukaryotic assemblies
+Liftoff lifts an existing reference annotation (GFF3/GTF) onto a target
+eukaryotic assembly by aligning the annotated features with minimap2 and
+projecting them -- the eukaryotic counterpart to Bakta'…
+
+- *(frontend)* band substitution spectrum by Ti/Tv category
+bcftools emits the twelve substitution classes in its own order, with
+transitions and transversions interleaved, so the two categories a
+scientist actually checks -- the same categories the summary ro…
+
+- *(pipelines)* phase called variants with whatsHap
+Adds read-based phasing of a called-variant VCF against its alignments
+(whatshap phase for one sample, polyphase across several), producing a new
+phased VCF carrying PS tags. The phase set is surfaced…
+
+- *(frontend)* show the project's MultiQC report in the panel header
+Implements the seven states from the design. The report lives in the left
+project panel rather than a file's QC tab, which is the placement question
+this feature turned on: a MultiQC report summarizes…
+
+- *(api)* report a project's MultiQC state in one read
+The Project QC panel renders seven states, and the interesting ones are
+combinations: a failed run with an older report still on disk says
+something different from a failed run with nothing, which dif…
+
+- *(pipelines)* offer an aggregate QC report from the Actions tab
+Adds launch_multiqc_report, the POST /pipelines/multiqc route, a GET route
+serving the generated report, and the Actions-tab card.
+
+- *(queue)* add the project-scoped multiqc_report handler
+The first job here scoped to a project rather than an object: it summarises
+QC other jobs already produced across many objects and belongs to none of
+them. So the payload carries project_id, the outpu…
+
+- *(qc)* retain fastp's JSON so an aggregate report can parse it
+MultiQC reads raw tool output, not the rendered HTML this application
+keeps. _run_short_read_qc parsed fastp's JSON into facts and left the file
+in the workdir, which is reaped when the job ends -- so…
+
+- *(pipelines)* add the MultiQC command builder
+Pure command construction, the same split quast_runner uses. Two flags are
+load-bearing rather than cosmetic, both found by running the real binary:
+
+- *(pipelines)* show transcript assembly runs in provenance and activity
+
+- *(pipelines)* format HISAT2 output for transcript assembly by default
+
+- *(pipelines)* offer transcript assembly on splice-aware alignments only
+
+- *(pipelines)* launch transcript assembly and keep its output out of annotation pickers
+Wires the launch path for StringTie transcript assembly: pipeline_service
+.launch_transcript_assembly() (mirroring launch_quantify's BAM+annotation
+shape and launch_salmon_quantify's budget/enqueue st…
+
+- *(queue)* ingest StringTie output as an assembled-transcripts object
+Adds _apply_transcript_assembly, registered in the results dispatch
+table beside salmon_quantify, so a finished transcript_assembly job
+becomes a first-class DataObject with role=ASSEMBLED_TRANSCRIPTS…
+
+- *(queue)* add transcript_assembly job handler
+
+- *(models)* add transcript-assembly run kind and assembled-transcripts role
+
+- *(pipelines)* add StringTie command construction and GTF parsing
+
+- *(pipelines)* install and register StringTie transcript assembler
+
+- *(services)* offer Delly on the SV card for short-read BAMs
+
+- *(pipelines)* dispatch SV calling to Delly for short-read BAMs
+Ties the Delly pieces together at the two points that choose a caller: the
+call_structural_variants handler and launch_structural_variant_calling.
+
+- *(pipelines)* build Delly short-read SV commands
+
+- *(pipelines)* install Delly 2.6.0 and document it
+
+- *(pipelines)* map read chemistry to an SV caller in one place
+
+- *(frontend)* render the coverage depth report as a per-contig track
+Adds the Coverage depth panel to a BAM's Results tab, gated on its own
+fact like the feature coverage panel beside it, and placed after it so the
+two read together: per annotated feature, then per win…
+
+- *(pipelines)* measure depth over an uploaded target BED
+Adds region mode: when the launch carries a regions_id, mosdepth measures
+that BED's intervals instead of the generated uniform windows. Same rows
+out either way, so the report and facts now record wh…
+
+- *(services)* offer a Coverage depth card on any completed alignment
+Adds build_coverage_card and registers it in CARD_BUILDERS, and flips
+mosdepth's TOOL_META to runnable now that something dispatches to it.
+
+- *(services)* launch coverage jobs and apply their facts to the BAM
+Wires the coverage handler to the rest of the app: launch_coverage in
+pipeline_service, its node-type adapter and spec, the POST and report
+routes, and the applier that merges the returned facts onto …
+
+- *(queue)* add the coverage handler running mosdepth over windows
+A SUBPROCESS handler on the feature_coverage_handlers.py model: read-only
+like bam_stats, so no derived object -- one JSON report under coverage_dir
+plus summary facts merged onto the BAM.
+
+- *(pipelines)* add the mosdepth runner (command, windows, parsers)
+Pure module on the feature_coverage_runner.py model -- no subprocess here,
+so the command builder, window generator and parsers are all unit-testable
+without the binary.
+
+- *(pipelines)* install mosdepth and register the tool
+First stage of #626: mosdepth is installed, probed, and documented on
+/help/software, but nothing dispatches to it yet -- `runnable=False`
+until the coverage card and its launch function ship, the sam…
+
+- *(pipelines)* install MultiQC in an isolated venv and register the tool
+MultiQC pins kaleido==0.2.1; this image carries kaleido 1.3.0 for NanoPlot.
+Installing into the shared environment downgrades kaleido and breaks
+long-read QC silently -- nothing imports kaleido at sta…
+
+- add raw p-value histogram to DE results
+A diagnostic the volcano and MA plots cannot provide: the shape of the
+raw p-value distribution across every tested gene. Uniform across [0,1]
+with a spike near 0 is healthy; a hill in the middle mean…
+
+- *(ui)* add mirrored indel length distribution chart to variant results
+The data was already computed by bcftools stats (IDD section), persisted,
+and typed -- nothing rendered it. Adds a hand-rolled SVG mirrored bar chart
+where deletions extend left of the zero line and i…
+
+- *(pipelines)* identify organisms in reads with kraken2 and bracken (#685)
+* docs(pipelines): design spec for Kraken2 classification / contamination screening
+
+- *(pipelines)* offer salmon where a transcriptome is available
+Adds the Actions-tab suggestion card for alignment-free RNA-seq
+quantification: build_salmon_quantify_card guards on FASTQ, checks
+tools.salmon() fresh at call time, and gates on a project having a
+di…
+
+- *(pipelines)* add a salmon quantification node
+Wires launch_salmon_quantify (reads + transcriptome, paired-end via
+mate_id, RunKind.QUANTIFY with run_tool="salmon" to disambiguate from
+featureCounts) into the salmon_quantify node type, resolving a…
+
+- *(queue)* register salmon output as a counts object
+
+- *(queue)* quantify a sample with salmon in one job
+
+- *(models)* add the salmon index sidecar role
+
+- *(pipelines)* write salmon counts in the shape the parser reads
+
+- *(pipelines)* build salmon index and quant commands
+Adds command-builder functions for salmon index and salmon quant, plus path helpers
+for quantification output and sample name derivation. These functions construct the
+command-line arguments needed to…
+
+- *(pipelines)* sum salmon transcript estimates into gene counts
+
+- *(pipelines)* read salmon's quant.sf into per-transcript reads
+
+- *(pipelines)* install salmon and probe for it
+
+- *(pipelines)* add SnpEff as an alternative variant annotator
+Adds SnpEff (pegi3s/snpeff:5.2a, ON_DEMAND_IMAGE) behind the existing
+annotate_variants node type, alongside bcftools csq. The card now picks
+whichever annotator is available, defaulting to bcftools c…
+
+- *(pipelines)* annotate structural variants with GFF gene overlap (#671)
+Option A implementation for structural variant annotation (#652).
+Intersects SV intervals [POS, END] against reference GFF/GTF features to attach overlapping gene lists to symbolic SVs (e.g. <DEL>, <I…
+
+- *(frontend)* add Medaka --bacteria opt-in to the polish_long launch dialog (#670)
+Expose Medaka's bacterial-methylation model (--bacteria) from the
+polish_long Actions-tab card via a launch dialog, matching iVar's primer
+scheme and completeness's lineage-override pattern.
+
+- *(services)* offer medaka polishing for long-read projects
+Adds build_polish_long_card, the Medaka sibling of build_polish_card,
+as a separate card rather than a smarter single one -- the two tools
+take different reads and fail for different reasons, so mergi…
+
+- *(pipelines)* register the medaka polish node type
+
+- *(api)* launch medaka polishing from a draft and long reads
+
+- *(queue)* polish long-read assemblies with medaka
+
+- *(services)* identify long-read sets for polishing
+
+- *(pipelines)* probe and document medaka
+
+- *(pipelines)* count positions medaka changed in the draft
+
+- *(pipelines)* record which model medaka resolved
+
+- *(pipelines)* build medaka_consensus commands
+
+- *(frontend)* per-feature coverage table on BAM results
+Adds the Results-tab section for the feature_coverage pipeline
+(bedtools coverage of a BAM against a project annotation): a summary
+line plus an unpaginated table of every feature, sorted worst-breadt…
+
+- *(pipelines)* feature coverage card, launch endpoint, and report API
+Adds the Actions-tab card, POST /pipelines/feature-coverage launch route,
+and GET /pipelines/feature-coverage/{object_id}/report, then flips
+bedtools' TOOL_META runnable flag now that it has a real co…
+
+- *(services)* launch feature coverage as a classified pipeline node
+Adds launch_feature_coverage, requiring the BAM's .bai and the reference's
+.fai to already exist (matching launch_variant_calling's precedent) rather
+than chaining index builds. Classifies it as a rea…
+
+- *(queue)* feature_coverage handler running bedtools coverage
+
+- *(pipelines)* bedtools coverage command builder and parser
+
+- *(ui)* show sample correlation as a heatmap grouped by condition
+Hand-rolled SVG matching the other expression charts. Samples are reordered by
+condition rather than left in matrix order, so replicate blocks land on the
+diagonal -- without that the blocks are still…
+
+- *(pipelines)* report sample-to-sample correlation alongside the DE projection
+The projection catches a swapped or mislabelled sample; it cannot say how
+strongly replicates actually agree. Two samples can sit adjacent on PC1/PC2
+while correlating poorly, since the first two comp…
+
+- *(ops)* install seqkit in the backend image, both arches
+
+- *(pipelines)* probe bedtools and seqkit as first-class tools
+
+- *(frontend)* chart long-read length and quality distributions on the QC tab
+Two new hand-rolled SVG charts read the facts the backend now persists: a
+base-weighted read-length histogram (bases per bin, not reads, with N50
+marked on the log axis) and a length-vs-quality densit…
+
+- *(pipelines)* bin NanoPlot's per-read TSV into long-read length and quality distributions
+--raw now writes per-read length/quality pairs alongside the existing
+NanoStats summary; a new nanoplot_raw module bins them into a base-weighted
+length histogram and a length-vs-quality density grid,…
+
+- *(pipelines)* convert hifiasm GFA contigs to FASTA
+
+- *(frontend)* shade the alignment's chromosomes by depth
+Adds a "Depth by chromosome" strip to a BAM's Results tab: each contig drawn
+to scale as in the reference's chromosome map, shaded by its depth against a
+typical contig. The failure modes it exists fo…
+
+- *(frontend)* read contig depth against the median, not the genome mean
+The baseline a per-contig depth chart normalizes against decides whether it
+reports biology or noise, and the obvious choice -- `bam_stats_summary`'s
+`mean_depth` -- is the wrong one. That figure is t…
+
+- *(ui)* overlay the before/after quality curves on the trim report
+Shows where trimming acted along the read, not only how much it removed. The
+two curves come from one fastp pass over the same reads, so they are directly
+comparable; where they separate is the answer…
+
+- *(pipelines)* keep fastp's before/after quality curves on the trim report
+The scalar deltas say how much trimming removed; they cannot say where it
+acted. The per-cycle curves can -- a clipped 3' decay, an adapter tail, a
+uniform lift, or (the case worth catching) two curve…
+
+- *(ui)* show k-mer spectrum estimates on the assembly panel
+kmer_spectra had no consumer anywhere: the K-mer spectrum card launched
+a job whose headline outputs (estimated genome size, heterozygosity)
+had no display even once the facts reached the object. Rend…
+
+- *(pipelines)* pass curated minimap2 flags
+
+- *(ui)* expose curated minimap2 fields in the align dialog
+
+- *(pipelines)* validate curated minimap2 parameters
+
+- *(e2e)* add launch, find, patch, and get_object steps to the harness
+The reads path was blocked on the harness having no way to start a pipeline
+over HTTP. The QC/trim/align flow is deliberately not reachable through the
+`run_pipeline` MCP tool: that passes `params` st…
+
+- *(frontend)* expose Bowtie2 workflow parameters
+
+- *(aligners)* emit Bowtie2 pair geometry flags
+
+- *(aligners)* add Bowtie2 workflow presets
+
+- *(aligners)* validate Bowtie2 paired-end parameters
+
+- *(export)* pack included report artifacts
+
+- *(export)* add typed report artifact manifest rows
+
+- *(export)* discover object report artifacts
+
+- predict protein structure via ESMFold sidecar when none is deposited (#576)
+* feat: add sequence reader, ProteinPrediction model, and PREDICTION_SIDECAR_URL config
+
+- *(align)* tag aligners as recommended or incompatible by read chemistry
+None of the five aligners had a `recommendations` entry, so the align
+picker never showed a "Recommended" badge (bwa-mem2 for short reads,
+minimap2 for long reads) and had no way to flag a chemistry-i…
+
+- *(ui)* explain metadata history metrics and standalone charts (#579)
+
+- *(frontend)* find the files a launch's selections were derived from
+`supersededBySelection` answers "did anything already chosen come from
+this file", which is the link a picker needs to avoid offering the raw
+version of a read set the user has already added.
+
+- *(pipelines)* declare per aligner whether its index builder reads gzip
+hisat2-build and STAR's genomeGenerate both require a plain-text FASTA;
+bowtie2-build, bwa-mem2 index and minimap2 -d accept gzip and bgzip alike.
+Measured against the binaries this image ships rather…
+
+- *(ui)* put info markers on the Results tab's reported numbers
+Wires InfoMarker into the four Results renderers, the same way #557 did
+for the Quality tab: BamResults and its coverage, contig-depth, depth
+histogram and per-contig table; VariantResults and Variant…
+
+- *(ui)* explain the Results tab's numbers in the metric registry
+Adds the 34 entries the Results renderers need: the BAM headline row and
+its coverage/depth charts, the variant call-set summary, the differential
+expression summary and plots, and the annotation bloc…
+
+- *(ui)* badge offloaded files and offer to free their space
+Adds the frontend half: an NCBI badge on an offloaded row, a Storage
+control in the manage panel, and a download-size warning in the align
+dialog when an input would have to be fetched first.
+
+- *(pipelines)* fetch offloaded alignment inputs before the job runs
+Wires ensure_local into the alignment launch, the workflow that motivates
+the feature: trim reads, offload the raw FASTQ, then align against it later.
+Each of R1, its mate and the reference is checked…
+
+- *(queue)* fetch an offloaded file's bytes back into the object that had them
+Completes the round trip: fetch_remote handler, _apply_fetch_remote applier,
+object_service.restore_bytes_for_object, and pipeline_service.ensure_local
+to queue the fetch a launch needs.
+
+- *(objects)* release a re-fetchable file's bytes, keeping it in the project
+Adds the offload path: blob_service.release_bytes_for_object,
+object_service.offload_object, and POST /objects/{id}/offload.
+
+- *(objects)* refuse byte access to an offloaded file, naming the fetch
+Every path that reaches for an offloaded object's bytes now refuses with a
+message about fetching it back, rather than falling through to a message
+written for an upload still in flight.
+
+- *(models)* record whether an object's bytes are here, and where to refetch them
+Adds `Locality` (LOCAL/REMOTE) and `RemoteSource` to DataObject, the model
+half of offloading a re-fetchable NCBI download while keeping the file in
+the project tree.
+
+- *(ui)* offer "Launch anyway" on an Actions card refused for memory
+
+- *(pipelines)* probe SPAdes and make it a selectable assembler
+
+- *(pipelines)* install SPAdes 4.3.0, prebuilt on amd64 and built from source on arm64
+
+- *(pipelines)* build SPAdes commands with a floored memory ceiling
+
+- *(pipelines)* declare SPAdes outputs and running modes in the registry
+
+- *(pipelines)* add SPAdes assembly parameters with three running modes
+
+- *(ui)* show which parameter set configured a run
+
+- *(api)* wire from_parameter_set through align/assemble launch routes
+Task 8 (frontend, merged) sends from_parameter_set on launch requests when a
+saved parameter set configured the run, but AlignRequest/AssembleRequest and
+pipeline_service.launch_alignment/launch_assem…
+
+- *(ui)* offer saved parameter sets in the align and assemble dialogs
+Mounts ParameterSetPicker above the biology fields in AlignDialog and
+AssembleDialog, and threads from_parameter_set provenance (set id, name,
+revision, and whether the form was edited after applying)…
+
+- *(ui)* add a parameter-set picker with a persistent drift notice
+
+- *(frontend)* add parameter-set types and client methods
+
+- *(provenance)* record which parameter set configured a run
+
+- *(api)* add parameter-set CRUD and an apply-time resolve route
+
+- *(pipelines)* resolve saved params against a tool's current schema
+
+- *(pipelines)* derive parameter-set eligible keys from tool specs
+
+- *(models)* add a ParameterSet document for saved pipeline knobs
+
+- *(ui)* give the database index a Remote Databases header
+Everything below "Local Databases" -- the 475-entry catalog, its search,
+filters and cards -- had no heading of its own, so it read as a
+continuation of the local list rather than a separate section.
+
+- *(ui)* explain the Quality tab's QC rows and charts
+Wires the info marker into the rest of the Quality tab: both QcReport
+blocks (short-read fastp/FastQC and long-read NanoPlot) and the eight
+charts in the grid, plus the chromosome strip beside them.
+
+- *(ui)* explain every reported number behind an info marker
+Every figure BioFlow reports is one someone might copy into a methods
+section, and several are not what their label implies. "Mean quality" is
+the mean of the per-position means rather than the mean o…
+
+- *(metadata)* migrate stored platform values to instrument_model
+Carries the existing rows across the split in the previous commit. Every
+object written before it holds an instrument model in `metadata.platform`;
+this moves that value to `instrument_model` and re-d…
+
+- *(metadata)* split instrument model out of the platform field
+`metadata.platform` held two vocabularies at once. The schema declared it
+an ENUM over family names ("Illumina NovaSeq", "PacBio"), while SRA
+enrichment wrote the INSTRUMENT_MODEL into it -- so all 55…
+
+- *(ops)* decide compose invocations by tokenizing, not phrase matching
+`compose_target.py` answers one question -- does this Bash command invoke
+compose against the host's stack -- by tokenizing the command line with
+shlex and inspecting the command words, rather than ma…
+
+- *(ui)* offer "Adjust…" beside Launch, opening the dialog on that card's run
+The one-click cards turned out to be used for more than quick launches, so
+a card now offers both routes: Launch runs it with the settings already
+decided, and Adjust opens that operation's settings d…
+
+- *(api)* say which settings dialog can adjust a suggestion card's run
+Each card already carries the complete launch body for its endpoint, which
+is also everything a settings dialog would ask for -- the reference, the
+tool, the params. What it did not say is whether a d…
+
+- *(queue)* add an exact declared-vs-budget refusal predicate
+
+- *(models)* add SequencingPlatform enum and exhaustiveness tests (#543)
+Adds SequencingPlatform StrEnum over SRA PLATFORM tags in
+app/models/object.py, alongside SequenceType. Exhaustiveness-tests
+LONG_READ_PLATFORMS, SHORT_READ_PLATFORMS, _SAM_PLATFORM_PATTERNS,
+and _PLA…
+
+- *(pipelines)* add progress parsers to samtools sort/merge and polish alignment calls (#542)
+* feat(pipelines): add progress parsers to samtools sort/merge and polish alignment calls
+
+- *(ui)* add a project export action with a size-preview dialog
+Adds a project-level Export action alongside ProjectDangerZone: a dialog
+lets the user adjust the blob-inclusion threshold (default 100 MB,
+matching the backend), queue an export via POST
+/projects/{i…
+
+- *(export)* add endpoints to create, list, and download project exports
+Adds POST /api/v1/projects/{id}/export (enqueues launch_project_export),
+GET /api/v1/exports (lists archives in exports_dir), and
+GET /api/v1/exports/{name}/download (streams one, rejecting a traversa…
+
+- *(export)* run the export as a queued job
+THREAD mode, not SUBPROCESS: it packs a tarball in-process. Registered in
+EXCLUDED_LAUNCHES since an export produces an archive on disk rather than
+an object a downstream node could consume. Also clas…
+
+- *(export)* pack the project archive with a versioned envelope
+Adds export_project(), the top-level function that runs collect() ->
+redact() -> build_manifest() -> render_report() and packs the result into
+a single .tar.gz under settings.exports_dir. Greps the pr…
+
+- *(export)* render the analysis report through provenance_report
+Reuses render_markdown rather than adding a second renderer, so its gap
+markers carry into the archive -- a reader scanning for a tool version
+sees the question asked and unanswered rather than assumi…
+
+- *(export)* list every blob in the manifest, flagging excluded bytes
+Manifest rows cover every blob in scope, including ones whose bytes are
+left out of the archive -- the recipient can tell "not sent" from "does
+not exist". content_sha256 falls back to blob.id when un…
+
+- *(export)* redact secrets, filesystem paths, and machine identity
+Names the collections it serializes rather than dumping and subtracting.
+This inverts ops/backup.sh deliberately: backup fails safe by including
+every collection, export fails safe by excluding all bu…
+
+- *(export)* collect a project subtree and everything it references
+
+- *(export)* add exports directory and archive format constants
+
+- *(ui)* add a structure tab that browses a protein FASTA's proteins in 3D
+
+- *(api)* report a protein record's structure and why it has none
+
+- *(api)* resolve a protein accession to its PDB structures via UniProt
+
+- *(api)* serve a paged, searchable protein record list for a protein FASTA
+Adds GET /objects/{id}/protein-records?offset=&limit=&q= returning total,
+truncated, and rows of {ordinal, identifier, description, length,
+has_reference}. Search matches identifier or description, ca…
+
+- *(api)* index a protein FASTA's records at ingest so its proteins can be listed
+Scans every record in a protein FASTA at ingest time and writes an
+identifier, description, length, byte offset, and parsed UniProt/RefSeq
+accession per record to a new protein_records collection. Gat…
+
+- *(models)* add a protein record collection for FASTA record listings
+
+- *(metadata)* read UniProt and RefSeq accessions out of protein FASTA headers
+
+- *(ui)* offer short-read assembly instead of refusing it
+The Actions-tab assemble card no longer refuses short reads with "Short-read
+assembly is not installed" now that ABySS is wired end to end. The card
+offers the run and its `why` text says whether the …
+
+- *(api)* assemble short reads paired, resolving the mate at launch
+launch_assembly now identifies a mate for paired-layout assemblers (ABySS)
+by delegating to the existing suggest_mate discovery, adds one refusal on
+top -- an explicitly-supplied candidate whose read …
+
+- *(queue)* run abyss with a resolved mate and a bloom filter budget
+
+- *(pipelines)* parse abyss progress and its own stats table
+
+- *(pipelines)* build abyss command lines as make variable assignments
+
+- *(pipelines)* route short reads to abyss in the assembler registry
+
+- *(pipelines)* let an assembly memory model charge for read volume
+
+- *(pipelines)* add abyss assembler params with a k-mer field
+
+- *(pipelines)* install abyss and declare it as a tool
+Adds the abyss apt package to the backend image and a probe/TOOL_META
+entry so later short-read assembly tasks can build on it. abyss-pe is
+a GNU Make wrapper rather than a conventional CLI, so the pr…
+
+- *(ui)* add reload button to launcher status line (#520)
+Adds a subtle ↻ button in the launcher's status line that triggers
+window.location.reload(). Primarily for development use when making
+changes to the launcher's frontend code.
+
+- *(ui)* put annotation feature type and biotype charts side by side (#509)
+Wraps the 'Features by type' and 'Features by biotype' sections in the
+annotation results panel with the existing FactsColumns component, so they
+render in two columns instead of stacked vertically.
+
+- *(frontend)* add a Storage page reporting database and disk drift
+Renders the drift sweep result from GET /api/v1/maintenance/drift (task
+8) at /settings/storage: per-category counts, reclaimable bytes, and
+last-checked time, following the same settings-page/Setting…
+
+- *(api)* serve the latest storage drift report
+
+- *(api)* schedule the storage drift sweep every six hours
+
+- *(api)* compose the drift detectors into one stored sweep
+
+- *(api)* detect report directories missing from claiming objects
+
+- *(api)* map each report predicate fact to its report root
+Adds REPORT_ROOTS, its companion REPORTS_WITHOUT_DIRS, the exhaustive
+ALL_REPORT_STATUS_FACTS, and object_claims_report() to drift_service.py,
+plus exhaustiveness tests in test_drift_registry.py that …
+
+- *(api)* report blobs verify_files has confirmed missing
+
+- *(api)* detect orphaned files and stalled ingests under objects/
+Adds find_orphaned_files(), the first storage-drift detector: walks
+objects/ and reports files with no Blob record (ORPHANED_FILE) or
+whose record is still PENDING past GC_GRACE (STALLED_INGEST). A
+PE…
+
+- *(api)* add the stored drift report document
+
+- *(api)* tell each suggestion card whether its work is already running
+Adds a `running` field to every card, true when a queued or running job of
+the type that card's endpoint produces is attributed to the file.
+
+- *(ops)* restore a backup and verify /data against its manifest
+Restore gates on the recorded version, confirms interactively before
+overwriting, and asserts per-collection document counts afterwards so a
+partial restore fails loudly rather than looking like a suc…
+
+- *(ops)* write the restore contract into every backup
+The machine that needs the contract may not have a checkout, so it ships
+inside the backup directory rather than only in docs. States plainly what
+restore recovers, what it does not (blobs, provider k…
+
+- *(ops)* take a backup into a timestamped directory
+mongodump plus the four companion files: the /data manifest, the
+provider summary, manifest.json with per-collection counts, and the
+restore contract. The counts are load-bearing -- restore asserts ag…
+
+- *(ops)* summarize configured providers without their keys
+Restore has to tell the user why their providers are broken and which to
+fix. It does that from a name, model, slot and last-four digest -- never
+the key and never the Fernet secret, so the backup sti…
+
+- *(ops)* enumerate /data blobs into a standalone manifest
+The blobs collection already records id, size, rel_path and
+content_sha256, so the manifest is a projection rather than new
+bookkeeping. It is written as its own TSV -- not left inside the dump --
+so …
+
+- *(ops)* stamp backups with a filesystem-safe UTC timestamp
+
+- *(ops)* add the backup script skeleton and its make targets
+Dispatch, usage, and the three environment knobs. The Mongo target is an
+environment variable from the start because the round-trip test must be
+able to redirect it away from the live stack.
+
+- *(api)* report the served git revision on the version endpoint
+VERSION alone cannot answer "is this stale?" -- it is unchanged by the branch
+the checkout is parked on, which is the thing that actually decides what code
+runs. The fields are null in a shipped image…
+
+- *(api)* log which checkout the api and worker are serving at startup
+One line in the logs turns a half-hour hunt into a glance. Warns rather than
+informs when HEAD is not origin/main: a stale checkout is not a fact about
+the environment, it is a bug waiting to be misat…
+
+- *(api)* read the served checkout's git revision without a git binary
+The api and worker containers run bind-mounted source, so what they execute
+is whatever the checkout has on disk -- not what VERSION claims, and not
+necessarily main. Nothing surfaced that, so a check…
+
+- *(frontend)* add a Set Default button to each AI provider
+Lets a user make a provider the global default directly from its
+detail pane, instead of only through the Task routing table.
+
+- *(frontend)* add formatRelative for lists that span more than a day
+formatClock renders a bare clock, which is right for rows that all belong
+to the current session but loses the day for anything older. A list of
+finished runs spanning a week gave every line a time an…
+
+- *(api)* fail provisioning when the node's worker does not stay up
+`docker compose up -d` exits 0 as soon as the container is created, which
+is before it can crash. A node whose worker died on startup -- bad image,
+unwritable storage path, unreadable .env -- provisio…
+
+- *(frontend)* validate API responses behind irreversible UI actions (#422)
+
+- *(frontend)* show remaining-time estimates on running jobs in the queue view (#430)
+Surfaces timing estimates on running-job rows in QueuePanel by fetching job
+details and using the same label logic as IngestProgress. Extracts the shared
+timing label computation into lib/jobTiming.ts…
+
+- *(ops)* auto-restart the worker on source changes in the dev override (#428)
+Adds watchfiles to dev dependencies and adds a watchfiles command to the
+worker service in docker-compose.override.yml so the worker auto-restarts
+when backend source files change. This eliminates the…
+
+- *(pipelines)* canvas node type for annotation subset export (#392)
+* docs(pipelines): spec the annotation export canvas node type
+
+- *(frontend)* offer sequence extraction on a GenBank's Results tab
+
+- *(frontend)* add the GenBank sequence extraction API calls
+
+- *(api)* add endpoints to extract and look up a GenBank's sequence
+
+- *(pipelines)* guard GenBank sequence extraction against a second run
+
+- *(pipelines)* ingest an extracted GenBank sequence as a reference
+
+- *(pipelines)* add the extract_genbank_sequence handler
+
+- *(pipelines)* stream a GenBank ORIGIN block into wrapped FASTA
+
+- *(pipelines)* parse bases out of a GenBank ORIGIN line
+
+- *(ops)* add local commit-msg hook mirroring CI's subject check
+
+- *(annotation)* edit and materialize annotation records
+
+- *(e2e)* add fixtures and starter tests
+
+- *(e2e)* add desktop plugin page
+
+- *(e2e)* add harness backend (clients, store, loader, runner, API)
+
+- *(e2e)* add install script
+
+- *(e2e)* add harness config loader
+
+- *(e2e)* scaffold harness directory and Python environment
+
+- *(icons)* add reads-type tooltips showing Illumina/PacBio/Nanopore/Unspecified
+The reads-type icons (reads_raw_illumina, reads_raw_pacbio,
+reads_raw_nanopore, and their trimmed variants) in the Project Explorer
+and other object surfaces had no hover tooltip — the SVG <title> chi…
+
+- *(ui)* export the annotation table's current filter
+Shows matched and exported counts together: the closure adds parents and
+children, so the exported number is routinely larger, and showing only one
+of the two reads as a bug.
+
+- *(api)* add annotation subset export routes
+The count route is separate from the export so the UI can show matched
+against exported before anything is queued: the closure is routinely larger
+than the matched count, and an unexplained difference…
+
+- *(queue)* register an exported annotation subset as a derived object
+derived_from the source annotation, so the subset's lineage is inspectable.
+Carries no annotation results facts: the subset opens to a Compute results
+button like any other annotation, leaving whether…
+
+- *(queue)* add the annotation subset export handler
+Receives the filter as it was applied in the table and passes it straight to
+closure_lines -- it never re-derives the filter, which is what keeps the
+exported subset and the displayed table from drift…
+
+- *(pipelines)* write a verified annotation subset
+Copies original source lines rather than serializing Feature, which keeps
+neither the GFF source column nor phase -- a reconstructed CDS line would
+silently lose its reading frame.
+
+- *(pipelines)* compute the closure of an annotation filter
+A filter matches rows, but a valid annotation needs whole trees: a gene
+without its exons leaves Parent= references dangling, and exons without
+their gene leave orphans. The closure is every match plu…
+
+- *(pipelines)* store each feature's source line in the annotation index
+No index on the column: subset export selects by filter and reads the line
+out, it never looks a feature up by line. Rows sharing one source line
+under multiple parents all record that line.
+
+- *(pipelines)* record the source line number on every parsed feature
+Set by the handler's read loop rather than the parse functions, which take
+one string and cannot know where it came from. None for GenBank, whose
+features span multiple lines and whose segment childre…
+
+- *(frontend)* pair RefSeq/GenBank twins with a namespace toggle
+A reference downloaded from NCBI arrives as either a GCA (GenBank) or GCF
+(RefSeq) accession, and a project that needs both currently shows them as
+two separate rows. They are one assembly in two name…
+
+- *(launcher)* stage update notification for alpha/beta users
+Adds a new stage-update affordance that detects when a newer alpha or beta
+tag is available and offers a one-click update with confirmation dialog.
+
+- *(launcher)* add update_to_stage Tauri command
+
+- *(launcher)* add update_to_stage action and tests for check_stage_update
+
+- *(launcher)* add check_stage_update and set_bioflow_tag helpers
+
+- *(ui)* say why annotation coverage is missing instead of drawing blank bars
+
+- *(pipelines)* backfill annotation analysis when a reference lands
+
+- *(pipelines)* analyze an annotation when it finishes ingesting
+
+- *(pipelines)* record whether an annotation analysis resolved a reference
+Adds contig_lengths_known to the launch_annotation_stats payload and
+annotation_contig_lengths_known to run_annotation_stats's facts, so the
+ingest backfill (a later task) can find annotations analyze…
+
+- *(pipelines)* add the auto-analysis eligibility rule for annotations
+
+- *(storage)* add resolve_report_file containment helper
+Both stats report endpoints hand-roll the same three-step guard with two
+different spellings of the containment check. Extract it so a third result
+type inherits the guard rather than re-deriving it -…
+
+- *(ui)* show the annotation track above the feature table
+
+- *(ui)* draw annotation features along a coordinate axis
+
+- *(frontend)* add the annotation window client and its types
+
+- *(api)* serve annotation features or their density for a window
+
+- *(pipelines)* resolve an annotation's reference by provenance or accession
+
+- *(pipelines)* assemble gene models for a coordinate window
+
+- *(pipelines)* count annotation features per coordinate bin
+
+- *(pipelines)* pack overlapping annotation features into rows
+
+- *(annotation)* report unresolved parentage on the results summary
+
+- *(annotation)* add a genes/all/unresolved view toggle to the feature table
+Adds the frontend half of the parent-resolution and gene-summary work
+from tasks 1-6: a three-tab toggle (Genes/All records/Unresolved) above
+the annotation feature table, backed by the new /genes rou…
+
+- *(annotation)* serve the genes view and reach unresolved records over the API
+The features route gains a `view=unresolved` parameter that clears
+top_level_only and filters to UNRESOLVED_STATUSES, making a dangling/
+ambiguous/self/cyclic record reachable for the first time. A ne…
+
+- *(annotation)* resolve hierarchy and build the gene table during the compute job
+run_annotation_stats now classifies every feature's parent reference and
+builds the genes table against the temporary database, before the atomic
+rename into place -- a database is only published once…
+
+- *(annotation)* build a per-gene summary table with de-duplicated descendant counts
+
+- *(annotation)* store one row per parent relationship and filter by resolution status
+Fixes build_annotation_db, which crashed after Feature.parent became
+Feature.parents (a tuple) in the previous commit: it now writes one
+row per declared parent relationship so a shared exon is reacha…
+
+- *(annotation)* classify every parent reference as resolved, dangling, ambiguous, self, or cyclic
+
+- *(ui)* label, icon, and results tab for GenBank files
+Adds the "GenBank" format label and maps it to the existing GFF
+annotation icon. DetailPanel also gated the Results tab and its
+AnnotationResults branch on format kind (gff/gtf/bed) -- without
+adding …
+
+- *(annotation)* make GenBank files eligible for annotation results
+
+- *(annotation)* build feature tables and stats from GenBank files
+
+- *(formats)* detect GenBank by extension and LOCUS header
+
+- *(pipelines)* stream GenBank records without loading sequence
+
+- *(pipelines)* emit GenBank features as parent rows plus segment children
+
+- *(pipelines)* parse GenBank qualifier blocks with wrapped values
+
+- *(pipelines)* parse GenBank locations without flattening joins
+
+- *(formats)* add GENBANK format kind
+Adds FormatKind.GENBANK and places it in FORMAT_FIELDS alongside the
+other interval/annotation formats (GFF, GTF, BED). First of an 11-task
+plan for GenBank annotation support (#294); every subsequent…
+
+- *(ui)* say what SSH key BioFlow installs and retains when provisioning
+
+- *(ui)* show each node's version and offer an update when it is behind
+
+- *(api)* endpoints to update a compute node and poll its progress
+
+- *(services)* update a node's image over SSH, verified by re-enrollment
+
+- *(api)* install a managed SSH key during node provisioning
+Adds an install_key phase between write_env and pull_image in
+_provision_node: generates a keypair, appends it to the node's
+authorized_keys over the existing connection, verifies it authenticates
+ind…
+
+- *(services)* generate and install a managed SSH key on compute nodes
+
+- *(api)* expose the primary's image digest as the staleness reference
+
+- *(api)* persist and expose the backend version each node reports
+Enrollment now writes image_digest/version onto the Node document
+instead of only Redis, which expires when a worker stops
+heartbeating, and enumerate_nodes/list_nodes surface those fields
+(plus an up…
+
+- *(queue)* worker reports its image digest and version in the heartbeat
+
+- *(models)* record SSH connection details and reported version on Node
+
+- *(models)* add NodeUpdateTask for tracking node image updates
+Mirrors NodeProvisionTask's structure but avoids the bare-string
+Settings.indexes bug found in that model: task_id and node_id are both
+declared via field-level Indexed(...) annotations only, with no
+…
+
+- add project-level operations with collapsible actions accordion
+Add a 'Project actions' accordion above the filter box in the left panel
+that lists project-scoped operations. Clicking an action opens its form
+in the right panel via the existing ?sel= URL param sys…
+
+- *(frontend)* add optional additional reads to the align dialog
+The dialog keeps the one-file default -- the primary reads row and the
+paired-end auto-mate are untouched -- and adds an "Add another read
+file" picker beneath them. Each added file resolves its own m…
+
+- *(pipelines)* record additional read sets in alignment provenance
+An alignment run's inputs now list every additional set member under its
+own role -- extra_reads for the set's own file, extra_mate for its mate
+-- instead of the set being invisible to the activity v…
+
+- *(pipelines)* concatenate additional read set mates into the R2 stream
+A paired alignment with additional read sets previously threaded every
+set's R1 into the combined R1 stream and dropped the mates entirely.
+Each set's mate now concatenates into the R2 stream alongsid…
+
+- *(pipelines)* resolve and validate paired additional read sets at launch
+Each additional set is now a typed pair (R1 plus optional mate) resolved
+the same way as the primary: explicit link, else suggest_mate. The set's
+mate is auto-included, so adding one file of a pair is…
+
+- *(api)* accept ordered additional alignment read sets
+A file-level alignment launch can now carry additional read sets as a typed
+top-level request field, a sibling of mate_object_id: each set is an R1 plus
+an optional mate, and the whole run shares one …
+
+- *(ci)* publish images and launcher bundles in one release
+A v* tag now builds the launcher alongside the images and attaches the
+bundles to the single GitHub release it creates (#335). A launcher failure
+leaves the release published with images and no bundle…
+
+- *(ops)* constrain launcher-only releases to exceed the app version
+Keeps the launcher-never-below-app invariant that lets a combined cut
+overwrite the launcher version safely (#335), and rejects pre-release
+launcher-only cuts, which have no images to be staged agains…
+
+- *(ops)* bump the launcher version as part of an app release
+One release, one version (#335). A combined cut overwrites whatever the
+launcher declared, so a launcher-only release's drift never survives the
+next app release.
+
+- *(docs)* update GitHub Pages landing page to v2
+Replaces docs/index.html with a redesigned version of the landing
+page (richer layout: numbered section nav, stats sidebar), still a
+self-contained static bundle with no build step.
+
+- *(ui)* give annotation files a results view
+
+- *(ui)* browse annotation features with filters and a locus jump
+
+- *(ui)* chart annotation feature types, density, and coverage
+
+- *(frontend)* add the annotation results client and its types
+
+- *(api)* serve the annotation feature table, filtered and paged
+Adds launch_annotation_stats + _check_annotation_stats_callable to
+pipeline_service.py, and three routes (POST /annotationstats, GET
+/annotationstats/features/{id}, GET /annotationstats/children/{id})…
+
+- *(pipelines)* compute annotation summaries and the feature index
+
+- *(ops)* keep annotation results artifacts in a reaped directory
+
+- *(pipelines)* store annotation features in a queryable SQLite index
+
+- *(pipelines)* accumulate annotation aggregates in one bounded pass
+
+- *(pipelines)* normalize GFF3, GTF, and BED lines to one feature shape
+
+- *(docs)* add GitHub Pages landing page
+Adds the project landing page as docs/index.html, a self-contained
+static bundle (fonts and assets inlined) with no build step. Once
+GitHub Pages is enabled to serve from main /docs, this becomes the
+…
+
+
+
+
+
+### 🐛 Bug Fixes
+
+- *(ui)* reach the Record form's field help by keyboard and touch
+The metadata form rendered its help affordance as a bare <span title=…>,
+which opens on mouse hover and nothing else. The help text the form now
+carries on all 61 fields was therefore unreachable thre…
+
+- *(ui)* explain the AI summary and SRA rows, not leave them in "Other"
+Seven facts the backend writes -- four ai_summary_* and three sra_* --
+were in none of LABELS, METRIC_INFO or NO_INFO_NEEDED. Unlabelled facts
+are not dropped from the table, they render with a title-…
+
+- *(api)* refuse to provision a node with an unreachable primary address
+Provisioning discovered the primary's address with a UDP-connect trick run
+inside the API container, which returns the container's own Docker-network
+address (172.19.0.6). That went into the node's .e…
+
+- *(api)* word the non-empty-project conflict for a person
+The 409 raised when deleting a project with contents told the caller to
+"pass cascade=true". That string reaches a user: the UI surfaces the
+error body in a toast, so a failed delete advised setting a…
+
+- *(ui)* delete a non-empty project instead of failing with a 409
+The project list's row action called deleteProject without cascade, so
+deleting any project that had contents failed. The server's 409 body was
+piped straight into a toast, which put API wording in fr…
+
+- *(models)* explain every Record field, not half of them
+The Record form's ⓘ marker renders only where a FieldDef sets `help`, so a
+field without one looks finished -- labelled input, no marker, nothing
+broken -- while being the one field on the form nobody…
+
+- *(ui)* explain every reference quality row, not four of them
+A reference's Quality tab renders AssemblyFacts rather than FactsTable, so
+the LABELS partition in metricInfo.test.ts never saw a single one of its
+rows. It shipped with info markers on four of thirty…
+
+- *(ui)* drop a reference's download link rather than blanking the tab
+A payload with no `index_ids` made the index panel read a key off undefined,
+which threw and took the whole metadata tab down with it. A missing download
+link is not worth a blank page.
+
+- *(api)* return a reference's index_ids beside indexes, not inside it
+Opening the metadata tab for a reference with any built index rendered a
+blank page, on "undefined is not an object (evaluating
+'entry.index_ids[name]')".
+
+- *(services)* offer assembly when any installed assembler fits the reads
+The assemble card asked whether the *chemistry's default* assembler was
+installed. On an image without ABySS that made a short-read FASTQ's card
+read "abyss is not installed" with no Launch and no Adj…
+
+- *(pipelines)* validate the assembler that runs, not the chemistry's
+`launch_assembly` checked availability and read layout against
+`spec_for_chemistry(chemistry)` while enqueuing `parsed.assembler`.
+Nothing could reach that divergence -- `default_assembly_params` alwa…
+
+- *(storage)* clean up coverage, gc_bias and the other newer report dirs
+Per-object report directories under coverage/, gc_bias/, feature_coverage/,
+variants_in_regions/, annotation_comparison/ and methylation/ survived their
+object being deleted, so they leaked permanentl…
+
+- *(services)* name the assemble card's assembler from its spec
+The card's title read `spec.assembler.value` while the sentence beside
+it said "assembled with ABySS" in prose. Three assemblers now declare
+layout="paired", so the hardcoded name is a sentence that c…
+
+- *(services)* re-estimate a community assembly with its own memory model
+_assembly_estimate never passed `meta=`, so every replan of a metagenome
+assembly re-estimated against the assembler's single-genome model. For a
+community that model has no genome size to consume, so…
+
+- *(pipelines)* estimate memory for an always-meta assembler
+estimate_assembly_mb selected its read-volume branch on
+`meta and spec.meta_memory_model is not None`, which assumes every
+community assembly is a *mode* some assembler switches into. An
+assembler tha…
+
+- *(pipelines)* declare CheckM2's measured memory, not a guessed 16 GB
+Q1 forbids fitting mem_mb from the memory model, and the first value was
+neither fitted nor measured -- it was a guess picked from the tier other
+16 GB jobs use.
+
+- *(pipelines)* pin CheckM2 to the database version it actually requires
+The first pin named Zenodo record 7563512, found by searching for "CheckM2
+database" and taking the result whose title said so. It is the wrong
+database, and would have failed at the worst possible mo…
+
+- *(pipelines)* name BED features from the annotation, not the variant
+`bedtools intersect -wao` writes the A record, then B, then the overlap, so
+the B record has to be addressed from the end of the row. The BED branch
+sliced `cols[:-1]` instead -- the whole row minus t…
+
+- *(frontend)* suppress gc_bias and gc_blob facts in generic FactsTable
+Read-only facts emitted for GC coverage visualizations (gc_bias_*,
+gc_blob_*) were leaking into FactsTable's generic renderer as a wall of
+raw chips, duplicating what GcBiasChart and ContigBlobChart r…
+
+- *(ops)* stop leaking Mongo/sshd volumes from worktree test runs
+
+- *(pipelines)* initialize beanie in feature coverage test fixture
+The client fixture in test_feature_coverage_reports.py constructs an
+unsaved Job(...) without requesting beanie_models, so the test only
+passes when another file already initialized Beanie earlier in …
+
+- *(pipelines)* install Liftoff with --no-deps and a real parasail wheel
+Pinning liftoff to a version that exists on PyPI (99e15314) traded one
+build failure for another: every PyPI release of Liftoff pins its
+dependencies with exact `==` versions from 2020 (numpy 1.21.0, …
+
+- *(pipelines)* pin liftoff to a version that actually exists on PyPI
+liftoff==1.7.2 was never published -- PyPI's latest release is
+1.6.3.2 -- so every worker build failed on this step. Found while
+rebuilding the worktree stack to verify #631; the wheel resolution
+past…
+
+- *(pipelines)* remove Filtlong's dead release-tarball install step
+The from-source build (added in a8ba1076) already installs Filtlong;
+this leftover block from before that fix still tried to download a
+GitHub release asset that no longer exists (rrwick/Filtlong's re…
+
+- *(frontend)* correct the blobplot's depth axis, cap caption, and partial-data warning
+Fixes six findings from the Stage 2 (#641) whole-branch review:
+- minDepth was pinned to a hardcoded 0.1 for every real dataset, mislabelling
+  the y-axis and crushing the log-scale plot into a small …
+
+- *(frontend)* explain an all-unscoreable blobplot instead of rendering empty
+An assembly where every kept contig is all-N would otherwise render a
+blank scatter with a "showing N contigs" caption implying a clean result
+with zero visible points -- indistinguishable from a genu…
+
+- *(pipelines)* surface partial GC tracks and empty curves in gc_bias
+Final integration review on issue #640 Stage 1 found two load-bearing
+gaps and three minor issues once all seven tasks' seams were viewed
+together:
+
+- *(queue)* hold the sv_stats_dir patch for the whole test module
+
+- *(ops)* satisfy shellcheck on the durations table prefix
+CI's shellcheck run (no --config exemption) flags the sed 's/^/  /'
+idiom as SC2001; the local pre-commit hook doesn't catch it because it
+only warns. Replace it with a plain read loop.
+
+- *(pipelines)* classify phase_variants handler and wire budget refusal
+Two exhaustiveness-registry checks the full suite runs caught that the
+targeted run missed:
+- the provenance walker requires every registered handler to carry a step
+  verb, so phase_variants is now "…
+
+- *(ops)* stop the docs-only skip step failing on a YAML comment
+The skip step added for #732 is double-quoted and contains '#732', so
+YAML treats everything from the '#' as a comment and the run: value
+parses to 'echo "Docs-only PR (see' -- an unterminated quote t…
+
+- *(pipelines)* default qc_summarizable so the context dataclass builds
+A dataclass cannot place a non-default field after a defaulted one, and
+sibling_snf_ids -- which landed on main while this branch was in flight --
+is defaulted. Caught by the full suite after the reba…
+
+- *(ops)* make required build-check jobs report on docs-only PRs
+paths-ignore made the four required jobs absent (not success or
+skipped) on a docs-only PR, so the branch ruleset waited on checks
+that would never arrive and the PR sat BLOCKED forever. Each job now
+…
+
+- *(services)* explain how _variant_dedup_key includes the caller
+The docstring said the key includes the caller; the returned string
+mentions only the BAM and a params fingerprint. Verified against real
+objects that the caller does reach the key -- VariantParams.as…
+
+- *(frontend)* give assembled_transcripts its own role display
+The backend added ObjectRole.ASSEMBLED_TRANSCRIPTS (D4) to distinguish a
+StringTie-produced GTF, a proposed transcript model, from an authoritative
+downloaded annotation. The frontend never learned ab…
+
+- *(pipelines)* suppress --dta when spliced alignment is disabled
+D6's flip of Hisat2Params.dta's default to True argued this cannot affect
+DNA-seq alignments because the auto-suggested RNA-seq card only selects
+HISAT2 for spliced assays. That's incomplete: the manu…
+
+- *(pipelines)* reject non-BAM formats in launch_transcript_assembly
+_check_quantifiable is shared with featureCounts and accepts BAM/SAM/CRAM,
+but StringTie 2.2.1 only reads BAM. The Actions-tab card only offers BAM
+objects, but POST /pipelines/transcript-assembly is …
+
+- *(pipelines)* stop mosdepth's help text promising CRAM support
+TOOL_META's summary is served on /help/software and said mosdepth reads
+"an indexed BAM or CRAM". True of the binary, false of BioFlow's coverage
+job: build_coverage_card returns None for any non-BAM,…
+
+- *(tests)* patch tools.delly in SV card tests instead of trusting the environment
+CI's backend suite runs inside ghcr.io/syntheticgio/bioflow-ci-runner, a
+separate, hand-maintained image (.github/Dockerfile.ci) that does not
+install Delly (or Sniffles) -- unlike the app's own Docke…
+
+- *(frontend)* route Delly SV callsets to the SV results view
+Results-tab routing, the SvRecord.support doc comment, and two
+user-facing strings all assumed Sniffles2 was the only structural
+variant caller. facts.variants_called_by is now "sniffles2" or
+"delly",…
+
+- *(pipelines)* name Delly SV output .delly.vcf.gz, not .sniffles.vcf.gz
+_sv_payload hardcoded the .sniffles.vcf.gz output_name suffix
+regardless of which caller ran, so a launch-path Delly callset was
+always stored on disk under a Sniffles-looking filename -- the
+handler'…
+
+- *(pipelines)* read SV support per caller, not from Sniffles' key alone
+
+- *(sv_provenance)* use presence check instead of falsy override for caller
+The fallback to "sniffles2" was using `or`, which incorrectly overrides any
+present-but-falsy value (empty string, None). Changed to a true presence check
+with `in` operator, so the fallback applies o…
+
+- *(queue)* stamp SV provenance with the caller that actually ran
+
+- *(services)* put the caller in the SV dedup key so two callers cannot collide
+
+- *(frontend)* stop the depth tooltip reading "typical depth of mean"
+formatRatio already renders "1.67x typical depth", so appending "of mean"
+produced "1.67x typical depth of mean" -- and the baseline is the median
+rather than the mean, which is the distinction format…
+
+- *(queue)* drop the other mode's facts when a coverage run replaces it
+Facts merge onto the object, so a region run left the previous windowed
+run's `coverage_window_count` sitting beside its new
+`coverage_region_count` -- two mutually exclusive descriptions of the one
+r…
+
+- *(ops)* run the worker under the app interpreter, not Medaka's
+The image puts Medaka's venv first on PATH (the polish jobs call
+`medaka` by bare name, so it must stay there), which makes a bare
+`python` Medaka's interpreter -- one with none of the app's
+dependenc…
+
+- *(sv)* wire merge structural variants card to sibling SNF callsets (#713)
+The merge SV card sent only the clicked SNF's ID to the launch endpoint,
+which reject_merging fewer than 2 callsets. Added sibling_snf_callsets()
+to pipeline_service to find all SNF sidecars in a proj…
+
+- *(tests)* read /proc for process liveness instead of shelling out to ps
+The process-group cancellation tests failed in CI with "the process group
+was not signalled" -- the opposite of what had happened. The group was
+signalled and the grandchild was killed; `_pid_alive` j…
+
+- *(services)* map the SV-merge endpoint so its Launch button greys out
+The card added in #690 posts to /pipelines/merge_structural_variants, which
+ENDPOINT_JOB_TYPES did not know, so running_now could not tell the UI a
+merge was already in flight -- the Launch button sta…
+
+- clear every lint error and test failure in the tree, not only this branch's
+CI's ruff job reported 17 errors across backend/app, backend/tests, ops and
+e2e, most of them older than this branch, and the suite carried three
+failures written off as pre-existing. Splitting those …
+
+- *(tests)* build the Mongo test URI by rebuilding its query, not by substring
+Two bugs that only the worktree runner's URL shape exposes, both inherited
+from the munging this moved out of the beanie_models fixture.
+
+- *(tests)* connect to Mongo by service name when running inside the network
+The mongo: -> 127.0.0.1: rewrite in the beanie_models fixture assumed
+pytest runs on the host, where the compose service name does not resolve
+and the published port is the only way in. Inside the api…
+
+- *(ops)* make worktree test runs reach pytest and a valid Mongo URI
+Two defects in the worktree test harness, both of which stopped
+`./backend/run-worktree-tests.sh` from running at all in this image:
+
+- *(pipelines)* close the bracken tool entry and import SidecarRole
+Two errors that ruff caught as more than style, both of which broke code
+rather than formatting:
+
+- *(pipelines)* close three cross-task gaps found by the final SV review
+The final whole-branch review of the Sniffles2 structural-variant plan
+(#619, since independently merged via #671/#672/#690) found four Important
+issues, each visible only across task boundaries -- no…
+
+- *(pipelines)* give SV merge its own run kind (#690)
+merge_structural_variants reused RunKind.STRUCTURAL_VARIANT_CALLING, so the
+(run_kind, run_tool) pair was not unique and workflow_derive._node_type_for
+returned the last matching spec -- deriving a ca…
+
+- *(pipelines)* correct salmon docs and port requirement after the per-job indexing ruling
+The controller ruled that the Salmon index is built fresh inside each
+job's workdir and discarded, not cached and reused across samples via
+a sidecar. Three pieces written against the original reuse p…
+
+- *(queue)* detect a salmon mate file the same way this codebase's other handlers do
+reads2_blob_id is a key nothing in this codebase ever sets, so the
+paired-end branch in salmon_quantify could never fire and every job
+silently ran single-end. Switch to mate_sha256/mate_path, matchin…
+
+- *(pipelines)* sort salmon test imports per isort convention
+The prior E402 fix moved Path to the top of the file but left it
+ahead of pytest, which ruff's import-sort rule (I001) still flagged.
+
+- *(pipelines)* move Path import to top of salmon test file
+E402 violation: module-level import not at top of file. Moved the pathlib
+import from line 161 (mid-file) to the top-of-file import block alongside
+pytest and ValidationError.
+
+- *(pipelines)* drop unused forward-provisioned imports from salmon_runner
+
+- *(ops)* skip heredoc bodies in compose_target guard (#674)
+Heredoc bodies contain data passed to stdin, not host commands. Leaving
+heredoc body lines in place caused prose carrying shell operators (e.g. ;, &&)
+to be split into command segments, misfiring bloc…
+
+- *(docker)* vendor upstream salmon binaries to prevent SIGILL on arm64 (#669)
+Debian trixie's salmon 1.10.2 arm64 package crashes with SIGILL (exit 132)
+during salmon quant on Apple Silicon / ARM hypervisors due to CPU extension
+instruction set mismatches. Replaces Debian packa…
+
+- *(pipelines)* accept GTF annotations for feature coverage, fix wiring and sort corruption (#662)
+Three bugs found in a final whole-branch review of the bedtools feature-coverage
+pipeline, each missed because its own task's review was scoped too narrowly:
+
+- *(provenance)* classify polish_long_assembly in narration verbs
+polish_long_assembly (the Medaka handler registered earlier in this
+plan) had no entry in provenance_walker's _STEP_VERBS, so its
+provenance step silently fell back to the generic verb instead of
+"pol…
+
+- *(queue)* execute medaka_consensus wrapper, not the raw medaka binary
+polish_long_assembly passed tools.medaka()'s probed path (the raw medaka
+dispatcher, settings.medaka_binary_path) into build_consensus_command,
+which builds argv for the medaka_consensus wrapper scrip…
+
+- *(pipelines)* stop medaka's env from absorbing later pip installs
+Medaka's ENV PATH addition sat right after its install layer, so every
+bare pip install later in the build (NanoPlot, pydeseq2, ragtag, and
+the app's own dependency set) resolved pip through Medaka's …
+
+- *(pipelines)* add frameshift detection and correct position count semantics
+
+- *(pipelines)* drop unused pathlib import in feature_coverage_runner tests
+CI's ruff check caught it; the local suite never runs ruff, so it stayed
+green while this failed only on push -- same shape as the #217/#314
+import-order gap CLAUDE.md documents.
+
+- *(services)* register feature_coverage in provenance and running-now maps
+The full suite caught two hand-maintained registries Stage 1's tasks never
+touched: provenance_walker's narrative-step classification (feature_coverage
+belongs beside run_bam_stats -- facts written ba…
+
+- *(ops)* bound apt-get fetches in launcher-build.yml's Linux step (#658)
+The Linux bundle job ran a bare `sudo apt-get update` with apt's
+default fetch behaviour — the same exposure that hung build-check.yml's
+backend-smoke job on PR #609 (#577). The frequency is lower bec…
+
+- *(pipelines)* correct seqkit citation and mark both tools not runnable
+seqkit's TOOL_META cited the superseded 2016 bioRxiv preprint instead
+of the SeqKit2 paper the README's own Citation section now points to.
+Also set runnable=False on both bedtools and seqkit: no job …
+
+- *(ops)* bound network fetches in the full backend test job too
+backend-full-test landed on main while this branch was in flight and
+carries the same unbounded-fetch defect: a bare `apt-get update`, plus
+two curl downloads from third-party hosts (NCBI's FTP server…
+
+- *(ops)* bound apt-get fetches so a stalled mirror fails fast
+Both apt-get steps in the backend-smoke job fetched with apt's defaults,
+so a mirror that accepted the connection and then stopped sending had
+nothing to bound it. On PR #609 that hung "Install system…
+
+- *(build-check)* move mongod --replSet and --bind_ip_all to cmd field
+--replSet and --bind_ip_all are mongod arguments, not Docker create flags.
+Passing them via 'options' caused 'unknown flag: --replSet' at container
+start. Use 'cmd' for the container entrypoint argume…
+
+- *(pipelines)* match real meryl output, scan assembly for repeats
+Every meryl-analysis run parsed to nothing because both parsers expected
+formats meryl never emits (verified against meryl 1.4.2 in the worker
+image):
+
+- *(queue)* apply analyze_meryl_tracks facts to the assembly object
+The handler returned {object_id, job_id, facts} exactly like
+analyze_gc_tracks, but _APPLIERS had no analyze_meryl_tracks entry and
+results.apply() silently returns for unknown job types -- so kmer_sp…
+
+- *(backend)* keep strong references to fire-and-forget asyncio tasks
+The event loop holds only a weak reference to a scheduled Task, so the
+feedback-webhook notification and the agent command-rejection error event
+could be garbage-collected before running -- silently d…
+
+- *(pipelines)* preserve explicit minimap2 choices
+
+- *(pipelines)* reject non-finite minimap2 preset floats
+
+- *(pipelines)* omit unset minimap2 overrides from presets
+
+- *(pipelines)* wrap minimap2 numeric parse errors
+
+- *(pipelines)* reject minimap2 numeric sentinels
+
+- *(protein-structure)* distinguish a UniProt outage from a zero-candidate result
+`protein_structure.resolve()` returned bare None for two different
+situations: a UniProt outage/timeout and a query that succeeded but
+matched nothing. The Structure tab mapped both to `lookup_failed`…
+
+- *(queue)* stop index_bam and ingest_headers erasing each other's facts
+Both appliers loaded the whole facts dict, merged their own keys in
+memory, and wrote the merged dict back. After an alignment they finish on
+the same BAM at nearly the same moment, so whichever loade…
+
+- *(queue)* fail a chunked alignment that refuses to merge, don't report success
+`_apply_align_reads_chunked` refuses to enqueue the merge when it cannot
+resolve a BAM for every bucket sub-job -- merging a partial set produces a BAM
+missing a slice of the reference while claiming …
+
+- *(queue)* let an applier fail its job instead of reporting a silent success
+`_apply_result` caught every exception and logged `result_apply_failed`, so a
+job whose applier gave up still reported succeeded. That is right for the case
+it was written for -- a write-back that bro…
+
+- *(frontend)* preserve preset while schema loads
+
+- *(aligners)* preserve Bowtie2 preset provenance and pairing semantics
+
+- *(frontend)* default Bowtie2 to standard preset
+
+- *(frontend)* refresh Bowtie2 preset resolution
+
+- *(models)* pin mean_plddt to the 0-1 scale the pipeline stores it on
+test_create_prediction passed mean_plddt=85.5 and failed validation
+against the field's le=1.0 bound. The reported diagnosis was that the
+constraint rejects what the sidecar emits, but the call site s…
+
+- *(export)* validate report paths and bytes before packing
+Reject symlinked or escaped report paths during discovery and packing, and verify report snapshots against their recorded size, digest, and threshold before writing tar members.
+
+- *(export)* reject escaped report files
+
+- *(queue)* refuse to merge a chunked alignment missing any bucket
+_apply_align_reads_chunked skipped past any bucket sub-job whose BAM it
+could not resolve -- a lookup error, a non-succeeded job, or a success
+that recorded no output path -- and then merged whatever …
+
+- *(pipelines)* give the chunked merge a sort command that exists
+merge_chunked_buckets called align_runner.build_sort_command, which was
+never defined there -- the only build_sort_command in the tree lives in
+ivar_runner with a different signature. Every chunked al…
+
+- *(ui)* break the QC picker's recommended-tool tie explicitly, not by dict order
+For short reads both fastp and fastqc carry RECOMMENDED in the QC family,
+and PipelineToolSelector auto-selected the *first* recommended tool it
+found -- so which tool the QC dialog opened on depended…
+
+- *(tests)* point parameter-set no-fields tests at hifiasm, not spades
+SPAdes gained its own parameter fields, so tests hardcoding it as the
+"tool with no fields" example started asserting the opposite of what
+they meant. HIFIASM still has no declared fields and is the t…
+
+- *(frontend)* drop raw reads from the align picker once their trimmed version is added
+The additional-reads dropdown excluded files by object id alone, so
+adding a trimmed read set left its raw parents on offer -- different
+objects, same sample name, which reads as the dialog listing fi…
+
+- *(ci)* bound Build check jobs with timeout-minutes
+Backend smoke and its siblings had no job- or step-level timeout, so
+a stalled apt-get mirror on "Install system build dependencies" hung
+several in-flight runs for over an hour with nothing to fail t…
+
+- *(pipelines)* decompress the reference for HISAT2, not just for STAR
+build_index decompressed a gzipped reference only in the STAR branch, so
+hisat2-build was handed the .fna.gz path directly. It exits 1 partway
+through and deletes the .ht2 files it had already written…
+
+- *(objects)* name the accession from metadata when remote_source is unset
+Found by running the Stage 3 checks against the real database rather than
+fixtures. All 55 SRA-backed objects in the live project carry their
+accession in metadata.sra_run and nothing in remote_source…
+
+- *(ui)* give system upkeep its own section on the activity page
+Storage cleanup was listed among the user's own work, where it could not
+be found. Verification alone posts a job a minute, so on this machine 137
+of the 200 jobs the activity page fetches were sweeps…
+
+- *(ui)* name maintenance sweeps in words, not their handler tokens
+The activity page labelled a job by the file in its payload, falling back
+to the job type. Maintenance sweeps act on the whole library and name no
+file, so every one of them rendered as its raw handle…
+
+- *(ui)* route a declared refusal to the card in every heavy-launcher dialog
+CompletenessDialog, ScaffoldDialog, QuantifyDialog, and
+DifferentialExpressionDialog launch heavy launchers this branch gave
+resource-refusal details to, but their onError still fell through to a
+plai…
+
+- *(ui)* give the Actions refusal card working Edit feedback and button locking
+The refusal card's Edit button always reads "Edit parameters" even for the
+nine launchers with no settings dialog, where onEdit silently dismissed the
+card instead. Toast the user instead of leaving a…
+
+- *(pipelines)* refuse an over-budget differential expression run instead of stranding it
+
+- *(pipelines)* refuse an over-budget quantify run instead of stranding it
+
+- *(pipelines)* refuse an over-budget assembly error QC run instead of stranding it
+
+- *(pipelines)* refuse over-budget scaffold, misassembly, and synteny runs
+Groups scaffold, misassembly QC, and synteny together since all three
+share the same draft+reference resolution shape and were built with
+identical test coverage.
+
+- *(pipelines)* refuse an over-budget consensus run instead of stranding it
+
+- *(pipelines)* refuse an over-budget meryl analysis run instead of stranding it
+
+- *(pipelines)* refuse an over-budget completeness run instead of stranding it
+
+- *(pipelines)* refuse an over-budget variant calling run instead of stranding it
+
+- *(pipelines)* refuse an over-budget continuity QC run instead of stranding it
+
+- *(pipelines)* refuse an over-budget QV assessment instead of stranding it
+
+- *(pipelines)* refuse an over-budget polish run instead of stranding it
+
+- *(pipelines)* refuse an over-budget genome annotation instead of stranding it
+
+- *(ui)* show the refusal card for a declared over-budget launch, not a toast
+
+- *(api)* tag resource refusals so the frontend can route them to a card
+
+- *(pipelines)* route SPAdes to a real progress parser instead of Flye's
+Final-review fix wave for the SPAdes short-read assembler, three findings:
+
+- *(pipelines)* register SPAdes in all_tools() so it reaches the tools panel
+tools.spades() itself works correctly and returns an available Tool, but
+all_tools() is a hand-maintained list of function calls and was never updated
+to include it. This meant SPAdes never reached th…
+
+- *(api)* serialize from_parameter_set on run responses
+RunOut declared no from_parameter_set field, so Pydantic silently
+dropped it from every GET /runs response, leaving the run-detail
+"Preset" display permanently dead. Add the field to RunOut and thread…
+
+- *(ui)* detect a real 409 status on parameter-set save conflicts
+
+- *(ui)* let the database index use the full window width
+The page carried .help-page's 760px prose measure, which is right for a
+column of text but not for this page: its body is a grid of database
+cards, so two 340px columns sat against the left edge with …
+
+- *(ui)* keep the info card on screen when its marker is not
+Two placement bugs found by driving the real Quality tab rather than by
+reading the code, both invisible to the test suite because there is no
+DOM test setup here to catch them.
+
+- *(export)* scope GET /exports and download route by owner (#555)
+* fix(export): scope GET /exports and download route by owner
+
+- *(ops)* stop the worktree guard blocking writes that merely mention compose
+The hook matched `docker` + `compose` as a substring of the whole Bash
+command, so it fired on commands that could not touch the biopipe stack: a
+heredoc file write whose docstring said the phrase, an…
+
+- *(export)* include project-scoped job timings in export archives
+export_service.collect() gathered JobRunTiming rows by object_id alone.
+executor.py only records object_id for a job that attached to a single
+object, so project-level work -- and any job whose object…
+
+- *(queue)* check the index-build declaration before enqueueing it too
+launch_alignment enqueued an unchecked build_index job -- which declares
+more memory than the align job it does check -- before the align-side
+refusal ran at all. An over-budget index build could stil…
+
+- *(queue)* refuse an alignment that could never be claimed
+
+- *(queue)* refuse an assembly that could never be claimed
+
+- *(queue)* keep the admission budget under the kernel hard limit
+
+- *(export)* satisfy ruff's line-length rule on a test fixture
+CI's ruff check runs a rule (line length) the local worktree suite never
+invokes, same class of gap CLAUDE.md already documents for import-order
+checks.
+
+- *(ui)* say API keys are never collected, not removed
+The export dialog's disclosure text claimed API keys, absolute paths,
+and machine names are all "removed automatically" -- accurate for
+paths and machine names, but API keys are excluded by constructi…
+
+- *(export)* redact DataObject.source.original_path and worker_id
+_strip_paths only checked top-level dict keys, so DataObject.source
+(a nested SourceInfo) shipped its fully-resolved original_path
+verbatim for every register-in-place object -- a username and
+directo…
+
+- *(ui)* show projected export size and redaction notice in the dialog
+The export dialog was missing two things the brief required: an estimate
+of the archive size at the chosen threshold, and a statement of what
+gets redacted. Adds both.
+
+- *(export)* pass owner to queue.enqueue in launch_project_export
+queue.enqueue's owner parameter is required and keyword-only with no
+default, so every call to launch_project_export raised TypeError before
+this fix -- the export launcher could never actually queue …
+
+- *(export)* stop counting an unset machine record as cleared
+A default RunMachine() dumps to a dict of all-None values, which is
+truthy, so the old check counted every job_timings row as having had
+machine identity cleared -- even ones that never recorded any. …
+
+- *(metadata)* sort test_protein_headers.py imports for ruff I001
+Two subagents in this branch's execution flagged this exact I001 finding
+independently, and both were dismissed as unreproducible against local
+checks -- CI's exact invocation (ruff check ... backend/…
+
+- *(api)* fix byte offsets, empty-index state, and unused has_reference
+Three Important findings from the whole-branch review of the protein
+structure viewer, all independently verified real:
+
+- *(api)* use two_profiles fixture instead of a new local-owner one in protein record tests
+Replaces the ad-hoc local_profile fixture (which called
+Profile.find_all().delete() and adopted "local") with the existing
+two_profiles fixture that test_object_computations.py already uses for this
+e…
+
+- *(models)* sort protein_record imports alphabetically for ruff I001
+The import block in __init__.py now correctly orders profile before
+protein_record alphabetically. The test file's imports now correctly
+place app.metadata before app.models. Both changes satisfy ruff…
+
+- *(frontend)* move Other running section into In Progress column (#537)
+* fix(frontend): move Other running section into In Progress column
+
+- *(frontend)* show confirmation dialog before running QC (#532)
+* fix(frontend): show confirmation dialog before running QC
+
+- *(pipelines)* satisfy ruff on the new abyss tests
+CI's ruff check caught an unused local and an unsorted import block that
+the local pytest run never exercises: an unread `changed` assignment in
+test_abyss_progress_reports_a_phase, and assemblers imp…
+
+- *(pipelines)* build ABySS-shaped defaults instead of raising on short reads
+default_assembly_params called mode_for_chemistry unconditionally, which
+does a bare mode_flags[chemistry] lookup -- KeyError for ABySS, whose
+mode_flags is empty by design (no chemistry-graded mode; …
+
+- *(frontend)* add explanation for Remove duplicate reads checkbox (#530)
+Adds subtext explaining when to use duplicate removal, similar to the
+existing polyG trimming explanation.
+
+- *(frontend)* auto-select first recommended tool in pipeline tool selector (#529)
+When opening a computation modal, the tool selector now auto-selects the
+first recommended option based on the file's chemistry bucket. Falls back
+to the first available tool if no recommendation exis…
+
+- *(ops)* sync frontend/package-lock.json version on release (#522)
+* fix(ops): sync frontend/package-lock.json version on release
+
+- *(api)* use pipeline_service.launch_qc in qc_all endpoint (#521)
+qc_all_reads was building the run_qc payload inline with only object_id,
+but the handler requires r1_sha256 or r1_path and immediately fails with
+'No input given'. Replaced the inline enqueue with pip…
+
+- *(queue)* fail jobs that exceed machine memory at enqueue time (#517)
+A job requesting more memory than the machine has (e.g. 16384 MB on a
+12.4 GB machine) would sit in the ready set forever because claim.lua can
+never admit it. Nothing told the user why — the job appe…
+
+- *(queue)* say why a queued job isn't running, not just that it waits (#503)
+* docs(queue): spec how a waiting job explains what it is waiting on
+
+- *(api)* include annotation_stats_dir in report dir delete and copy (#514)
+Both remove_report_dirs and copy_report_dirs in object_service.py iterated
+only qc_reports_dir, bam_stats_dir, and vcf_stats_dir, silently omitting
+annotation_stats_dir. This leaked annotation_stats/<…
+
+- *(queue)* forward node_id and ready_key from claim() to claim.lua (#508)
+queue.claim() accepts node_id and ready_key parameters but always called
+the Lua script with keys.READY and omitted the node_id from ARGV[10].
+The worker._try_claim_queue() correctly passes both, so t…
+
+- *(api)* batch the drift sweep's walk and cap findings as they arrive
+The storage-drift sweep did not hold up at the few hundred thousand files
+its own design doc names as the target. Two independent ceilings, both
+reached well before that scale:
+
+- *(api)* add the missing /pipelines/meryl-analysis route so both meryl cards launch
+The kmer_spectra and repeat_density cards both post to
+/pipelines/meryl-analysis, but no such route was ever registered --
+`pipeline_service.launch_meryl_analysis` existed and was never wired to
+one. …
+
+- *(ops)* default BIOINFO_HOME to FastDataExtension, not the retired disk
+`.env` is gitignored, so the compose default is what runs whenever it is
+absent -- a fresh clone, or any `docker compose` invoked from a directory
+without one. That default pointed at /Volumes/ModelEx…
+
+- *(frontend)* keep the settings tab bar from shifting on the Tools page
+The Tools page widened `.settings-page` itself (`.settings-page-wide`,
+860px -> 1400px) to give its tool list room for two columns. Since that
+div is also what centers SettingsNav above it, the wider …
+
+- *(api)* load the drift report singleton after detectors run, not before
+Narrows the window during which a long sweep holds a stale in-memory
+copy of the singleton before save()'s full-document replace.
+
+- *(frontend)* keep Launch greyed across a reload, not just this tab's launch
+
+- *(ai)* name an exhausted token budget when a reasoning model returns no text (#497)
+A reasoning model can burn its entire llm_max_tokens on reasoning_content
+and come back with content: ''. Previously this collapsed into a bare
+BAD_RESPONSE indistinguishable from genuine garbage. Now…
+
+- *(ops)* reject a restore whose recorded database disagrees with MONGO_DB
+mongorestore --archive restores into the database name embedded in the
+dump, not $MONGO_DB -- so a restore run with a non-default MONGO_DB would
+silently write into the wrong database after prompting …
+
+- *(ops)* brace $dir before the ellipsis so restore runs under a UTF-8 locale
+`log "Restoring from $dir…"` and the matching line in cmd_verify parse as
+${dir…} when LC_CTYPE is UTF-8 -- bash reads the ellipsis bytes as
+identifier characters -- so `set -u` killed both subcommand…
+
+- *(ops)* address provider summary to a container name, not a compose service
+write_provider_summary() hardcoded `docker compose exec -T api`, which
+resolves through the compose project rather than a container name -- the
+same trap CLAUDE.md documents for bare `docker compose` …
+
+- *(frontend)* keep a suggestion card's Launch greyed until its job ends
+The Actions-tab cards disabled Launch only for the duration of the POST
+-- milliseconds -- so a card re-enabled the instant the job was queued
+and stayed enabled for the hours it ran. Reported against…
+
+- *(pipelines)* attribute a chunked alignment to the reads it aligns
+The chunked path enqueued align_reads_chunked without object_id, unlike
+the single-shot path beside it. /jobs?object_id= is how every "is
+anything running on this file?" surface answers the question, …
+
+- *(e2e)* parse MCP Streamable-HTTP SSE responses (#486)
+
+- *(queue)* drop dead workers' heartbeats instead of listing them as nodes
+
+- *(api)* verify a node's host key through the client, not known_hosts
+`connect_with_tofu` passed its host-key callback as `known_hosts=`. asyncssh
+treats a callable there as a known-hosts *lookup* -- it calls it with
+`(host, addr, port)`, three strings, and expects the …
+
+- *(e2e)* add trailing slash to MCP URL and render test descriptions
+
+- *(frontend)* drop the pair-group spine from stage-rail cards
+The RAW/TRIMMED and REFSEQ/GENBANK toggle header already brackets a
+card's rows, so the vertical spine inherited from .pair-group -- meant
+to bracket a bare labelled pair -- was redundant, showing a l…
+
+- *(frontend)* date each recent run, not just its time of day
+The recent-runs ledger showed "02:14:07 PM" and nothing else, so a run
+from last Tuesday was indistinguishable from one an hour ago -- the
+column reads as a list of times with no way to place them.
+
+- *(api)* name the provider and reason when a prose call fails
+The History tab's "Generate paragraph" reported "The model call did not
+succeed." and nothing else. The `Failure` returned by `ai.complete()`
+already carried both a coarse `reason` and a scrubbed upst…
+
+- *(queue)* don't dispatch a job whose dependencies say it cannot run
+`_handle_dependencies` decides three different things -- the job has a failed
+dependency, the job must wait, the job is runnable -- and returned None for
+all three. `enqueue` could not tell them apart…
+
+- *(pipelines)* classify the annotation export launcher only as a node type
+`pipeline_service.launch_annotation_export` was in both `NODE_TYPES` and
+`EXCLUDED_LAUNCHES`, which made `TestExhaustiveness::
+test_no_launcher_is_both_used_and_excluded` fail on `main`.
+`test_every_l…
+
+- *(queue)* stop a progress bar's leading CR from logging a blank line
+A tool that prints a normal line and then redraws a progress bar -- `printf
+'start\r\n'` followed by a `\r`-redrawn bar, which is what fasterq-dump and
+prefetch do -- had a blank line reported between…
+
+- *(services)* rename connect_with_tofu timeout param to satisfy ASYNC109
+ruff's ASYNC109 flags a `timeout` parameter on an async function since
+it shadows asyncio.timeout(); renaming to timeout_seconds keeps the
+existing asyncio.wait_for-based deadline without restructurin…
+
+- *(services)* pin node SSH host keys on first use instead of disabling verification
+Implements trust-on-first-use (TOFU) host key verification for SSH connections
+to compute nodes. Adds a connect_with_tofu helper that captures the server host
+key on first connection and enforces it o…
+
+- *(api)* generate the node compose file instead of reading /srv (#426)
+
+- *(services)* warn when an upload chunk arrives without a client digest (#425)
+Logs a warning when write_chunk is called without an expected_sha256 digest,
+so the unverified path is visible in the logs rather than silently
+indistinguishable from the verified one.
+
+- *(ai)* scrub API keys from crash logs in complete() and complete_sync() (#415)
+Both functions logged `str(e)` verbatim when an adapter call crashed. A
+provider client library that echoes the request into its exception message --
+a URL with the key in a query parameter, a header …
+
+- *(frontend)* stack the nodes settings page so the banner spans its column
+The provisioning banner's buttons overhung the box border because the banner
+was ~40px wide, not because of how its contents wrapped. `.settings-body` is
+the shared rail-and-detail flex *row* from the…
+
+- *(frontend)* wrap the provisioning banner instead of overhanging its border
+The result banner was a single unwrapped flex row in a narrow settings column,
+so the Try Again and Close buttons crowded the rounded corner while the message
+was squeezed to a few words per line. A f…
+
+- *(api)* create the node install dir under the remote user's home, not root's
+Provisioning expanded `~/.bioflow` with os.path.expanduser() inside the API
+container, which resolves against that container's own HOME. The container
+runs as root, so the command sent over SSH was `m…
+
+- *(frontend)* fix UniProt downloader checkbox sizing and default selection
+Row checkboxes inherited the global input reset (border, radius,
+padding), squashing them into tiny rounded dots; scope a checkbox
+override to .sra-table so they render normally. Also stop
+pre-selecti…
+
+- *(e2e)* copy frontend into plugin dir and surface query errors
+
+- *(e2e)* copy backend into dashboard dir and use a flat shim
+
+- *(launcher)* import vitest globals so tsc can compile the update tests
+src/update-logic.test.ts used describe/it/expect without importing them,
+unlike its three sibling test files. Vitest injects those globals at
+runtime, so `npm run test` passed and nothing looked wrong…
+
+- *(frontend)* keep the extract-sequence button disabled until it lands
+extractMutation.isPending goes false the instant the job is queued, well
+before the applier has actually created the reference -- so the button
+re-enabled and invited a second click during that gap. T…
+
+- *(pipelines)* classify the GenBank sequence launcher as excluded
+
+- *(provenance)* classify extract_genbank_sequence in the step-verb registry
+Registering the handler in Task 4 made test_every_registered_handler_is_classified
+fail: _STEP_VERBS/_NO_NARRATIVE_STEP partition every registered handler, and this
+one had no entry in either. Same re…
+
+- *(pipelines)* classify the annotation stats and export handlers for provenance
+Both were unclassified in _STEP_VERBS/_NO_NARRATIVE_STEP, the same
+exhaustiveness gap fixed for the canvas registry in the prior commit.
+run_annotation_stats writes facts onto the existing object with…
+
+- *(pipelines)* exclude the annotation launchers from the canvas registry
+launch_annotation_stats and launch_annotation_export both failed the
+exhaustiveness test that requires every launch_* to be classified as a
+canvas node type or explicitly excluded. Neither has a fixed…
+
+- *(ui)* stop firing the export-count query on the Genes tab
+The export control is only visible when view !== 'genes', but its backing
+count query's enabled condition didn't include that check -- so it kept
+refetching on every filter change while the user sat o…
+
+- *(pipelines)* honor a locus jump's coordinate window in annotation export
+The export preview and launch read the raw contig filter state and never
+saw the Locus jump input's min/max at all, so exporting after jumping to a
+specific region silently operated over the whole unb…
+
+- *(api)* remove a duplicated export precondition and close a traversal gap
+launch_annotation_export's own 'no computed results' check raised
+ValidationError (422) while the identical condition is NotFoundError (404)
+everywhere else, including the same route's own guard right…
+
+- *(queue)* attach an exported annotation subset to its run
+Every other ingest-creating applier in this file resolves the job's run and
+records the new object as one of its outputs, so it appears in the
+run/activity view. This applier ingested the subset but n…
+
+- *(pipelines)* fail verification on an unindexed line, not just a mismatched one
+write_subset's safety property -- verify every line against the index before
+writing it -- previously held only when every line number in the caller's
+set happened to already be a key the index record…
+
+- *(nodes)* use AppError hierarchy in /nodes router instead of bare HTTPException
+The /nodes router raised bare HTTPException at 11 call sites, producing
+{"detail": ...} bodies that the frontend's client.ts cannot read — it
+looks for body.message and falls back to a bare "409 Confl…
+
+- *(nodes)* pass PEM string to import_private_key instead of StringIO
+asyncssh.import_private_key expects a str or bytes, not a file-like
+object. The io.StringIO wrapper caused an AttributeError at runtime
+whenever key-based node provisioning was attempted, because
+impo…
+
+- *(pipelines)* classify annotation_stats only as an excluded launcher
+This reverts commit bdfec631, which added a NodeTypeSpec for
+annotation_stats. Two commits landed independently for #355, each a
+complete fix on its own: bdfec631 added the spec, and a3f54da0 added th…
+
+- *(pipelines)* classify launch_annotation_stats as an excluded launcher
+Exhaustiveness check in test_node_types.py flagged it as unclassified.
+It's a read-only Results computation over an existing GFF/GTF/BED/GenBank
+object, auto-triggered at ingest and callable on demand…
+
+- *(pipelines)* add a NodeTypeSpec for annotation_stats
+launch_annotation_stats had no entry in NODE_TYPES or EXCLUDED_LAUNCHES,
+failing test_every_launch_function_is_classified on every run. Its
+sibling bam_stats/vcf_stats already had entries; this one wa…
+
+- *(pipelines)* classify run_annotation_stats as a no-narrative-step handler
+Same shape as run_bam_stats and run_vcf_stats: it writes statistics back
+onto an existing object rather than producing a new one, so it belongs in
+_NO_NARRATIVE_STEP alongside them. #257 added the han…
+
+- *(ci)* allow workflow_dispatch to bypass the tag version-guard
+The version-guard job's if condition only matched tag pushes, so a
+workflow_dispatch (intended as a 'does this still build' smoke test)
+skipped the guard and cascaded to skip the entire workflow. Allo…
+
+- *(api)* add explicit strict= to the row-packing zip
+CI's ruff check (B905) flags zip() without strict= -- a rule the local
+worktree test run never invokes. features and rows are guaranteed the same
+length here (rows is built from a list comprehension o…
+
+- *(pipelines)* wire launch_annotation_stats to two-tier reference resolution
+Task 10's browser verification found the track's "no coordinate axis" refusal
+firing for every real annotation in the seeded dataset. Traced to
+launch_annotation_stats still calling _reference_for_ann…
+
+- *(pipelines)* require the reference role in accession-tier resolution
+Task 7's real-database check (docs/superpowers/plans/2026-08-12-annotation-track-viewer.md)
+found that resolve_annotation_reference's accession tier filtered candidates
+on FormatKind.FASTA alone, not …
+
+- *(pipelines)* enforce the reference-or-reason invariant on AnnotationReference
+
+- *(pipelines)* prefer the reference role when resolving an annotation's genome
+_reference_for_annotation took the first FASTA in derived_from with no role
+check, so an annotation downloaded alongside its protein.faa could resolve to
+the protein set. Matches reference_for_bam's p…
+
+- *(pipelines)* treat a self-referencing parent as absent, not a silent drop
+Correct the features_in_window docstring, which claimed two queries
+when the code issues one SELECT (parents and children together) then
+reassembles the tree in two Python passes.
+
+- *(annotation)* update genbank_parse tests for the Feature.parents rename
+The rebase onto main pulled in GenBank annotation support, which
+constructed Feature with the pre-Task-1 parent kwarg and asserted
+against the same singular field in its own tests. genbank_parse.py's
+…
+
+- *(annotation)* update owner-scoping test for Feature.parents rename
+test_route_owner_scoping.py still constructed Feature with the old
+`parent=None` kwarg, which Task 1 replaced with `parents: tuple[str, ...]`.
+The test was failing collection/setup with a TypeError, m…
+
+- *(annotation)* wrap views in TabPanel and use the server's echoed depth_cap
+
+- *(annotation)* fix the third parent= kwarg site broken by the Feature.parents rename
+
+- *(annotation)* make build_gene_table re-runnable and distinguish same-coordinate leaf types
+
+- *(annotation)* dedupe child_count the same way descendant_count already is
+
+- *(annotation)* keep every parent of a multi-parent GFF3 record, not just the first
+
+- *(annotation)* keep GenBank out of the featureCounts annotation pool
+_is_annotation gates more than annotation-Results eligibility -- it also
+backs annotations_for_project/resolve_annotation, which feed
+launch_quantify. Adding GENBANK there (Task 8's original change) m…
+
+- *(annotation)* harden the GenBank contig-lengths ordering dependency
+Two issues from Task 7's code-quality review, both about the same root
+cause: nothing enforced that _genbank_rows' generator was fully drained
+before the handler read its side-channel facts dict, so a…
+
+- *(formats)* tighten GenBank sniff to a literal space, cover compressibility
+
+- *(pipelines)* stop misreading a short continuation line as a new feature
+iter_features's key-detection check only required a line to reach column 6
+before testing whether column 22 held non-whitespace. A wrapped qualifier's
+tail line shorter than column 22 has an empty sli…
+
+- *(ui)* surface update-start failures and clear stale progress panels across nodes
+startUpdate had no onError handler, so a 409/404 from POST /nodes/{id}/update
+rejected silently with the confirmation dialog just re-enabling its button.
+Also, clicking Update on a new node left a pri…
+
+- *(services)* make run_update's own error handling failure-tolerant
+The initial task lookup and _fail's own task.save() were unguarded, so a
+transient Mongo hiccup during either could raise out of run_update -- a
+fire-and-forget background task with no caller to catch…
+
+- *(services)* log at node_ssh's failure points, not just raise
+
+- *(api)* run current-version's docker probe off the event loop
+_own_image_digest shells out to docker twice via subprocess.run, up to
+~20s worst case, blocking the single event loop thread and stalling
+every other request the primary serves (node heartbeats, job …
+
+- *(queue)* resolve image digest through the container's own image id, not a hardcoded tag
+
+- *(models)* use the repo's timezone-aware utcnow() in NodeUpdateTask
+datetime.utcnow() is deprecated and timezone-naive; match the local
+utcnow() pattern node.py already uses for this purpose.
+
+- *(api)* register NodeProvisionTask so provisioning can write its task document
+Registering the model in ALL_MODELS activated a previously dead code
+path in db.index_reconcile: NodeProvisionTask.Settings.indexes held a
+bare field-name string ("task_id") instead of an IndexModel, …
+
+- *(frontend)* clarify the per-contig coverage loading state
+The table showed a bare "Loading…" whenever the query had no data yet, so a
+failed request left "Loading…" on screen indefinitely. Show the pending
+state only while the request is in flight and a dist…
+
+- *(frontend)* align coverage-chart titles on a shared baseline
+The Insert size and Mapping quality cards sit in a flex row, but each still
+carried the .section class, whose margin-top offsets every card after the
+first. That pushed "Mapping quality" below and rig…
+
+- *(agent)* await the project-context services the system prompt depends on
+#290's project-context injection made _system_prompt and
+_build_project_context call two async services, search_service.count_by_kind
+and project_service.recent_jobs, without await. Every /ask and /re…
+
+- *(metadata)* classify molecule_type and library_source as open/closed
+Two new ENUM fields (2e073b8f) had no open/closed classification, tripping
+test_schemas_open_vocabulary's tripwire: 17 distinct ENUM FieldDefs, 15
+accounted for. molecule_type (DNA/RNA/Other) is a voc…
+
+- *(api)* rewrite Docker service hostnames in URLs handed to provisioned nodes
+_rewrite_host built its pattern with an f-string containing `:\\d+`, which in
+an f-string is a literal backslash followed by "d" rather than the digit class
+`\d`. So `mongodb://mongo:27017/db` never m…
+
+- *(models)* register NodeProvisionTask so node provisioning can write
+NodeProvisionTask was never added to ALL_MODELS, so init_beanie never
+created its collection. Node provisioning from Settings -> Nodes failed at
+runtime: _provision_node writes a NodeProvisionTask doc…
+
+- *(ops)* fail a release tag whose launcher version files disagree
+Tauri reads tauri.conf.json, not Cargo.toml, so a stale one publishes
+bundles labelled with the wrong version while every other check passes.
+That is what shipped as launcher-v0.2.0 (#335).
+
+- *(launcher)* bump tauri.conf.json so bundles carry the release version
+Tauri reads tauri.conf.json's version key in preference to Cargo.toml, and
+bump_version.py never wrote it -- so launcher-v0.1.0 and launcher-v0.2.0 both
+published bundles named 0.1.0. Pre-releases get…
+
+- *(pipelines)* drop an unused Feature import in annotation_db
+build_annotation_db's rows parameter is untyped, so Feature never
+appears as an annotation anywhere in this file -- caught by CI's
+ruff check, which flagged F401 on a pass the local pre-push check
+mis…
+
+- *(frontend)* drop a dead AskQuestionResponse import
+Left behind by rebasing onto main: the conflict in client.ts's import
+block had AskQuestionResponse on one side, and resolving it kept the
+name without checking it still exists on the branch being reb…
+
+- *(pipelines)* dispatch run_annotation_stats via THREAD, not SUBPROCESS
+Pure in-process parsing and SQLite writes, no binary to spawn or kill
+via process group -- same shape as run_transcript_qc, which already
+uses THREAD for the identical reason. Also documents the attri…
+
+- *(pipelines)* stop exon/CDS rows colliding with their transcript's feature_id
+parse_gtf_line's else-branch set feature_id equal to parent
+(transcript_id or gene_id) for every exon/CDS/UTR row, so siblings
+under the same transcript were indistinguishable from each other and
+from…
+
+- *(ci)* move workflows from self-hosted to GitHub-hosted runners
+The repo going public unlocks free hosted ubuntu-24.04-arm and macos-latest
+runners, removing the constraint that put arm64 Docker builds and macOS
+launcher signing on self-hosted machines. publish-im…
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 ## [0.5.1] - 2026-08-13
 
 
