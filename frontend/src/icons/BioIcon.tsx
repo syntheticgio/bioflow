@@ -1504,9 +1504,15 @@ export const BIO_ICONS: Record<string, Glyph> = {
   },
   agent: {
     label: "Agent",
+    // Optically centred, not geometrically: the antenna is a hairline and the
+    // head is a solid block, so centring the ink box (y=131 of 256) drops the
+    // face to y=156 and the icon reads low beside `projects` and `files` in
+    // the footer strip. Shifted up 17 units (9.06 -> -8) to bring the head
+    // centre to y=139. Not the full correction -- head-centring needs
+    // ty=-19.4, which clips the antenna tip off the top of the viewBox.
     a: (
       <>
-        <g transform="translate(-6.73 9.06) scale(1.0526)" strokeWidth={15.2}>
+        <g transform="translate(-6.73 -8) scale(1.0526)" strokeWidth={15.2}>
         <path d="M128 72V38"></path>
         <rect x="40" y="72" width="176" height="136" rx="28" fill="var(--bio-accent,#0088b0)" fillOpacity="var(--bio-duo,0.15)"></rect>
         <g fill="currentColor" stroke="none">
