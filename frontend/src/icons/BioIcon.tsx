@@ -1842,6 +1842,81 @@ export const BIO_ICONS: Record<string, Glyph> = {
       </>
     ),
   },
+  /* Agent header controls. Settings drops the gear (its teeth close up at
+   * 13px) for sliders; delete keeps a bin in the outline forms and strikes the
+   * bubble in the marks; restart is the set's only closed rotation. */
+  agent_settings: {
+    label: "Agent settings",
+    a: (
+      <g transform="translate(4.92 4.92) scale(0.9615)" strokeWidth={16.64}>
+        <path d="M40 72h176"></path><path d="M40 128h176"></path><path d="M40 184h176"></path>
+        <circle cx="88" cy="72" r="22" fill="var(--bio-accent,#0088b0)" fillOpacity="var(--bio-duo,0.15)"></circle>
+        <circle cx="164" cy="128" r="22" fill="var(--bio-accent,#0088b0)" fillOpacity="var(--bio-duo,0.15)"></circle>
+        <circle cx="112" cy="184" r="22" fill="var(--bio-accent,#0088b0)" fillOpacity="var(--bio-duo,0.15)" stroke="var(--bio-accent,#0088b0)"></circle>
+      </g>
+    ),
+    b: (
+      <g transform="translate(-11.13 -11.13) scale(1.0870)" strokeWidth={14.72}>
+        <circle cx="128" cy="128" r="92"></circle>
+        <path d="M128 128l58-58" stroke="var(--bio-accent,#0088b0)"></path>
+      </g>
+    ),
+    c: (
+      <g transform="translate(4.92 4.92) scale(0.9615)" strokeWidth={16.64}>
+        <path d="M40 96h176"></path><path d="M40 160h176"></path>
+        <g stroke="none"><circle cx="104" cy="96" r="18" fill="#201e1d"></circle><circle cx="168" cy="160" r="18" fill="var(--bio-accent,#0088b0)"></circle></g>
+      </g>
+    ),
+  },
+  chat_delete: {
+    label: "Delete chat",
+    a: (
+      <g transform="translate(4.92 4.92) scale(0.9615)" strokeWidth={16.64}>
+        <path d="M32 56h192v104H116l-44 40v-40H32Z" fill="var(--bio-accent,#0088b0)" fillOpacity="var(--bio-duo,0.15)"></path>
+        <path d="M40 196 216 36" stroke="var(--bio-accent,#0088b0)"></path>
+      </g>
+    ),
+    b: (
+      <g transform="translate(-11.13 -11.13) scale(1.0870)" strokeWidth={14.72}>
+        <path d="M56 76h144"></path>
+        <path d="M100 76V48h56v28"></path>
+        <path d="M76 76l12 128h80l12-128"></path>
+        <path d="M112 110v60" stroke="var(--bio-accent,#0088b0)"></path><path d="M144 110v60" stroke="var(--bio-accent,#0088b0)"></path>
+      </g>
+    ),
+    c: (
+      <g transform="translate(4.92 4.92) scale(0.9615)" strokeWidth={16.64}>
+        <path d="M32 56h192v104H116l-44 40v-40H32Z" fill="#201e1d" stroke="none"></path>
+        <path d="M40 196 216 36" strokeWidth={26} stroke="var(--bio-accent,#0088b0)"></path>
+      </g>
+    ),
+  },
+  agent_restart: {
+    label: "Restart agent",
+    a: (
+      <g transform="translate(4.92 4.92) scale(0.9615)" strokeWidth={16.64}>
+        <circle cx="128" cy="128" r="88" fill="var(--bio-accent,#0088b0)" fillOpacity="var(--bio-duo,0.15)" stroke="none"></circle>
+        <path d="M128 40a88 88 0 1 1-88 88"></path>
+        <path d="M102 14l26 26-26 26" stroke="var(--bio-accent,#0088b0)"></path>
+      </g>
+    ),
+    b: (
+      <g transform="translate(-11.13 -11.13) scale(1.0870)" strokeWidth={14.72}>
+        <path d="M42 97A92 92 0 0 1 214 97"></path>
+        <path d="M214 159A92 92 0 0 1 42 159"></path>
+        <path d="M178 84l38 12-12 38" stroke="var(--bio-accent,#0088b0)"></path>
+        <path d="M78 172l-38-12 12-38"></path>
+      </g>
+    ),
+    c: (
+      <>
+        <g transform="translate(4.92 4.92) scale(0.9615)" strokeWidth={22}>
+          <path d="M128 40a88 88 0 1 1-88 88"></path>
+        </g>
+        <path d="M120 12 176 40 120 68Z" fill="var(--bio-accent,#0088b0)" stroke="none"></path>
+      </>
+    ),
+  },
   user: {
     label: "User",
     a: (
@@ -1952,6 +2027,12 @@ export const CHOSEN_VARIANT: Record<string, BioIconVariant> = {
   reads_trimmed_pacbio: "c",
   reads_raw_nanopore: "c",
   reads_trimmed_nanopore: "c",
+  // Agent header controls keep the house default (`a`) -- the reviewed pick
+  // for all three, replacing the ⚙️/🗑/🔄 emoji in the AI Agent drawer head.
+  // Listed rather than left implicit so re-picking one is a one-line edit.
+  agent_settings: "a",
+  chat_delete: "a",
+  agent_restart: "a",
   // user keeps the house default (`a`) -- explicitly chosen in review as the
   // replacement for the 🧬 emoji beside the profile name.
 };
@@ -1969,6 +2050,7 @@ export function BioIcon({
   size = 22,
   className = "",
   title,
+  decorative = false,
 }: {
   name: BioIconName;
   /** Omit to get the reviewed choice for this concept. */
@@ -1976,10 +2058,34 @@ export function BioIcon({
   size?: number;
   className?: string;
   title?: string;
+  /** Set when the glyph sits inside a control that already names itself --
+   *  a `title`-carrying icon button, say. Without it the svg contributes a
+   *  second tooltip and a second accessible name for the one control. */
+  decorative?: boolean;
 }) {
   const glyph = BIO_ICONS[name];
   if (!glyph) return null;
   const chosen = variant ?? variantFor(name);
+  if (decorative) {
+    return (
+      <svg
+        viewBox="0 0 256 256"
+        width={size}
+        height={size}
+        className={className}
+        aria-hidden="true"
+        focusable="false"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth={16}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        style={{ display: "block", flexShrink: 0 }}
+      >
+        {glyph[chosen]}
+      </svg>
+    );
+  }
   return (
     <svg
       viewBox="0 0 256 256"
