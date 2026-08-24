@@ -233,6 +233,15 @@ if [ "$LINE" = "app" ]; then
   # Move the release commit onto the stage branch, then push branch and tag
   # together: a pushed tag whose commit never landed is a tag CI cannot check
   # out.
+  #
+  # This push CREATES alpha/X.Y.Z the first time a version is cut, and the
+  # "Protect main and version branches" ruleset carries a `creation` rule that
+  # now matches alpha/**, beta/** and release/** (#827 -- before that its
+  # patterns were written against the *tag* namespace, `v0.3.0`, and so matched
+  # no branch at all). The push works only because that ruleset grants the
+  # admin repository role `bypass_mode: always`, and releases are cut by an
+  # admin. Cut one as a non-admin -- a CI token, a future contributor -- and
+  # this line fails with a ruleset rejection, not a git error.
   if git rev-parse -q --verify "refs/heads/$TARGET" >/dev/null; then
     git switch "$TARGET"            # at HEAD, guaranteed by the preflight
   else
