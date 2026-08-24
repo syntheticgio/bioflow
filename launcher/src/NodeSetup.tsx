@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import mastheadImg from "./assets/broadhead-masthead.png";
+import { LAUNCHER_VERSION_LABEL } from "./version";
 import {
   discoverNodeConnection,
   dockerReady,
@@ -179,7 +180,7 @@ export function NodeSetup({ onInstalled, onBack }: Props) {
             {step === "details" && "Configure compute node"}
             {step === "install" && "Ready to install"}
           </span>
-          <span>{dockerIsReady ? "Docker ready" : "Docker not detected"} · Launcher 0.1.0</span>
+          <span>{dockerIsReady ? "Docker ready" : "Docker not detected"} · {LAUNCHER_VERSION_LABEL}</span>
         </div>
         <div className="masthead-rule-thin" />
       </header>

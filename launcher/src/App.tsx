@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import mastheadImg from "./assets/broadhead-masthead.png";
+import { LAUNCHER_VERSION_LABEL } from "./version";
 import { checkForUpdate, currentSettings, listVersionOptions, openBioFlow, otherStacks, runStack, status, stopStack, updateStack, updateToStage } from "./commands";
 import { MigrateStorage } from "./MigrateStorage";
 import { PrefetchStep } from "./PrefetchStep";
@@ -350,14 +351,14 @@ export function App() {
         {state.kind === "DockerUnavailable" && (
           <div className="status-line status-line-warn">
             <span>Docker unavailable</span>
-            <span>Launcher 0.1.0</span>
+            <span>{LAUNCHER_VERSION_LABEL}</span>
           </div>
         )}
         {state.kind === "Stopped" && (
           <div className="status-line">
             <span>Stopped</span>
             <span>
-              Launcher 0.1.0
+              {LAUNCHER_VERSION_LABEL}
               <button
                 className="btn-reload"
                 title="Reload launcher"
@@ -375,7 +376,7 @@ export function App() {
               Running · localhost:{settings.port}
             </span>
             <span>
-              API healthy
+              API healthy · {LAUNCHER_VERSION_LABEL}
               <button
                 className="btn-reload"
                 title="Reload launcher"
