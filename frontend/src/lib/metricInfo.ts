@@ -44,7 +44,40 @@ export interface MetricInfo {
 const CALC = "/help/calculations";
 
 export const METRIC_INFO: Record<string, MetricInfo> = {
+  // ---- AI summary --------------------------------------------------------
+  // The one block here describing generated prose rather than a measurement.
+  // That distinction is the whole point of the entries: the summary renders
+  // as a row among measured numbers, so the card is where it gets said that
+  // this one was written rather than measured.
+  ai_summary: {
+    term: "AI summary",
+    description:
+      "A plain-language description of this file written by a language model from the facts on this page. It is generated text, not a measurement, and it can be wrong or state a figure with more confidence than the underlying number deserves. Treat every figure it quotes as needing a check against the row it came from.",
+    computed:
+      "Generated from this object's facts and metadata after they were parsed. The summary reads only what is already shown here -- it never re-reads the file, so it cannot know anything the rows above do not.",
+  },
+  ai_summary_at: {
+    term: "AI summary written",
+    description:
+      "When the summary text above was generated. A summary older than the newest fact on this page describes a file as it used to be, which is the usual reason its wording no longer matches the numbers beside it.",
+  },
+  ai_summary_model: {
+    term: "AI summary model",
+    description:
+      "Which language model wrote the summary. Recorded because the wording, and the kind of mistake it tends to make, depend on the model -- two summaries of the same file are only comparable when this matches.",
+  },
+
   // ---- Sampling and provenance -------------------------------------------
+  sra_downloaded_from: {
+    term: "SRA accession",
+    description:
+      "The NCBI Sequence Read Archive run this file was downloaded from. It identifies the exact run to anyone re-fetching the data, which is the identifier a methods section needs.",
+  },
+  sra_platform: {
+    term: "SRA platform",
+    description:
+      "The sequencing platform NCBI records for this run, in NCBI's own spelling. Because it comes stamped from the archive rather than inferred from an instrument name, it is taken as authoritative when choosing which QC tools this file's reads call for.",
+  },
   stats_sampled_reads: {
     term: "Records sampled",
     description:
@@ -1158,6 +1191,13 @@ export const METRIC_INFO: Record<string, MetricInfo> = {
  * new fact cannot quietly arrive with no explanation and no decision.
  */
 export const NO_INFO_NEEDED: ReadonlySet<string> = new Set([
+  // An opaque hash of the facts the summary was written from, used only to
+  // notice that they changed. Nothing about the digest itself is readable,
+  // and the staleness it guards is explained on `ai_summary_at` instead.
+  "ai_summary_fingerprint",
+  // Names the archive the bytes came from ("ncbi"). The accession beside it
+  // is the identifier worth explaining; this is just where it was fetched.
+  "sra_download_source",
   // Provenance: which tool ran, which version, and when. Self-describing.
   "checkm2_version",
   // Which database the scores came from. Names a registry entry; the label
