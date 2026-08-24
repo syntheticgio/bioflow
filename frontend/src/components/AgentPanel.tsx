@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
 import { api } from "../api/client";
+import { BioIcon } from "../icons/BioIcon";
 import { useAgentSSE } from "../hooks/useAgentSSE";
 import { AgentMessageBubble } from "./AgentMessageBubble";
 import { AgentPanelInput } from "./AgentPanelInput";
@@ -283,7 +284,7 @@ export function AgentPanel({
             title="Agent instructions"
             style={{ marginLeft: "auto" }}
           >
-            ⚙️
+            <BioIcon name="agent_settings" size={16} decorative />
           </button>
           <button
             type="button"
@@ -296,7 +297,7 @@ export function AgentPanel({
             title="New session (clears the agent's memory)"
             disabled={isStreaming}
           >
-            🗑
+            <BioIcon name="chat_delete" size={16} decorative />
           </button>
           <button
             type="button"
@@ -304,7 +305,7 @@ export function AgentPanel({
             onClick={() => restart.mutate()}
             title="Restart agent (keeps the conversation)"
           >
-            🔄
+            <BioIcon name="agent_restart" size={16} decorative />
           </button>
           <button type="button" className="icon-btn" onClick={onClose} title="Close">
             ×
