@@ -103,11 +103,24 @@ export const LABELS: Record<string, string> = {
   bin_taxon_label: "Taxonomic label",
   bin_taxon_fraction: "Taxonomic fraction",
   bin_unclassified_fraction: "Unclassified fraction",
+  // Written by the summariser and the SRA downloader. Both landed in the
+  // catch-all "Other" group with fallback labels and no explanations (#797):
+  // the fallback renders a plausible-looking row, so nothing pointed out that
+  // an AI-written paragraph was sitting beside measured numbers unmarked.
+  ai_summary: "AI summary",
+  ai_summary_at: "AI summary written",
+  ai_summary_model: "AI summary model",
+  ai_summary_fingerprint: "AI summary fingerprint",
+  sra_downloaded_from: "SRA accession",
+  sra_download_source: "Download source",
+  sra_platform: "SRA platform",
 };
 
 // Rendered as annotations on other rows, or in their own panel — not as rows
 // of their own.
-const SUPPRESSED = new Set([
+/** Exported for the metric-info coverage test, which treats a suppressed key
+ *  as a deliberate decision not to render a row for it. */
+export const SUPPRESSED = new Set([
   "read_count_exact",
   "record_count_exact",
   "sequence_count_exact",
@@ -311,6 +324,25 @@ const GROUPS: FactGroup[] = [
     ],
     match: (k) => k.startsWith("bin_taxon_") || k.startsWith("bin_unclassified_"),
   },
+  {
+    title: "Download provenance",
+    note: "Where the bytes came from, as recorded when the run was fetched. This is provenance, not a measurement of the file.",
+    keys: ["sra_downloaded_from", "sra_download_source", "sra_platform"],
+  },
+  {
+    // Last, and titled for its source: an AI-written paragraph beside
+    // measured numbers reads as another measurement unless the heading says
+    // otherwise.
+    title: "AI summary",
+    note: "Written by a language model from the facts above. It can be wrong, and it is not a measurement -- check any figure it quotes against the row it came from.",
+    keys: [
+      "ai_summary",
+      "ai_summary_at",
+      "ai_summary_model",
+      "ai_summary_fingerprint",
+    ],
+    match: (k) => k.startsWith("ai_summary"),
+  },
 ];
 
 /**
@@ -320,7 +352,7 @@ const GROUPS: FactGroup[] = [
  * dropped -- a new fact from a parser must still be visible before anyone
  * remembers to classify it here.
  */
-function groupKeys(
+export function groupKeys(
   keys: string[],
 ): { title: string; note?: string; keys: string[] }[] {
   const remaining = new Set(keys);
