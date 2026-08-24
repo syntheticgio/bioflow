@@ -442,6 +442,31 @@ describe("classifyChromosomes", () => {
     expect(view.kind).toBe("drawable");
   });
 
+  // The real GCA_000001405.29 case: 709 sequences in the file, 50 recorded,
+  // and the recorded window holds chromosomes 1-18 only. Drawing 18 bars is
+  // honest, but saying nothing about the other six is not.
+  it("flags a strip built from a truncated window", () => {
+    const view = classifyChromosomes({
+      sequence_names: Object.keys(HUMAN_LENGTHS),
+      sequence_lengths: HUMAN_LENGTHS,
+      sequence_roles: HUMAN_ROLES,
+      sequence_count: 709,
+    });
+    if (view.kind !== "drawable") throw new Error("expected drawable");
+    expect(view.truncated).toBe(true);
+  });
+
+  it("does not flag a complete file", () => {
+    const view = classifyChromosomes({
+      sequence_names: Object.keys(HUMAN_LENGTHS),
+      sequence_lengths: HUMAN_LENGTHS,
+      sequence_roles: HUMAN_ROLES,
+      sequence_count: Object.keys(HUMAN_LENGTHS).length,
+    });
+    if (view.kind !== "drawable") throw new Error("expected drawable");
+    expect(view.truncated).toBeUndefined();
+  });
+
   // A role entry for a sequence the file does not contain must not invent a
   // bar: a GCF role map against a GCA file, or a subset FASTA.
   it("only draws sequences the file actually has", () => {
