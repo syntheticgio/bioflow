@@ -125,180 +125,183 @@ export function Settings({ current, running, onClose, onApplied }: Props) {
         <h2 className="dialog-title">Settings</h2>
         <div className="dialog-rule" />
 
-        <div className="dialog-fields">
-          <div className="field">
-            <div className="field-head">
-              <span className="field-label">Storage location</span>
+        <div className="dialog-body">
+          <div className="dialog-fields">
+            <div className="field">
+              <div className="field-head">
+                <span className="field-label">Storage location</span>
+              </div>
+              {running ? (
+                <span className="field-value" aria-label="Storage location">
+                  {storageLocation}
+                </span>
+              ) : (
+                <input
+                  className="field-value-input"
+                  value={storageLocation}
+                  onChange={(e) => setStorageLocation(e.target.value)}
+                  disabled={applying}
+                  aria-label="Storage location"
+                />
+              )}
+              {running && (
+                <span className="field-hint" role="note">
+                  Stop the stack to change this.
+                </span>
+              )}
+              {storageChanged && (
+                <span className="field-hint-warn" role="note">
+                  Changing the storage location points BioFlow at a different folder.
+                  Existing data does not move -- copy it yourself first if you want it to
+                  carry over.
+                </span>
+              )}
             </div>
-            {running ? (
-              <span className="field-value" aria-label="Storage location">
-                {storageLocation}
-              </span>
-            ) : (
-              <input
-                className="field-value-input"
-                value={storageLocation}
-                onChange={(e) => setStorageLocation(e.target.value)}
-                disabled={applying}
-                aria-label="Storage location"
-              />
-            )}
-            {running && (
-              <span className="field-hint" role="note">
-                Stop the stack to change this.
-              </span>
-            )}
-            {storageChanged && (
-              <span className="field-hint-warn" role="note">
-                Changing the storage location points BioFlow at a different folder.
-                Existing data does not move -- copy it yourself first if you want it to
-                carry over.
-              </span>
-            )}
-          </div>
 
-          <div className="field dialog-field-narrow">
-            <span className="field-label">Port</span>
-            {running ? (
-              <span className="field-value field-value-numeric" aria-label="Port">
-                {port}
-              </span>
-            ) : (
+            <div className="field dialog-field-narrow">
+              <span className="field-label">Port</span>
+              {running ? (
+                <span className="field-value field-value-numeric" aria-label="Port">
+                  {port}
+                </span>
+              ) : (
+                <input
+                  className="field-value-input field-value-numeric"
+                  type="number"
+                  value={port}
+                  onChange={(e) => setPort(Number(e.target.value))}
+                  disabled={applying}
+                  aria-label="Port"
+                />
+              )}
+              {running && (
+                <span className="field-hint" role="note">
+                  Stop the stack to change this.
+                </span>
+              )}
+            </div>
+
+            <div className="field">
+              <label className="checkbox-row">
+                <input
+                  type="checkbox"
+                  checked={networkExposed}
+                  onChange={(e) => setNetworkExposed(e.target.checked)}
+                  disabled={applying}
+                />
+                <span className="checkbox-box" aria-hidden="true">
+                  {networkExposed ? "✓" : ""}
+                </span>
+                <span className="checkbox-label">
+                  Allow access from other devices on my network
+                </span>
+              </label>
+              {networkExposed && (
+                <span className="checkbox-hint" role="note">
+                  Anyone on your network can reach BioFlow with no login required.
+                </span>
+              )}
+            </div>
+
+            <div className="field dialog-field-narrow">
+              <span className="field-label">Hard memory limit (GB)</span>
               <input
                 className="field-value-input field-value-numeric"
                 type="number"
-                value={port}
-                onChange={(e) => setPort(Number(e.target.value))}
+                min="1"
+                step="1"
+                placeholder="No limit"
+                value={hardMemGb}
+                onChange={(e) => setHardMemGb(e.target.value)}
                 disabled={applying}
-                aria-label="Port"
+                aria-label="Hard memory limit in GB"
               />
-            )}
-            {running && (
-              <span className="field-hint" role="note">
-                Stop the stack to change this.
-              </span>
-            )}
-          </div>
-
-          <div className="field">
-            <label className="checkbox-row">
-              <input
-                type="checkbox"
-                checked={networkExposed}
-                onChange={(e) => setNetworkExposed(e.target.checked)}
-                disabled={applying}
-              />
-              <span className="checkbox-box" aria-hidden="true">
-                {networkExposed ? "✓" : ""}
-              </span>
-              <span className="checkbox-label">
-                Allow access from other devices on my network
-              </span>
-            </label>
-            {networkExposed && (
-              <span className="checkbox-hint" role="note">
-                Anyone on your network can reach BioFlow with no login required.
-              </span>
-            )}
-          </div>
-
-          <div className="field dialog-field-narrow">
-            <span className="field-label">Hard memory limit (GB)</span>
-            <input
-              className="field-value-input field-value-numeric"
-              type="number"
-              min="1"
-              step="1"
-              placeholder="No limit"
-              value={hardMemGb}
-              onChange={(e) => setHardMemGb(e.target.value)}
-              disabled={applying}
-              aria-label="Hard memory limit in GB"
-            />
-            {hardMem.kind === "none" && (
-              <span className="field-hint" role="note">
-                No hard cap. BioFlow will not <em>plan</em> to exceed the memory
-                budget you set inside the app, but a job that uses more than
-                predicted can still go over. Nothing is killed.
-              </span>
-            )}
-            {hardMem.kind === "set" && (
-              <span className="field-hint-warn" role="note">
-                BioFlow <em>cannot</em> exceed {hardMemGb} GB. A job that tries is
-                killed and loses its work. Protects the machine; costs the job.
-                Takes effect on restart.
-              </span>
-            )}
-            {hardMem.kind === "invalid" && (
-              <span className="field-hint-warn" role="note">
-                Enter a whole number of GB (at least 1), or leave blank for no
-                hard cap.
-              </span>
-            )}
-          </div>
-
-          {/* ── Version mode ─────────────────────────────────── */}
-          <div className="field">
-            <span className="field-label">Version</span>
-            <div className="field-row">
-              <select
-                className="field-value-input"
-                value={versionMode}
-                onChange={(e) => setVersionMode(e.target.value as VersionMode)}
-                disabled={applying || rebuilding}
-                aria-label="BioFlow version"
-              >
-                <option value="release">Release</option>
-                <option value="alpha" disabled={!alphaEnabled}>
-                  {alphaEnabled ? `Alpha (${versionOptions?.alpha})` : "Alpha (unavailable)"}
-                </option>
-                <option value="beta" disabled={!betaEnabled}>
-                  {betaEnabled ? `Beta (${versionOptions?.beta})` : "Beta (unavailable)"}
-                </option>
-                <option value="developer">Developer (local build)</option>
-              </select>
+              {hardMem.kind === "none" && (
+                <span className="field-hint" role="note">
+                  No hard cap. BioFlow will not <em>plan</em> to exceed the memory
+                  budget you set inside the app, but a job that uses more than
+                  predicted can still go over. Nothing is killed.
+                </span>
+              )}
+              {hardMem.kind === "set" && (
+                <span className="field-hint-warn" role="note">
+                  BioFlow <em>cannot</em> exceed {hardMemGb} GB. A job that tries is
+                  killed and loses its work. Protects the machine; costs the job.
+                  Takes effect on restart.
+                </span>
+              )}
+              {hardMem.kind === "invalid" && (
+                <span className="field-hint-warn" role="note">
+                  Enter a whole number of GB (at least 1), or leave blank for no
+                  hard cap.
+                </span>
+              )}
             </div>
-            <span className="field-hint" role="note">
-              Release is the latest stable version. Alpha and Beta are pre-release
-              stages published to GHCR. Developer builds and runs from a local checkout.
-            </span>
-          </div>
 
-          {versionMode === "developer" && (
+            {/* ── Version mode ─────────────────────────────────── */}
             <div className="field">
-              <span className="field-label">Local repo path</span>
+              <span className="field-label">Version</span>
               <div className="field-row">
-                <input
+                <select
                   className="field-value-input"
-                  value={developerRepo}
-                  onChange={(e) => setDeveloperRepo(e.target.value)}
+                  value={versionMode}
+                  onChange={(e) => setVersionMode(e.target.value as VersionMode)}
                   disabled={applying || rebuilding}
-                  placeholder="/path/to/bioflow-checkout"
-                  aria-label="Local repository path"
-                />
-                <button
-                  className="btn btn-secondary"
-                  onClick={handleRebuild}
-                  disabled={applying || rebuilding || !developerRepo.trim()}
-                  style={{ marginLeft: 8, whiteSpace: "nowrap" }}
+                  aria-label="BioFlow version"
                 >
-                  {rebuilding ? "Building…" : "Rebuild"}
-                </button>
+                  <option value="release">Release</option>
+                  <option value="alpha" disabled={!alphaEnabled}>
+                    {alphaEnabled ? `Alpha (${versionOptions?.alpha})` : "Alpha (unavailable)"}
+                  </option>
+                  <option value="beta" disabled={!betaEnabled}>
+                    {betaEnabled ? `Beta (${versionOptions?.beta})` : "Beta (unavailable)"}
+                  </option>
+                  <option value="developer">Developer (local build)</option>
+                </select>
               </div>
               <span className="field-hint" role="note">
-                Builds Docker images from this local checkout and restarts the stack
-                against them. Only needed after code changes; the initial build happens
-                when you Apply with Developer mode selected.
+                Release is the latest stable version. Alpha and Beta are pre-release
+                stages published to GHCR. Developer builds and runs from a local checkout.
               </span>
             </div>
-          )}
-        </div>
 
-        {error && (
-          <pre role="alert" className="launcher-error" style={{ marginTop: 16 }}>
-            {error}
-          </pre>
-        )}
+            {versionMode === "developer" && (
+              <div className="field">
+                <span className="field-label">Local repo path</span>
+                <div className="field-row">
+                  <input
+                    className="field-value-input"
+                    value={developerRepo}
+                    onChange={(e) => setDeveloperRepo(e.target.value)}
+                    disabled={applying || rebuilding}
+                    placeholder="/path/to/bioflow-checkout"
+                    aria-label="Local repository path"
+                  />
+                  <button
+                    className="btn btn-secondary"
+                    onClick={handleRebuild}
+                    disabled={applying || rebuilding || !developerRepo.trim()}
+                    style={{ marginLeft: 8, whiteSpace: "nowrap" }}
+                  >
+                    {rebuilding ? "Building…" : "Rebuild"}
+                  </button>
+                </div>
+                <span className="field-hint" role="note">
+                  Builds Docker images from this local checkout and restarts the stack
+                  against them. Only needed after code changes; the initial build happens
+                  when you Apply with Developer mode selected.
+                </span>
+              </div>
+            )}
+          </div>
+
+          {error && (
+            <pre role="alert" className="launcher-error" style={{ marginTop: 16 }}>
+              {error}
+            </pre>
+          )}
+
+        </div>
 
         <div className="dialog-actions">
           <button className="btn btn-secondary" onClick={onClose} disabled={applying || rebuilding}>

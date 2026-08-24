@@ -80,66 +80,69 @@ export function MigrateStorage({ currentLocation, port, networkExposed, onClose,
         <h2 className="dialog-title">Migrate storage location</h2>
         <div className="dialog-rule" />
 
-        <div className="dialog-fields">
-          <div className="field">
-            <span className="field-label">Current location</span>
-            <input className="field-value-input" value={currentLocation} disabled readOnly aria-label="Current location" />
-          </div>
-
-          <div className="field">
-            <span className="field-label">New location</span>
-            <input
-              className="field-value-input"
-              value={newLocation}
-              onChange={(e) => setNewLocation(e.target.value)}
-              disabled={busy}
-              aria-label="New location"
-            />
-          </div>
-
-          <div className="field">
-            <label className="checkbox-row">
-              <input
-                type="checkbox"
-                checked={keepOriginal}
-                onChange={(e) => setKeepOriginal(e.target.checked)}
-                disabled={busy}
-              />
-              <span className="checkbox-box" aria-hidden="true">{keepOriginal ? "✓" : ""}</span>
-              <span className="checkbox-label">Keep the original copy</span>
-            </label>
-          </div>
-
-          <div className="field">
-            <label className="checkbox-row">
-              <input
-                type="checkbox"
-                checked={validateByHash}
-                onChange={(e) => setValidateByHash(e.target.checked)}
-                disabled={busy}
-              />
-              <span className="checkbox-box" aria-hidden="true">{validateByHash ? "✓" : ""}</span>
-              <span className="checkbox-label">
-                Validate by hash (this may take hours depending on the size of the data)
-              </span>
-            </label>
-          </div>
-
-          {busy && (
-            <div className="field" role="status">
-              <span className="field-label">{progressPhase}</span>
-              <span>
-                {formatBytes(bytesCopied)} / {formatBytes(totalBytes)} ({percent}%)
-              </span>
+        <div className="dialog-body">
+          <div className="dialog-fields">
+            <div className="field">
+              <span className="field-label">Current location</span>
+              <input className="field-value-input" value={currentLocation} disabled readOnly aria-label="Current location" />
             </div>
-          )}
-        </div>
 
-        {error && (
-          <pre role="alert" className="launcher-error" style={{ marginTop: 16 }}>
-            {error}
-          </pre>
-        )}
+            <div className="field">
+              <span className="field-label">New location</span>
+              <input
+                className="field-value-input"
+                value={newLocation}
+                onChange={(e) => setNewLocation(e.target.value)}
+                disabled={busy}
+                aria-label="New location"
+              />
+            </div>
+
+            <div className="field">
+              <label className="checkbox-row">
+                <input
+                  type="checkbox"
+                  checked={keepOriginal}
+                  onChange={(e) => setKeepOriginal(e.target.checked)}
+                  disabled={busy}
+                />
+                <span className="checkbox-box" aria-hidden="true">{keepOriginal ? "✓" : ""}</span>
+                <span className="checkbox-label">Keep the original copy</span>
+              </label>
+            </div>
+
+            <div className="field">
+              <label className="checkbox-row">
+                <input
+                  type="checkbox"
+                  checked={validateByHash}
+                  onChange={(e) => setValidateByHash(e.target.checked)}
+                  disabled={busy}
+                />
+                <span className="checkbox-box" aria-hidden="true">{validateByHash ? "✓" : ""}</span>
+                <span className="checkbox-label">
+                  Validate by hash (this may take hours depending on the size of the data)
+                </span>
+              </label>
+            </div>
+
+            {busy && (
+              <div className="field" role="status">
+                <span className="field-label">{progressPhase}</span>
+                <span>
+                  {formatBytes(bytesCopied)} / {formatBytes(totalBytes)} ({percent}%)
+                </span>
+              </div>
+            )}
+          </div>
+
+          {error && (
+            <pre role="alert" className="launcher-error" style={{ marginTop: 16 }}>
+              {error}
+            </pre>
+          )}
+
+        </div>
 
         <div className="dialog-actions">
           <button className="btn btn-secondary" onClick={onClose} disabled={busy}>
