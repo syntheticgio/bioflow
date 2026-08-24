@@ -163,6 +163,11 @@ async def agent_events(
 async def _agent_stream(profile_id: str, project_id: str, running: bool):
     """Yield SSE events from the Pi agent process.
 
+    `agent_status` is sent at open and again on every transition after it, as
+    the re-attach loop below picks up a process or loses one. It answers "does
+    a pi process exist", not "is this stream healthy" -- the two are
+    independent, and the drawer must not present the first as the second.
+
     The keepalive ping and re-attach loop from the original implementation
     are preserved unchanged. No Mongo persistence -- Pi's session layer is
     the source of truth for conversation history.
@@ -172,8 +177,23 @@ async def _agent_stream(profile_id: str, project_id: str, running: bool):
     while True:
         agent = _live_process(profile_id, project_id)
         if agent is None:
+            if running:
+                # The process we were attached to is gone (stop, reap, crash).
+                # Say so: the drawer's only other source for this is opening a
+                # whole new stream, which it has no reason to do while this one
+                # is healthy.
+                running = False
+                yield {"event": "agent_status", "data": json.dumps({"running": False})}
             await asyncio.sleep(WAIT_POLL_SECONDS)
             continue
+
+        if not running:
+            # Attached to a process, so the answer to "is an agent running"
+            # has changed since the status we sent at open. Without this the
+            # drawer stays at whatever was true the instant it connected --
+            # for a lazily spawned agent, "no process", forever (issue #814).
+            running = True
+            yield {"event": "agent_status", "data": json.dumps({"running": True})}
 
         events = agent.events()
 
