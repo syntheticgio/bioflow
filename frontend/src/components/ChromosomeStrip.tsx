@@ -153,6 +153,7 @@ export function ChromosomeStrip({ facts }: { facts: Record<string, unknown> }) {
           <option value="">…and {view.overflow.length} more</option>
           {view.overflow.map((bar) => (
             <option key={bar.name} value={bar.name}>
+              {bar.label ? `${bar.label} · ` : ""}
               {bar.name} · {formatBases(bar.length)}
             </option>
           ))}
