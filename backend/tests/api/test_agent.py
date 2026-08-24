@@ -122,6 +122,19 @@ def _parse_event(block: str) -> tuple[str, dict]:
     assert etype is not None and data is not None, f"malformed SSE block: {block!r}"
     return etype, data
 
+async def _next_content_event(events):
+    """The next event that is not connection bookkeeping.
+
+    `agent_status` is emitted at open and again whenever the stream attaches
+    to or loses a process, and `ping` on the keepalive timer. Tests about the
+    forwarded agent translations should not have to spell out where those
+    land.
+    """
+    while True:
+        etype, data = await anext(events)
+        if etype not in ("agent_status", "ping"):
+            return etype, data
+
 class TestAsk:
     async def test_requires_a_profile(self, client, two_profiles):
         project = await _project(two_profiles["a"].owner_id())
@@ -235,7 +248,7 @@ class TestEvents:
                 fake.stdout.feed({"type": "agent_settled"})
 
                 async with asyncio.timeout(10):
-                    etype, _ = await anext(events)
+                    etype, _ = await _next_content_event(events)
                 assert etype == "agent_start"
                 async with asyncio.timeout(10):
                     etype, data = await anext(events)
@@ -244,6 +257,54 @@ class TestEvents:
                 async with asyncio.timeout(10):
                     etype, data = await anext(events)
                 assert etype == "done"
+
+    async def test_status_follows_the_process_not_just_the_stream(
+        self, two_profiles, spawn, live_server
+    ):
+        """agent_status must be re-announced as the process comes and goes.
+
+        Opening the stream is not the same fact as having a pi process: the
+        process spawns lazily on the first /ask and ends on stop, reap, or
+        crash. Sending agent_status only once, at open, left the drawer
+        permanently reporting whatever happened to be true at that instant
+        (issue #814).
+        """
+        project = await _project(two_profiles["a"].owner_id())
+        headers = two_profiles["a_headers"]
+        url = f"{live_server}/api/v1/projects/{project.id}/agent/events"
+        profile_id = two_profiles["a"].id
+
+        async with AsyncClient(timeout=None) as http:
+            async with http.stream("GET", url, params={"profile": str(profile_id)}) as stream:
+                events = _sse_events(stream)
+                async with asyncio.timeout(10):
+                    etype, data = await anext(events)
+                assert etype == "agent_status"
+                assert data == {"running": False}
+
+                await http.post(
+                    f"{live_server}/api/v1/projects/{project.id}/agent/ask",
+                    json={"message": "hi"},
+                    headers=headers,
+                )
+
+                # Attaching to the freshly spawned process re-announces the
+                # status, so the drawer can go from "ready" to "running".
+                async with asyncio.timeout(10):
+                    etype, data = await anext(events)
+                assert etype == "agent_status"
+                assert data == {"running": True}
+
+                # ...and losing it announces the way back down, without the
+                # browser having to reconnect to learn about it.
+                agent_url = f"{live_server}/api/v1/projects/{project.id}/agent"
+                response = await http.delete(agent_url, params={"profile": str(profile_id)})
+                assert response.status_code == 204
+
+                async with asyncio.timeout(10):
+                    etype, data = await anext(events)
+                assert etype == "agent_status"
+                assert data == {"running": False}
 
     async def test_reattaches_after_stop(self, two_profiles, spawn, live_server):
         """The stream is opened before any process and must follow the
@@ -271,7 +332,7 @@ class TestEvents:
                 )
                 spawned[0].stdout.feed({"type": "agent_start"})
                 async with asyncio.timeout(10):
-                    etype, _ = await anext(events)
+                    etype, _ = await _next_content_event(events)
                 assert etype == "agent_start"
 
                 # Stop the process: the attached stream ends (__stop__), the
@@ -292,7 +353,7 @@ class TestEvents:
                 )
                 spawned[1].stdout.feed({"type": "agent_start"})
                 async with asyncio.timeout(10):
-                    etype, _ = await anext(events)
+                    etype, _ = await _next_content_event(events)
                 assert etype == "agent_start"
 
 class TestLifecycle:

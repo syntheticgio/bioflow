@@ -369,8 +369,10 @@ async def bump_counters(project_id: PydanticObjectId, *, objects: int, total_byt
 async def recent_jobs(project_id: PydanticObjectId, *, limit: int = 5) -> list[dict]:
     """Fetch the most recent completed jobs for a project.
 
-    Returns a list of job summaries (type, state, progress, timing). Used by the
-    agent's project context injection.
+    Returns plain, JSON-serialisable summaries: this feeds the agent's
+    spawn-time project context, which is assembled into prompt text, so a
+    nested pydantic model here would fail well away from this function.
+    `progress` is therefore the percentage, not the whole JobProgress.
     """
     jobs = (
         await Job.find(
@@ -382,9 +384,9 @@ async def recent_jobs(project_id: PydanticObjectId, *, limit: int = 5) -> list[d
     )
     return [
         {
-            "type": j.job_type,
+            "type": j.type,
             "state": j.state,
-            "progress": j.progress,
+            "progress": j.progress.pct,
             "created_at": j.created_at.isoformat() if j.created_at else None,
         }
         for j in jobs

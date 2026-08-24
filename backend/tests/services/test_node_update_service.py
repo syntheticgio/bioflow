@@ -213,3 +213,170 @@ async def test_fail_save_failure_is_swallowed_not_reraised():
 
     await node.delete()
     await task.delete()
+
+
+# ---------------------------------------------------------------------------
+# Repairing a stale .env (#822)
+# ---------------------------------------------------------------------------
+
+
+async def test_refresh_env_rewrites_stale_connection_urls():
+    """A node provisioned before #803 carries a Docker bridge address in its
+    .env. Updating it must repoint the three connection URLs at the primary."""
+    stale = (
+        "NODE_TYPE=compute\n"
+        "MONGO_URL=mongodb://172.19.0.6:27017/biopipe?replicaSet=rs0&directConnection=true\n"
+        "REDIS_URL=redis://172.19.0.6:6379/0\n"
+        "WORKER_NODE_ID=ai-gen-desktop\n"
+        "PRIMARY_API_URL=http://172.19.0.6:8000\n"
+        "BIOINFO_HOME=/mnt/data\n"
+        "BIOINFO_REGISTER_ROOTS=/mnt/data\n"
+        "BIOFLOW_TAG=latest\n"
+        "WORKER_REPLICAS=2\n"
+    )
+
+    fixed = svc._refresh_env_urls(stale, "192.168.1.249")
+
+    assert (
+        "MONGO_URL=mongodb://192.168.1.249:27017/biopipe"
+        "?replicaSet=rs0&directConnection=true" in fixed
+    )
+    assert "REDIS_URL=redis://192.168.1.249:6379/0" in fixed
+    assert "PRIMARY_API_URL=http://192.168.1.249:8000" in fixed
+    assert "172.19.0.6" not in fixed
+
+
+async def test_refresh_env_preserves_every_other_setting():
+    """Only the connection URLs are the primary's to decide. The node's name,
+    storage location, pinned tag and replica count must survive untouched --
+    the update path does not know them and must not invent them."""
+    stale = (
+        "NODE_TYPE=compute\n"
+        "MONGO_URL=mongodb://172.19.0.6:27017/biopipe\n"
+        "REDIS_URL=redis://172.19.0.6:6379/0\n"
+        "WORKER_NODE_ID=ai-gen-desktop\n"
+        "PRIMARY_API_URL=http://172.19.0.6:8000\n"
+        "BIOINFO_HOME=/mnt/55e23b05\n"
+        "BIOINFO_REGISTER_ROOTS=/mnt/55e23b05\n"
+        "BIOFLOW_TAG=v0.5.9\n"
+        "WORKER_REPLICAS=7\n"
+        "WORKER_MAX_CONCURRENT=12\n"
+    )
+
+    fixed = svc._refresh_env_urls(stale, "192.168.1.249")
+
+    assert "WORKER_NODE_ID=ai-gen-desktop" in fixed
+    assert "BIOINFO_HOME=/mnt/55e23b05" in fixed
+    assert "BIOINFO_REGISTER_ROOTS=/mnt/55e23b05" in fixed
+    assert "BIOFLOW_TAG=v0.5.9" in fixed  # a pinned tag is not bumped
+    assert "WORKER_REPLICAS=7" in fixed
+    assert "WORKER_MAX_CONCURRENT=12" in fixed
+    assert "NODE_TYPE=compute" in fixed
+
+
+async def test_refresh_env_leaves_a_correct_env_byte_identical():
+    """A healthy node must not be rewritten at all -- no needless churn, and
+    no chance of mangling a hand-edited file."""
+    good = (
+        "NODE_TYPE=compute\n"
+        "MONGO_URL=mongodb://192.168.1.249:27017/biopipe?replicaSet=rs0\n"
+        "REDIS_URL=redis://192.168.1.249:6379/0\n"
+        "PRIMARY_API_URL=http://192.168.1.249:8000\n"
+        "WORKER_NODE_ID=n1\n"
+    )
+
+    assert svc._refresh_env_urls(good, "192.168.1.249") == good
+
+
+async def test_refresh_env_keeps_credentials_in_the_url():
+    """Rewriting the host must not drop a password embedded in the URL."""
+    stale = (
+        "MONGO_URL=mongodb://user:pw@172.19.0.6:27017/biopipe\n"
+        "REDIS_URL=redis://:secret@172.19.0.6:6379/0\n"
+        "PRIMARY_API_URL=http://172.19.0.6:8000\n"
+    )
+
+    fixed = svc._refresh_env_urls(stale, "10.0.0.4")
+
+    assert "MONGO_URL=mongodb://user:pw@10.0.0.4:27017/biopipe" in fixed
+    assert "REDIS_URL=redis://:secret@10.0.0.4:6379/0" in fixed
+
+
+async def test_update_repairs_a_stale_env_before_restarting():
+    """The regression #822 is about: an unreachable MONGO_URL survives every
+    update, so the worker crash-loops forever. The update must rewrite the
+    node's .env before `up -d`, or the restart just reuses the bad address."""
+    node = await _node("un-stale-env")
+    task = NodeUpdateTask(task_id="u8", node_id="un-stale-env")
+    await task.insert()
+
+    stale = (
+        "NODE_TYPE=compute\n"
+        "MONGO_URL=mongodb://172.19.0.6:27017/biopipe?replicaSet=rs0\n"
+        "REDIS_URL=redis://172.19.0.6:6379/0\n"
+        "WORKER_NODE_ID=ai-gen-desktop\n"
+        "PRIMARY_API_URL=http://172.19.0.6:8000\n"
+    )
+
+    conn = MagicMock()
+    written: list[str] = []
+
+    async def run(command, **kwargs):
+        result = MagicMock()
+        result.stdout = stale if "cat " in command and ">" not in command else ""
+        result.stderr = ""
+        result.exit_status = 0
+        if "HERMESEOF" in command:
+            written.append(command)
+        return result
+
+    conn.run = AsyncMock(side_effect=run)
+    conn.close = MagicMock()
+
+    with patch("app.services.ai.crypto.decrypt", return_value="PEM"), \
+         patch("asyncssh.import_private_key", MagicMock()), \
+         patch("asyncssh.connect", AsyncMock(return_value=conn)), \
+         patch("app.api.v1.nodes._primary_hostname", return_value="192.168.1.249"), \
+         patch.object(svc, "_await_digest", AsyncMock(return_value="sha256:new")):
+        await svc.run_update("u8", node, drain=False)
+
+    assert written, "the update never rewrote the node's .env"
+    assert "192.168.1.249" in written[0]
+    assert "172.19.0.6" not in written[0]
+
+    # ...and the repair lands before the worker is restarted, not after.
+    commands = [str(c) for c in conn.run.call_args_list]
+    env_at = next(i for i, c in enumerate(commands) if "HERMESEOF" in c)
+    up_at = next(i for i, c in enumerate(commands) if "up -d" in c)
+    assert env_at < up_at
+
+    await node.delete()
+    await task.delete()
+
+
+async def test_update_survives_an_unroutable_primary_address():
+    """If the primary cannot work out its own address, that is no reason to
+    abandon the update -- the image pull is still worth doing, and the node's
+    existing .env may well be fine. Repair is best-effort."""
+    from app.api.v1.nodes import UnroutablePrimaryHost
+
+    node = await _node("un-no-host")
+    task = NodeUpdateTask(task_id="u9", node_id="un-no-host")
+    await task.insert()
+    conn = _conn()
+
+    with patch("app.services.ai.crypto.decrypt", return_value="PEM"), \
+         patch("asyncssh.import_private_key", MagicMock()), \
+         patch("asyncssh.connect", AsyncMock(return_value=conn)), \
+         patch(
+             "app.api.v1.nodes._primary_hostname",
+             side_effect=UnroutablePrimaryHost("no idea"),
+         ), \
+         patch.object(svc, "_await_digest", AsyncMock(return_value="sha256:new")):
+        await svc.run_update("u9", node, drain=False)
+
+    done = await NodeUpdateTask.find_one(NodeUpdateTask.task_id == "u9")
+    assert done.status == "success"
+
+    await node.delete()
+    await done.delete()

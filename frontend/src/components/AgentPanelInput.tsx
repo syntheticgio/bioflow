@@ -1,12 +1,18 @@
 import { useState } from "react";
 
+import {
+  type AgentConnectionState,
+  agentStatusDotClass,
+  agentStatusLabel,
+} from "../lib/agentStatus";
+
 interface AgentPanelInputProps {
   onSend: (message: string) => void;
   disabled: boolean;
-  connected: boolean;
+  state: AgentConnectionState;
 }
 
-export function AgentPanelInput({ onSend, disabled, connected }: AgentPanelInputProps) {
+export function AgentPanelInput({ onSend, disabled, state }: AgentPanelInputProps) {
   const [input, setInput] = useState("");
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -46,14 +52,8 @@ export function AgentPanelInput({ onSend, disabled, connected }: AgentPanelInput
         </button>
       </div>
       <div className="agent-input-status">
-        {connected ? (
-          <span className="agent-status-dot agent-status-connected" />
-        ) : (
-          <span className="agent-status-dot agent-status-disconnected" />
-        )}
-        <span className="agent-status-text">
-          {connected ? "Connected" : "Disconnected"}
-        </span>
+        <span className={`agent-status-dot ${agentStatusDotClass(state)}`} />
+        <span className="agent-status-text">{agentStatusLabel(state)}</span>
       </div>
     </div>
   );
