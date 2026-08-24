@@ -203,6 +203,15 @@ if [ "$LINE" = "app" ]; then
   WRITTEN+=("frontend/package-lock.json")
 fi
 
+# The launcher's lockfile needs the same treatment, on *both* lines: an app cut
+# bumps launcher/package.json too (bump_app calls bump_launcher, #335), so
+# gating this on "$LINE" the way the frontend does would leave it stale. It had
+# been stale since 0.1.0 until #808.
+cd "$REPO_ROOT/launcher"
+npm install --package-lock-only --silent
+cd "$REPO_ROOT"
+WRITTEN+=("launcher/package-lock.json")
+
 # Regenerate CHANGELOG.md so the release commit carries the section for this
 # tag. The changelog tracks the app line only (#106); the launcher line keeps
 # its GitHub release notes. `--unreleased --tag` renders the commits since the

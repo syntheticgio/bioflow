@@ -5,6 +5,7 @@ messages matter as much as the exit codes: the whole point of refusing is to
 tell the operator which precondition they tripped.
 """
 
+import json
 import os
 import subprocess
 from pathlib import Path
@@ -212,7 +213,8 @@ class TestSuccessfulRelease:
         assert subject == "release: v0.2.0"
 
         # The release commit touches every version declaration -- app and
-        # launcher alike, since #335 -- plus the regenerated changelog.
+        # launcher alike, since #335 -- plus both synced lockfiles and the
+        # regenerated changelog.
         files = set(git(repo, "show", "--name-only", "--format=", "HEAD").stdout.split())
         assert files == {
             "VERSION",
@@ -222,6 +224,7 @@ class TestSuccessfulRelease:
             "frontend/package-lock.json",
             "launcher/src-tauri/Cargo.toml",
             "launcher/package.json",
+            "launcher/package-lock.json",
             "launcher/src-tauri/tauri.conf.json",
             "CHANGELOG.md",
         }
@@ -254,8 +257,15 @@ class TestSuccessfulRelease:
         assert files == {
             "launcher/src-tauri/Cargo.toml",
             "launcher/package.json",
+            "launcher/package-lock.json",
             "launcher/src-tauri/tauri.conf.json",
         }
+
+        # ...and it was synced, not just touched: the stale root version is
+        # what #808 found sitting at 0.1.0 through four releases.
+        lock = json.loads((repo / "launcher" / "package-lock.json").read_text())
+        assert lock["version"] == "0.2.1"
+        assert lock["packages"][""]["version"] == "0.2.1"
 
         # The launcher line has no stage machinery: the operator stays on
         # main, the bump commit lands on main, and no release/ branch appears
@@ -284,6 +294,7 @@ class TestSuccessfulRelease:
             "frontend/package-lock.json",
             "launcher/src-tauri/Cargo.toml",
             "launcher/package.json",
+            "launcher/package-lock.json",
             "launcher/src-tauri/tauri.conf.json",
             "CHANGELOG.md",
         }
