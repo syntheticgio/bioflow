@@ -11,12 +11,13 @@ export interface AgentSSEOptions {
   onError: (message: string) => void;
   onConnectionChange: (connected: boolean) => void;
   /**
-   * Fired only from the backend's `agent_status` event -- the actual signal
-   * for whether a pi agent process exists, as opposed to onConnectionChange
-   * which also fires from the SSE connection merely opening (onopen), before
-   * any real status is known. Use this, not onConnectionChange, for anything
-   * that needs to know whether the agent process itself is running (e.g.
-   * deciding whether a conversation is being "resumed").
+   * Fired only from the backend's `agent_status` event -- the signal for
+   * whether a pi agent process exists, as opposed to onConnectionChange,
+   * which reports the SSE stream itself. A healthy stream with no process
+   * yet (nobody has asked anything; the idle reaper took the last one) is
+   * the normal resting state, so use this, not onConnectionChange, for
+   * anything about the agent process (e.g. deciding whether a conversation
+   * is being "resumed").
    */
   onAgentStatus?: (running: boolean) => void;
 }
@@ -33,6 +34,9 @@ export function useAgentSSE({
 }: AgentSSEOptions) {
   const profileId = useProfileStore((s) => s.current?.id);
   const [connected, setConnected] = useState(false);
+  // Whether a pi agent process currently exists for this (profile, project).
+  // Distinct from `connected` -- see the agent_status listener below.
+  const [running, setRunning] = useState(false);
   const sourceRef = useRef<EventSource | null>(null);
   const reconnectTimerRef = useRef<number | null>(null);
   const reconnectAttempts = useRef(0);
@@ -67,6 +71,7 @@ export function useAgentSSE({
       sourceRef.current = null;
     }
     setConnected(false);
+    setRunning(false);
     onConnectionChangeRef.current(false);
   }, []);
 
@@ -86,6 +91,9 @@ export function useAgentSSE({
 
     source.onerror = () => {
       setConnected(false);
+      // A dropped stream tells us nothing about the process, but the next
+      // agent_status will; until then, don't claim a running agent.
+      setRunning(false);
       onConnectionChangeRef.current(false);
       source.close();
       sourceRef.current = null;
@@ -98,13 +106,20 @@ export function useAgentSSE({
       }, delay);
     };
 
+    // agent_status answers "does a pi process exist?", which is NOT the same
+    // question as "is this stream alive?". A process spawns lazily on the
+    // first /ask and is reaped once idle, so running:false is the normal
+    // resting state of a perfectly healthy connection. Reporting it through
+    // setConnected/onConnectionChange is what made a live, verified provider
+    // read as "Disconnected from agent" before anyone had asked anything
+    // (issue #814). The stream's own onopen/onerror own `connected`; this
+    // event only feeds onAgentStatus and the separate `running` flag.
     source.addEventListener("agent_status", (event: Event) => {
       try {
         const msgEvent = event as MessageEvent;
         const data = JSON.parse(msgEvent.data);
-        setConnected(data.running);
-        onConnectionChangeRef.current(data.running);
-        onAgentStatusRef.current?.(data.running);
+        setRunning(Boolean(data.running));
+        onAgentStatusRef.current?.(Boolean(data.running));
       } catch {
         // Ignore malformed data
       }
@@ -171,5 +186,5 @@ export function useAgentSSE({
     };
   }, [profileId, connect, disconnect]);
 
-  return { connected, connect, disconnect };
+  return { connected, running, connect, disconnect };
 }
