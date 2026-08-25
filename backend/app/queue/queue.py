@@ -23,6 +23,7 @@ from app.models import (
     ACTIVE_STATES,
     TERMINAL_STATES,
     AttemptProgress,
+    IoClass,
     Job,
     JobClass,
     JobLease,
@@ -950,16 +951,86 @@ async def rescue_orphans(older_than_seconds: float = 60.0) -> int:
     return rescued
 
 
+async def _rebuild_reservation_counters(r) -> int:
+    """Reset every `bp:conc:*` counter to the true sum over the RUNNING set.
+
+    The counters are the admission gate claim.lua reads, and each is meant to
+    equal the summed demand of the jobs currently leased (cpu and mem_mb) or the
+    count of heavy-IO leases (io_heavy), scoped per node. claim.lua INCRBYs on
+    grant and release.lua DECRBYs on every terminal outcome -- but a handful of
+    paths break that pairing: a cancel that races a claim deletes the dispatch
+    hash the release would have read its amounts from, a non-idempotent retry
+    increments twice, and a hard crash between INCRBY and release leaves the
+    increment with no counterpart. Nothing else ever zeroes the counters, so any
+    such leak is permanent until Redis is flushed -- a phantom reservation that
+    shrinks headroom forever, and once it pushes mem_mb above the budget it
+    silently refuses every future job.
+
+    Startup is the one moment this can be made authoritative: the RUNNING zset
+    plus each job's dispatch hash is the exact state claim.lua reserved from, so
+    summing it and writing the totals back makes the whole leak class
+    self-healing. Reservations for scopes with nothing running are cleared; a
+    deleted key reads as zero to claim.lua (`tonumber(nil) or 0`), same as "0".
+
+    Returns the number of live RUNNING leases counted, for the reconcile log.
+    """
+    # {node_id ("" for global): [cpu, mem_mb, io_heavy]}
+    totals: dict[str, list[int]] = {}
+    job_ids = await r.zrange(keys.RUNNING, 0, -1)
+    for job_id in job_ids:
+        cpu, mem_mb, io, node = await r.hmget(
+            keys.job_key(job_id), "cpu", "mem_mb", "io", "node"
+        )
+        if cpu is None and mem_mb is None:
+            # A RUNNING member whose dispatch hash is gone reserved nothing this
+            # rebuild can attribute; the per-job loop below handles the orphan.
+            continue
+        bucket = totals.setdefault(node or "", [0, 0, 0])
+        bucket[0] += int(cpu or 0)
+        bucket[1] += int(mem_mb or 0)
+        if io == IoClass.HEAVY.value:
+            bucket[2] += 1
+
+    # Clear every counter that currently exists, then write the true totals.
+    # Clearing first is what drains a leak on a scope that now has nothing
+    # running -- it would never appear in `totals` to be overwritten.
+    existing = set()
+    for resource in ("cpu", "mem_mb", "io_heavy"):
+        pattern = keys.conc_key(resource) + "*"
+        async for key in r.scan_iter(match=pattern):
+            existing.add(key)
+    if existing:
+        await r.delete(*existing)
+
+    for node, (cpu, mem_mb, io_heavy) in totals.items():
+        node_id = node or None
+        await r.mset(
+            {
+                keys.conc_key("cpu", node_id): cpu,
+                keys.conc_key("mem_mb", node_id): mem_mb,
+                keys.conc_key("io_heavy", node_id): io_heavy,
+            }
+        )
+
+    return len(job_ids)
+
+
 async def reconcile() -> int:
     """Rebuild Redis dispatch state from MongoDB.
 
     Run at startup. Without it, an AOF loss or a flushed Redis would silently
     strand every queued job -- they would still exist in Mongo, but nothing
     would ever dispatch them.
+
+    It also resets the `bp:conc:*` reservation counters to the truth held in the
+    RUNNING set (see `_rebuild_reservation_counters`), so a leaked reservation
+    from a crashed or raced release does not shrink admission headroom forever.
     """
     r = get_redis()
     restored = 0
     now_ms = int(datetime.now(UTC).timestamp() * 1000)
+
+    running_counted = await _rebuild_reservation_counters(r)
 
     async for job in Job.find({"state": {"$in": [s.value for s in ACTIVE_STATES]}}):
         job_id = str(job.id)
@@ -1019,8 +1090,13 @@ async def reconcile() -> int:
             await job.set({Job.state: JobState.QUEUED, Job.lease: None})
         restored += 1
 
-    if restored:
-        log.info("queue_reconciled", restored=restored, now_ms=now_ms)
+    if restored or running_counted:
+        log.info(
+            "queue_reconciled",
+            restored=restored,
+            running_counted=running_counted,
+            now_ms=now_ms,
+        )
     return restored
 
 
