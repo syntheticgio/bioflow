@@ -667,11 +667,31 @@ async def heartbeat(
     await _heartbeat_mongo(job_ids, epochs, ttls, now)
 
 
-async def release(job_id: str, *, requeue: bool = False, score: float | None = None) -> bool:
-    """Release a lease and its reserved resources. Idempotent."""
+async def release(
+    job_id: str,
+    *,
+    requeue: bool = False,
+    keep_dispatch: bool = False,
+    score: float | None = None,
+) -> bool:
+    """Release a lease and its reserved resources. Idempotent.
+
+    `requeue` puts the job straight back on the ready queue (graceful shutdown).
+    `keep_dispatch` releases the lease but leaves the `bp:job:{id}` hash intact
+    without requeueing, for a caller that will place the job somewhere else
+    itself -- `retry_later` puts it on the delayed zset, and the hash is what
+    promote_delayed and claim.lua read when the backoff elapses. The default
+    drops the hash, which is only correct for a job that is finished.
+    """
+    if requeue:
+        mode = "1"
+    elif keep_dispatch:
+        mode = "keep"
+    else:
+        mode = "0"
     result = await get_script("release")(
         keys=[keys.RUNNING, keys.READY],
-        args=[job_id, "1" if requeue else "0", score or 0],
+        args=[job_id, mode, score or 0],
     )
     return bool(result)
 
@@ -773,7 +793,18 @@ async def retry_later(job_id: str, epoch: int, attempts: int, error: dict) -> No
         return
 
     r = get_redis()
-    await release(job_id, requeue=False)
+    # Keep the dispatch hash: it carries class/cpu/mem_mb/io/score, which
+    # promote_delayed scores from and claim.lua dispatches on once the backoff
+    # elapses. Releasing it the terminal way left a bare id on the delayed zset
+    # that promote_delayed scored with the wall clock and claim.lua then
+    # dropped as garbage -- the job disappeared on any transient error, while
+    # Mongo went on reporting it as delayed until a restart's reconcile.
+    await release(job_id, keep_dispatch=True)
+    # Keep the hash's attempt count in step with the document's. The retry
+    # ceiling is decided in Python from Mongo, so this does not gate anything
+    # here -- but reap_expired.lua HINCRBYs this field on a later lease expiry,
+    # and a preserved hash that still said 0 would restart that count.
+    await r.hset(keys.job_key(job_id), "attempts", attempts)
     await r.zadd(keys.DELAYED, {job_id: int(available_at.timestamp() * 1000)})
     log.info("job_retry_scheduled", job_id=job_id, delay_s=round(delay, 1))
 
