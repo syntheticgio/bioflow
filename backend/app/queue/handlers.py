@@ -785,11 +785,24 @@ async def gc_blobs(ctx: JobContext) -> dict:
     External blobs are never unlinked -- we do not own files the user registered
     in place, so only the database record is removed.
 
-    Each managed blob is claimed atomically before unlinking: a find_one_and_update
-    sets ref_count to a tombstone (-1) only when it is still ≤ 0, closing the race
-    between the GC query and the unlink.
+    Each managed blob is claimed atomically before unlinking: a
+    `find_one_and_update` sets ref_count to a tombstone (-1) only when it is
+    still <= 0, and returns the document it claimed -- `None` meaning the blob
+    was re-referenced between the candidate query and the claim, so its bytes
+    must be left alone. The claim has to ask for the *document* rather than an
+    update result: a bare `.update()` resolves to an `UpdateResult`, which is
+    never None, so a `is None` guard on it can never fire and every re-referenced
+    blob would be unlinked anyway.
+
+    A blob whose bytes could not be removed keeps its record. `unlink_blob`
+    reports False both for an already-absent file and for a real OSError, and
+    only the latter matters: dropping the record there would orphan bytes that
+    nothing else knows about, so the record stays and the next sweep retries.
     """
     import asyncio
+    from datetime import UTC, datetime
+
+    from beanie.odm.queries.update import UpdateResponse
 
     from app.models import Blob, BlobStorage
     from app.services import blob_service
@@ -808,29 +821,48 @@ async def gc_blobs(ctx: JobContext) -> dict:
     for blob in candidates:
         ctx.check_cancel()
         if blob.storage is BlobStorage.EXTERNAL:
-            # Atomically claim this external record — re-check ref_count at
-            # delete time so a re-reference between query and delete doesn't
-            # silently remove a live blob record.
-            claimed = await Blob.find_one(
-                Blob.id == blob.id, Blob.ref_count <= 0
-            ).delete()
+            # Handled by the aged batch delete below, which applies the same
+            # grace window this candidate list was built with.
             continue
-        # Atomically claim the managed blob for deletion: set ref_count to
-        # a tombstone only if it is still ≤ 0.  If nothing was matched the
-        # blob was re-referenced between query and claim — skip it.
+        # Claim the managed blob for deletion: tombstone the refcount only
+        # while it is still <= 0, and take the claimed document back so a
+        # re-reference in the meantime is visible as None.
         claimed = await Blob.find_one(
             Blob.id == blob.id, Blob.ref_count <= 0
-        ).update({"$set": {Blob.ref_count: -1}})
+        ).update(
+            {"$set": {Blob.ref_count: -1}},
+            response_type=UpdateResponse.NEW_DOCUMENT,
+        )
         if claimed is None:
             continue
-        if await asyncio.to_thread(cas.unlink_blob, blob.id):
-            unlinked += 1
-        await Blob.find_one(Blob.id == blob.id).delete()
 
-    # External records with no references carry no bytes to reclaim.
-    # Batch-delete in one round trip rather than N+1 per-blob deletes.
+        removed = await asyncio.to_thread(cas.unlink_blob, blob.id)
+        if removed:
+            unlinked += 1
+            await Blob.find_one(Blob.id == blob.id).delete()
+            continue
+
+        # The bytes are still there (or their absence could not be confirmed).
+        # Restore the record to a collectable state instead of deleting it, so
+        # the next sweep tries again rather than losing track of the file.
+        if not blob_path(blob.id).exists():
+            # Already gone -- nothing to orphan, so the record can go too.
+            unlinked += 1
+            await Blob.find_one(Blob.id == blob.id).delete()
+        else:
+            log.warning("gc_unlink_failed_record_kept", digest=blob.id)
+            await Blob.find_one(Blob.id == blob.id).update(
+                {"$set": {Blob.ref_count: 0}}
+            )
+
+    # External records with no references carry no bytes to reclaim, but they
+    # get the same grace window as managed ones: a refcount that dipped to zero
+    # moments ago may be about to come back (a detach mid-flight, a re-reference
+    # racing this sweep), and an unaged delete gave those no protection at all.
     external_result = await Blob.find(
-        Blob.ref_count <= 0, Blob.storage == BlobStorage.EXTERNAL
+        Blob.ref_count <= 0,
+        Blob.storage == BlobStorage.EXTERNAL,
+        Blob.updated_at < datetime.now(UTC) - blob_service.GC_GRACE,
     ).delete()
     external_pruned = external_result.deleted_count
 
