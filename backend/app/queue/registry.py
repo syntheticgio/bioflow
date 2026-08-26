@@ -18,6 +18,7 @@ from typing import Any
 from app.errors import JobCancelled
 from app.logging import get_logger
 from app.models import JobClass, JobResources
+from app.queue.resource_sampler import ResourceSampler
 
 log = get_logger(__name__)
 
@@ -87,6 +88,10 @@ class JobContext:
     # shorter-than-ideal lease, corrected on the next call or heartbeat tick),
     # not worth the cost here.
     lease_override_seconds: int | None = None
+    # Resource sampler for this job. Set by the executor after construction.
+    # Handlers that call run_subprocess use this to register spawned PIDs so
+    # the sampler tracks only this job's process tree, not the whole worker's.
+    sampler: ResourceSampler | None = None
 
     def is_cancelled(self) -> bool:
         return self.cancel_event.is_set()

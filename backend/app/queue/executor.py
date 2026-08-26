@@ -170,6 +170,9 @@ class JobExecutor:
             started_at=ctx.started_at,
             eta_model_ms=ctx.eta_model_ms,
         )
+        # Plumb the sampler into the context so handlers can register spawned
+        # subprocess PIDs for per-job resource tracking.
+        ctx.sampler = sampler
         outcome = RunOutcome.SUCCEEDED
         try:
             # Compute nodes: fetch input blobs from the primary before running
@@ -313,12 +316,12 @@ class JobExecutor:
         started_at: datetime | None = None,
         eta_model_ms: int | None = None,
     ) -> tuple[ResourceSampler, asyncio.Task]:
-        """Sample this worker's own process subtree.
+        """Sample this job's own process subtree.
 
-        The worker's baseline is included, which slightly overstates a job's
-        own footprint -- but subprocess tools are spawned as children of this
-        process, so the subtree is what captures them, and two concurrent jobs
-        remain separable because each tool tree is walked from its own root.
+        The sampler starts rooted at the worker PID as a fallback, but once
+        the handler calls `run_subprocess` the spawned PID is registered via
+        `track_subprocess` and the sampler switches to walking only that
+        subprocess tree -- keeping concurrent jobs' resource usage separable.
 
         `psutil.Process(pid)` is constructed exactly once, here, and reused
         for every poll. `cpu_percent(interval=None)` reports the percentage
@@ -672,6 +675,9 @@ def run_subprocess(
         start_new_session=True,
     )
 
+    if ctx.sampler is not None:
+        ctx.sampler.track_subprocess(proc.pid)
+
     try:
         return _wait_cancellable(ctx, proc)
     finally:
@@ -818,6 +824,9 @@ def _run_streaming(
         # Reading raw bytes and splitting on either `\r` or `\n` ourselves is
         # what lets that kind of bar reach `on_line`/`parser` mid-transfer.
     )
+
+    if ctx.sampler is not None:
+        ctx.sampler.track_subprocess(proc.pid)
 
     log_file = open(log_path, "a", encoding="utf-8", errors="replace") if log_path else None
 

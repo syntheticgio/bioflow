@@ -165,8 +165,8 @@ class TestChildCpuAcrossPolls:
 
         child = FakeProcess(rss=100, cpu=0.0, pid=7)
         sampler.observe(FakeProcess(rss=10, cpu=0.0, children=[child]))
-        assert 7 in sampler._child_procs
-        assert sampler._child_procs[7] is child
+        assert (1, 7) in sampler._child_procs
+        assert sampler._child_procs[(1, 7)] is child
 
     def test_a_child_pid_no_longer_present_is_dropped_from_tracking(self):
         """A child that exits between polls must not linger as a stale
@@ -175,12 +175,12 @@ class TestChildCpuAcrossPolls:
 
         child = FakeProcess(rss=100, cpu=5.0, pid=99)
         sampler.observe(FakeProcess(rss=10, cpu=0.0, children=[child]))
-        assert 99 in sampler._child_procs
+        assert (1, 99) in sampler._child_procs
 
         # Next poll: pid 99 no longer appears under the root at all (exited
         # and reaped, not merely erroring on read).
         sampler.observe(FakeProcess(rss=10, cpu=0.0, children=[]))
-        assert 99 not in sampler._child_procs
+        assert (1, 99) not in sampler._child_procs
 
     def test_a_persisted_child_that_starts_raising_is_evicted(self):
         """If the persisted Process itself starts raising (the child exited
@@ -190,11 +190,11 @@ class TestChildCpuAcrossPolls:
 
         child_poll_1 = FakeProcess(rss=100, cpu=5.0, pid=13)
         sampler.observe(FakeProcess(rss=10, cpu=0.0, children=[child_poll_1]))
-        assert 13 in sampler._child_procs
+        assert (1, 13) in sampler._child_procs
 
         # children() still lists pid 13 this poll, but reading it now fails.
         child_poll_1._gone = True
         # unused; read comes from the persisted one
         child_poll_2 = FakeProcess(rss=1, cpu=1.0, pid=13)
         sampler.observe(FakeProcess(rss=10, cpu=0.0, children=[child_poll_2]))
-        assert 13 not in sampler._child_procs
+        assert (1, 13) not in sampler._child_procs
