@@ -53,7 +53,7 @@ import { Computations } from "./Computations";
 import { ProvenanceNarrative } from "./ProvenanceNarrative";
 import { ManageFile } from "./ManageFile";
 import { PipelineSuggestions } from "./PipelineSuggestions";
-import { SchemaMetadataEditor } from "./SchemaMetadataEditor";
+import { metadataEditorKey, SchemaMetadataEditor } from "./SchemaMetadataEditor";
 import { DerivedFiles } from "./DerivedFiles";
 import { ActivePipelineJobs } from "./ActivePipelineJobs";
 import { AlignDialog } from "./AlignDialog";
@@ -1757,11 +1757,10 @@ function MetadataTab({
           Editable — these fields travel with the file into every pipeline it
           feeds.
         </div>
-        {/* Keyed on the role so a conversion remounts the editor: its schema
-            changes underneath, and in-progress edits belong to the previous
-            role's fields. Without this its dirty guard would keep them. */}
+        {/* Remounts per file AND per role: see metadataEditorKey for why
+            each half of the key is load-bearing. */}
         <SchemaMetadataEditor
-          key={obj.role ?? "none"}
+          key={metadataEditorKey(obj.id, obj.role)}
           value={obj.metadata}
           formatKind={obj.format.kind}
           objectId={obj.id}
