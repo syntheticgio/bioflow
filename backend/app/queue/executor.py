@@ -236,8 +236,15 @@ class JobExecutor:
                 log.error("job_dead", job_id=job_id, attempts=attempts, error=str(e))
             else:
                 outcome = RunOutcome.FAILED
+                # Epoch-fenced like every other queue write: a worker whose lease
+                # was already taken over must not overwrite the live attempt
+                # count with its stale snapshot + 1, which would let the job
+                # retry past max_attempts (stale count lower) or die short of
+                # it (stale count higher). retry_later fences its own write;
+                # this is the attempts counter it leaves to us.
                 await get_db().jobs.update_one(
-                    {"_id": PydanticObjectId(job_id)}, {"$set": {"attempts": attempts}}
+                    {"_id": PydanticObjectId(job_id), "lease.epoch": epoch},
+                    {"$set": {"attempts": attempts}},
                 )
                 await queue.retry_later(job_id, epoch, attempts, error)
                 log.warning("job_failed_retrying", job_id=job_id, attempts=attempts)
