@@ -174,8 +174,16 @@ class JobExecutor:
         try:
             # Compute nodes: fetch input blobs from the primary before running
             # the handler.  No-op on the primary.
+            #
+            # to_thread: _resolve_input_blobs does a synchronous urllib download
+            # of arbitrarily large blobs. Running it directly would freeze the
+            # event loop for the whole transfer -- heartbeats, the cancel
+            # watcher, and the lease renewals that feed the reaper all stop,
+            # so every other running job's lease expires and those jobs get
+            # reaped and re-run while still executing. Off the loop, the fetch
+            # proceeds while those keep ticking.
             if settings.is_compute_node:
-                _resolve_input_blobs(job.payload)
+                await asyncio.to_thread(_resolve_input_blobs, job.payload)
 
             result = await self._dispatch(spec, ctx)
             # Thread-mode handlers cannot touch the database (Beanie is async),
