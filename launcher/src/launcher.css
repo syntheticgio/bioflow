@@ -321,3 +321,52 @@ a:hover { color: var(--color-accent-2); }
 .mode-card-title { margin: 0 0 8px; font-size: 18px; font-weight: 600; }
 .mode-card-body { margin: 0 0 14px; font-size: 14px; line-height: 1.5; color: var(--ink-62); }
 .mode-card-action { font-size: 13px; font-weight: 600; color: var(--color-accent); }
+
+/* ── Release notes dialog (#842) ──────────────────────────────────────
+   Wider than the config dialogs: release bodies are prose and bullet
+   lists rather than labelled fields, and at 520px the generated PR-title
+   bullets wrap two or three times each. */
+.dialog-wide { width: 640px; }
+
+.notes-picker {
+  display: flex; align-items: center; gap: 12px;
+  margin-bottom: 18px;
+}
+.notes-picker .field-value-input { flex: 1; min-width: 0; }
+.notes-picker .field-hint { flex: none; white-space: nowrap; }
+
+.notes-body { font-size: 14px; line-height: 1.55; }
+.notes-h2 {
+  margin: 22px 0 8px; font-family: var(--font-heading);
+  font-size: 18px; font-weight: 600; letter-spacing: -0.01em;
+}
+/* The generated bodies open with a heading; a top margin there would
+   read as a gap under the rule rather than separation between sections. */
+.notes-body > .notes-h2:first-child { margin-top: 0; }
+.notes-h3 {
+  margin: 16px 0 6px; font-size: 14px; font-weight: 600;
+  text-transform: uppercase; letter-spacing: 0.06em; color: var(--ink-62);
+}
+.notes-paragraph { margin: 0 0 10px; }
+/* Rendered as bare <li>s without a wrapping list: the parser emits one
+   block per line, and grouping runs of bullets into <ul>s would buy a
+   default marker this already draws itself. */
+.notes-bullet {
+  margin: 0 0 6px 18px; list-style: none; position: relative;
+}
+.notes-bullet::before {
+  content: "—"; position: absolute; left: -18px; color: var(--ink-62);
+}
+.notes-code {
+  font-family: var(--font-mono); font-size: 0.9em;
+  background: var(--color-neutral-100); border-radius: var(--radius-sm);
+  padding: 1px 4px;
+}
+.notes-pre {
+  font-family: var(--font-mono); font-size: 12.5px; line-height: 1.5;
+  background: var(--color-neutral-100); border-radius: var(--radius-sm);
+  padding: 10px 12px; margin: 0 0 12px;
+  overflow-x: auto; white-space: pre;
+}
+.notes-link { color: var(--color-accent-700); cursor: pointer; }
+.notes-link:hover { color: var(--color-accent-2); }
