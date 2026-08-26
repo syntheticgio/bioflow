@@ -52,13 +52,31 @@ async def align_reads_chunked(ctx):
         sub_payload["chunk_bucket_index"] = spec["index"]
         sub_payload["chunk_total_buckets"] = total
         del sub_payload["bucket_specs"]
-        sid = await queue.enqueue(
+        job = await queue.enqueue(
             "align_reads",
             payload=sub_payload,
             owner=owner,
             parent_job_id=ctx.job_id,
         )
-        sub_job_ids.append(sid)
+        # enqueue returns the Job it created, or None when a concurrent
+        # duplicate was deduplicated away. Append the id, not the object:
+        # the polling loop and the cancel pass below both feed these to
+        # Job.get / request_cancel, which want an id.
+        #
+        # A None here is treated as a hard failure rather than a tracked
+        # in-flight job. This call site passes no dedup_key, so the unique
+        # index exempts it and dedup cannot fire -- the branch is defensive.
+        # If a dedup key were ever added, "find the job that beat us" would
+        # mean a Mongo query on type + owner + non-terminal state, which can
+        # match several jobs (retries, a prior run of the same bucket) and
+        # tracking the wrong one is worse than failing. A bucket we cannot
+        # track means we cannot verify its output exists before the merge.
+        if job is None:
+            raise PermanentError(
+                f"align_reads for bucket {spec['index']} was deduplicated "
+                "away at enqueue; cannot track a bucket with no job id"
+            )
+        sub_job_ids.append(str(job.id))
 
     ctx.progress(phase="aligning", pct=0.0, message=f"Buckets 0/{total}")
 

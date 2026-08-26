@@ -65,12 +65,15 @@ def orchestrate(monkeypatch):
     enqueued: list[dict] = []
 
     async def _enqueue(job_type, *, payload=None, owner=None, parent_job_id=None, **kw):
-        jid = str(PydanticObjectId())
+        # enqueue returns the Job it created (or None when deduplicated away);
+        # the orchestrator must read .id off it. A bare string here would pass
+        # the tests while the production code still appends the object.
+        job = SimpleNamespace(id=PydanticObjectId())
         enqueued.append(
             {"type": job_type, "payload": payload or {}, "owner": owner,
-             "parent_job_id": parent_job_id, "id": jid}
+             "parent_job_id": parent_job_id, "id": str(job.id)}
         )
-        return jid
+        return job
 
     monkeypatch.setattr("app.queue.queue.enqueue", _enqueue)
 
@@ -129,6 +132,27 @@ class TestFanOut:
 
         with pytest.raises(PermanentError, match="bucket_specs"):
             await orchestrate([], _payload(0))
+
+    async def test_a_deduplicated_bucket_fails_loudly_not_silently(self, monkeypatch):
+        """The #851 failure mode. enqueue returning None used to append None
+        to sub_job_ids; the poll loop's bare except then skipped the bucket
+        forever and the orchestrator spun to the 24h deadline. A bucket with
+        no trackable job must fail the orchestrator at enqueue time."""
+        from app.errors import PermanentError
+
+        monkeypatch.setattr(mod, "_POLL_SECONDS", 0)
+        calls: dict[str, bool] = {"first": True}
+
+        async def _enqueue(job_type, *, payload=None, owner=None, parent_job_id=None, **kw):
+            if not calls["first"]:
+                return None
+            calls["first"] = False
+            return SimpleNamespace(id=PydanticObjectId())
+
+        monkeypatch.setattr("app.queue.queue.enqueue", _enqueue)
+        ctx = _Ctx(_payload(2))
+        with pytest.raises(PermanentError, match="deduplicated"):
+            await mod.align_reads_chunked(ctx)
 
 
 class TestWaitingForBuckets:
