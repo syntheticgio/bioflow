@@ -3,6 +3,7 @@ pub mod commands;
 pub mod docker;
 pub mod migrate;
 pub mod optional_tools;
+pub mod release_notes;
 pub mod remote;
 pub mod settings;
 pub mod setup;
@@ -36,6 +37,7 @@ pub fn run() {
       commands::finish_storage_migration,
       commands::current_settings,
       commands::list_version_options,
+      commands::list_release_notes,
       commands::rebuild_developer,
       commands::discover_node_connection,
       commands::install_node_local,

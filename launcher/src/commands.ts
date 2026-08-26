@@ -1,6 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { openUrl } from "@tauri-apps/plugin-opener";
-import type { LauncherState, OtherStack } from "./types";
+import type { LauncherState, OtherStack, ReleaseNotes } from "./types";
 import { parseHardMemGb } from "./settings-logic";
 
 export function status(): Promise<LauncherState> {
@@ -355,4 +355,20 @@ export interface NodeStatus {
 
 export function nodeStatus(): Promise<NodeStatus> {
   return invoke("node_status");
+}
+
+// Every published BioFlow release plus which one the running stack
+// corresponds to. Fails silently to an empty list rather than throwing: the
+// dialog degrades to a link to GitHub, the same way the Settings version
+// dropdown degrades to Release-only when GHCR is unreachable.
+export function listReleaseNotes(): Promise<ReleaseNotes> {
+  return invoke<ReleaseNotes>("list_release_notes");
+}
+
+// Opens a URL in the user's real browser. Links inside the launcher must
+// never navigate the webview itself -- it has no back button or address
+// bar, so following one in place strands the user on a web page with no
+// way back to the launcher.
+export function openExternal(url: string): Promise<void> {
+  return openUrl(url);
 }
