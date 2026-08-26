@@ -306,6 +306,38 @@ class TestFasta:
         f = parsers.parse(gz, FormatKind.FASTA, Compression.GZIP)
         assert f["sequence_count"] == 3
 
+    def test_truncated_window_keeps_the_longest_not_the_first(self, tmp_path):
+        # The GRCh38 failure mode: chromosomes interleaved with scaffolds,
+        # so "first 50 in file order" spends the budget before the last
+        # chromosomes. The window must be the longest 50 instead.
+        lines = []
+        for i in range(60):
+            if i % 2 == 0:
+                lines.append(f">chr{i} 500 bp\n" + "A" * 500 + "\n")
+            else:
+                lines.append(f">scaf{i} 5 bp\n" + "C" * 5 + "\n")
+        path = tmp_path / "ref.fasta"
+        path.write_text("".join(lines))
+
+        f = parsers.parse(path, FormatKind.FASTA, Compression.NONE)
+        assert f["sequence_count"] == 60
+        assert f["sequence_names_truncated"] is True
+
+        names = f["sequence_names"]
+        lengths = f["sequence_lengths"]
+        assert len(names) == parsers.MAX_STORED_CONTIGS
+        assert len(lengths) == parsers.MAX_STORED_CONTIGS
+
+        # Every chromosome-scale record made the window...
+        kept = {n for n in names if n.startswith("chr")}
+        assert len(kept) == 30
+        # ...and the budget was filled with the longest scaffolds.
+        assert all(lengths[n] >= 500 for n in kept)
+        # Names and lengths stay paired by position and by key.
+        assert set(names) == set(lengths)
+        assert names[0] == "chr0"
+        assert lengths[names[0]] == 500
+
 
 class TestTabular:
     def test_bed_columns_and_contigs(self, tmp_path):
