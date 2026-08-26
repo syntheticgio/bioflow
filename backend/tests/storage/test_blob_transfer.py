@@ -1,6 +1,8 @@
 """Tests for blob_transfer — content-addressed blob fetch/push between nodes."""
 
 import hashlib
+import io
+import urllib.error
 from io import BytesIO
 from pathlib import Path
 from unittest.mock import patch
@@ -39,6 +41,20 @@ def _fake_200_response(content: bytes):
     resp.status = 200
     resp.url = "http://primary:8000/api/v1/objects/blob/abc"
     return resp
+
+
+class _FakeResponse:
+    """Minimal urllib response context manager (status + url only)."""
+
+    def __init__(self, status: int, url: str = "http://primary:8000/api/v1/objects/blob/x"):
+        self.status = status
+        self.url = url
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
 
 
 # ---------------------------------------------------------------------------
@@ -271,6 +287,125 @@ class TestPushBlob:
             with patch("app.storage.blob_transfer.blob_path", return_value=path):
                 with pytest.raises(OSError, match="local SHA-256 mismatch"):
                     push_blob(wrong_digest)
+
+    def test_push_streams_the_file_instead_of_buffering_it(self, tmp_path):
+        """The whole OOM: read_bytes() on a multi-GB BAM loads it all into
+        RAM. The PUT body must be a stream opened on the file with an
+        explicit Content-Length, not an in-memory bytes buffer. The stream is
+        closed by the time urlopen returns, so the body is snapshotted inside
+        the fake urlopen -- the moment the real one reads it."""
+        content = b"x" * (300 * 1024)  # > _BLOB_CHUNK, exercises chunked reads
+        digest = hashlib.sha256(content).hexdigest()
+        path = _write_blob(tmp_path, digest, content)
+
+        captured = {}
+
+        def fake_urlopen(req, timeout=None):
+            if req.get_method() == "HEAD":
+                raise urllib.error.HTTPError(req.full_url, 404, "not found", {}, None)
+            # Snapshot the body while the stream is still open.
+            captured["data_type"] = type(req.data).__name__
+            captured["is_stream"] = isinstance(req.data, io.IOBase)
+            captured["content"] = req.data.read()
+            captured["content_length"] = req.headers.get("Content-length")
+            return _FakeResponse(200)
+
+        with patch("app.storage.blob_transfer.settings") as s:
+            s.is_compute_node = True
+            s.primary_api_url = "http://primary:8000"
+            s.node_shared_secret = ""
+            with patch("app.storage.blob_transfer.blob_path", return_value=path):
+                with patch(
+                    "app.storage.blob_transfer.urllib.request.urlopen",
+                    side_effect=fake_urlopen,
+                ):
+                    assert push_blob(digest) is True
+
+        # The body was a stream (not an in-memory bytes buffer)...
+        assert captured["is_stream"], f"body was {captured['data_type']}, not a stream"
+        # ...with an explicit Content-Length...
+        assert captured["content_length"] == str(len(content))
+        # ...carrying exactly the file content.
+        assert captured["content"] == content
+
+    def test_fetch_failure_removes_the_partial_tmp_file(self, tmp_path):
+        """The ticket's cleanup bug: _fetch only unlinked its .tmp partial on
+        the digest-mismatch path. The write path -- where a partial .tmp
+        actually exists -- never cleaned up, so a failed write (disk full,
+        etc.) left {digest}.tmp files beside the store that nothing ever
+        swept. A disk-full during the write must leave no partial behind."""
+        import builtins
+        import contextlib
+
+        digest = "b" * 64
+        path = _blob_path(tmp_path, digest)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = path.with_suffix(path.suffix + ".tmp")
+        real_open = builtins.open
+
+        # Response streams one chunk; writing it to the .tmp fails with a
+        # disk-full, leaving a partial download behind that must be swept.
+        class _Resp(contextlib.AbstractContextManager):
+            status = 200
+            url = "http://primary:8000/api/v1/objects/blob/" + digest
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *exc):
+                return False
+
+            def read(self, n):
+                return b"partial chunk"
+
+        def fake_open(file, mode="r", *args, **kwargs):
+            if str(file) == str(tmp) and "w" in mode:
+                tmp.write_bytes(b"partial")  # the download that must be swept
+                raise OSError("No space left on device")
+            return real_open(file, mode, *args, **kwargs)
+
+        with patch("app.storage.blob_transfer.settings") as s:
+            s.is_compute_node = True
+            s.primary_api_url = "http://primary:8000"
+            s.node_shared_secret = ""
+            with patch("app.storage.blob_transfer.blob_path", return_value=path):
+                with patch(
+                    "app.storage.blob_transfer.urllib.request.urlopen",
+                    side_effect=lambda req, timeout=None: _Resp(),
+                ):
+                    with patch("app.storage.blob_transfer.open", side_effect=fake_open):
+                        with pytest.raises(OSError, match="No space left on device"):
+                            ensure_blob(digest)
+
+        assert not tmp.exists(), "failed write left the .tmp partial behind"
+        assert not path.exists()
+
+    def test_digest_mismatch_removes_the_tmp_file(self, tmp_path):
+        """The pre-existing cleanup path, kept: a corrupt download must not
+        be promoted to a real blob and must not leave its .tmp behind."""
+        digest = "c" * 64
+        path = _blob_path(tmp_path, digest)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = path.with_suffix(path.suffix + ".tmp")
+
+        resp = BytesIO(b"corrupt content that won't match")
+        resp.status = 200
+        resp.url = "http://primary:8000/api/v1/objects/blob/" + digest
+
+        with patch("app.storage.blob_transfer.settings") as s:
+            s.is_compute_node = True
+            s.primary_api_url = "http://primary:8000"
+            s.node_shared_secret = ""
+            with patch("app.storage.blob_transfer.blob_path", return_value=path):
+                with patch(
+                    "app.storage.blob_transfer.urllib.request.urlopen",
+                    side_effect=lambda req, timeout=None: resp,
+                ):
+                    with pytest.raises(OSError, match="SHA-256 mismatch"):
+                        ensure_blob(digest)
+
+        assert not tmp.exists()
+        assert not path.exists()
 
 
 # ---------------------------------------------------------------------------
