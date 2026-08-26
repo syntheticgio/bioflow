@@ -299,7 +299,13 @@ class LoadGovernor:
             and m.mem_available > min(0.20 * budget, 4 * 1024**3)
             and m.load1 < LOAD_OPEN
             and m.swap_in_mb_s < SWAP_OPEN_MB_S
-            and (m.disk_free_percent > DISK_FREE_OPEN_PCT or m.disk_free_bytes == 0)
+            and (
+                m.disk_free_bytes == 0
+                or (
+                    m.disk_free_percent > DISK_FREE_OPEN_PCT
+                    and m.disk_free_bytes > DISK_FREE_OPEN_BYTES
+                )
+            )
         )
 
     def _breaches_throttle(self, m: LoadSample) -> bool:
