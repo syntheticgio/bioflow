@@ -224,6 +224,74 @@ async def test_ambiguous_profile_is_a_clean_tool_error_not_a_500():
     assert "?profile=" in message
 
 
+async def test_a_deliberate_tool_error_keeps_its_message_not_just_the_profile_one():
+    """The general form of the case above, pinned separately because it is a
+    contract with the `mcp` library, not a fact about profiles.
+
+    `mcp` forwards a `ToolError`'s message to the model and deliberately
+    withholds the text of anything else, treating it as a crash. Every error
+    this package raises on purpose is an `AppError` whose message is written
+    to be acted on, so `_tool` translates the two. `NotFoundError` is used
+    here rather than `ProfileUnresolvedError` so this fails if that
+    translation is narrowed to the profile path alone -- which is exactly
+    how the mcp 2.1 regression would come back.
+    """
+    profile = await profile_service.create_profile(username="mcp-live-toolerror")
+    owner = profile.owner_id()
+
+    test_app = _build_test_app()
+    mcp_url = f"/api/v1/mcp/?profile={owner}"
+
+    async with test_app.router.lifespan_context(test_app):
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=test_app), base_url="http://test"
+        ) as client:
+            init_resp = await client.post(
+                mcp_url,
+                headers=_JSONRPC_HEADERS,
+                json={
+                    "jsonrpc": "2.0",
+                    "id": 1,
+                    "method": "initialize",
+                    "params": {
+                        "protocolVersion": "2024-11-05",
+                        "capabilities": {},
+                        "clientInfo": {"name": "test-client", "version": "0.0.1"},
+                    },
+                },
+            )
+            session_id = init_resp.headers["mcp-session-id"]
+            session_headers = {**_JSONRPC_HEADERS, "mcp-session-id": session_id}
+
+            await client.post(
+                mcp_url,
+                headers=session_headers,
+                json={"jsonrpc": "2.0", "method": "notifications/initialized"},
+            )
+
+            call_resp = await client.post(
+                mcp_url,
+                headers=session_headers,
+                json={
+                    "jsonrpc": "2.0",
+                    "id": 2,
+                    "method": "tools/call",
+                    "params": {
+                        "name": "bioflow_get_job",
+                        "arguments": {"job_id": "000000000000000000000000"},
+                    },
+                },
+            )
+
+    assert call_resp.status_code == 200, call_resp.text
+    payload = _extract_result(call_resp.text)
+    assert payload["result"]["isError"] is True, payload
+
+    message = payload["result"]["content"][0]["text"]
+    # The NotFoundError's own words, not the library's generic stand-in.
+    assert "Job not found" in message, message
+
+
 async def test_resources_list_includes_the_derived_and_guide_resources():
     test_app = _build_test_app()
     mcp_url = "/api/v1/mcp/"
