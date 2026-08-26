@@ -1,6 +1,13 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
 import { api } from "../api/client";
+import { BioIcon } from "../icons/BioIcon";
+import {
+  agentConnectionState,
+  agentStatusDotClass,
+  agentStatusError,
+  agentStatusLabel,
+} from "../lib/agentStatus";
 import { useAgentSSE } from "../hooks/useAgentSSE";
 import { AgentMessageBubble } from "./AgentMessageBubble";
 import { AgentPanelInput } from "./AgentPanelInput";
@@ -85,7 +92,7 @@ export function AgentPanel({
   // i.e. a fresh page load/drawer reopen -- counts as a resume.
   const suppressResumedRef = useRef(false);
 
-  const { connected } = useAgentSSE({
+  const { connected, running } = useAgentSSE({
     projectId,
     onMessageDelta: (_kind, _contentIndex, delta) => {
       if (_kind === "text") {
@@ -151,12 +158,11 @@ export function AgentPanel({
       streamingContentRef.current = "";
       currentToolCallsRef.current = [];
     },
+    // Only the stream dropping is an error worth a banner. An agent with no
+    // process yet is idle, not broken (issue #814), and agentStatusError is
+    // what decides which is which.
     onConnectionChange: (isConnected) => {
-      if (!isConnected) {
-        setError("Disconnected from agent. Click restart to reconnect.");
-      } else {
-        setError(null);
-      }
+      setError(agentStatusError(agentConnectionState(isConnected, false)));
     },
     // Fired only from the backend's agent_status event, never from the SSE
     // connection merely opening -- onopen fires unconditionally and says
@@ -182,6 +188,11 @@ export function AgentPanel({
       }
     },
   });
+
+  // "Disconnected" means the stream is down, not that no pi process has
+  // spawned yet -- the latter is the ordinary state of a freshly opened
+  // drawer whose provider is configured and working (issue #814).
+  const connectionState = agentConnectionState(connected, running);
 
   const ask = useMutation({
     mutationFn: (q: string) => api.askAgent(projectId, q),
@@ -268,11 +279,10 @@ export function AgentPanel({
       <div className="agent-drawer">
         <div className="queue-panel-head">
           <span className="panel-title">AI Agent</span>
-          {connected ? (
-            <span className="agent-status-dot agent-status-connected" title="Connected" />
-          ) : (
-            <span className="agent-status-dot agent-status-disconnected" title="Disconnected" />
-          )}
+          <span
+            className={`agent-status-dot ${agentStatusDotClass(connectionState)}`}
+            title={agentStatusLabel(connectionState)}
+          />
           {error && (
             <span className="agent-error-badge">{error}</span>
           )}
@@ -283,7 +293,7 @@ export function AgentPanel({
             title="Agent instructions"
             style={{ marginLeft: "auto" }}
           >
-            ⚙️
+            <BioIcon name="agent_settings" size={16} decorative />
           </button>
           <button
             type="button"
@@ -296,7 +306,7 @@ export function AgentPanel({
             title="New session (clears the agent's memory)"
             disabled={isStreaming}
           >
-            🗑
+            <BioIcon name="chat_delete" size={16} decorative />
           </button>
           <button
             type="button"
@@ -304,7 +314,7 @@ export function AgentPanel({
             onClick={() => restart.mutate()}
             title="Restart agent (keeps the conversation)"
           >
-            🔄
+            <BioIcon name="agent_restart" size={16} decorative />
           </button>
           <button type="button" className="icon-btn" onClick={onClose} title="Close">
             ×
@@ -391,7 +401,7 @@ export function AgentPanel({
             <AgentPanelInput
               onSend={submit}
               disabled={isStreaming}
-              connected={connected}
+              state={connectionState}
             />
           </>
         )}

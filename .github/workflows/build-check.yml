@@ -1,4 +1,16 @@
 # Verifies code quality and build integrity on every PR into main or into a
+# release-stage branch (alpha/X.Y.Z, beta/X.Y.Z, release/X.Y.Z).
+#
+# The stage branches are covered because that is where the flow has the least
+# other cover, not the most (#827). Fixes found in alpha land by PR *into the
+# alpha branch* and only later merge back to main, so main's gate is downstream
+# of the merge it should have guarded. Scoped to `main` alone this workflow
+# simply did not run there, and `gh pr view` still reported MERGEABLE / CLEAN --
+# "clean" means no *required* check is failing, which is indistinguishable from
+# green when nothing ran at all.
+#
+# The `changes` job needs no adjustment for this: dorny/paths-filter diffs
+# against the PR's own merge base, so it is base-branch agnostic.
 # release-stage branch (alpha/**, beta/**, release/**).
 #
 # Five jobs:
@@ -32,11 +44,7 @@ name: Build check
 # release. The branch names are the ones ops/release.sh creates.
 on:
   pull_request:
-    branches:
-      - main
-      - 'alpha/**'
-      - 'beta/**'
-      - 'release/**'
+    branches: [main, "alpha/**", "beta/**", "release/**"]
   workflow_dispatch:
     inputs:
       skip_frontend:

@@ -205,16 +205,24 @@ def enrich_from_assembly(
 
     result.facts = meta.to_facts()
 
-    # Per-sequence chromosome names, so the strip can label a bar "IV" rather
-    # than deriving "1136" from its accession. A second request, and a strictly
+    # Per-sequence chromosome names and roles, so the strip can label a bar
+    # "IV" rather than deriving "1136" from its accession, and can draw only
+    # the assembly's actual chromosomes. A second request, and a strictly
     # optional one: it must never cost the stats the lookup above already got.
+    #
+    # `sequence_labels` is still written for readers that predate
+    # `sequence_roles` -- the two are derived from one response, so keeping
+    # both costs no extra request.
     try:
-        labels = ncbi_assembly.lookup_sequence_names(meta.accession or accession)
+        roles = ncbi_assembly.lookup_sequence_roles(meta.accession or accession)
     except Exception as e:  # noqa: BLE001 - enrichment must never break ingest
-        log.warning("sequence_names_failed", accession=accession, error=str(e))
-        labels = None
-    if labels:
-        result.facts["sequence_labels"] = labels
+        log.warning("sequence_roles_failed", accession=accession, error=str(e))
+        roles = None
+    if roles:
+        result.facts["sequence_roles"] = roles
+        result.facts["sequence_labels"] = {
+            accession_key: entry["label"] for accession_key, entry in roles.items()
+        }
 
     for key, value in meta.to_metadata().items():
         if value in (None, ""):

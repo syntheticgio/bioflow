@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import mastheadImg from "./assets/broadhead-masthead.png";
+import { LAUNCHER_VERSION_LABEL } from "./version";
 import { nodeStatus, runNode, stopNode } from "./commands";
 import type { NodeStatus } from "./commands";
 
@@ -82,7 +83,7 @@ export function NodeScreen({ onOpenPrimary }: Props) {
               "Worker stopped"
             )}
           </span>
-          <span>Compute node · Launcher 0.1.0</span>
+          <span>Compute node · {LAUNCHER_VERSION_LABEL}</span>
         </div>
         <div className="masthead-rule-thin" />
       </header>

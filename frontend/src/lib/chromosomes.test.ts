@@ -323,7 +323,163 @@ describe("classifyChromosomes", () => {
     });
     expect(view.kind).toBe("drawable");
   });
+
+  // --- sequence_roles: only the assembly's actual chromosomes get bars ---
+
+  // GRCh38 as stored: 24 chromosomes plus MT are core, and the scaffolds,
+  // patches and alt loci around them are not. Lengths are the real ones, so
+  // the length-ranked ordering this replaces is genuinely different --
+  // chr11 is longer than chr10.
+  const HUMAN_LENGTHS: Record<string, number> = {
+    "NC_000001.11": 248956422,
+    "NC_000002.12": 242193529,
+    "NC_000010.11": 133797422,
+    "NC_000011.10": 135086622,
+    "NC_000023.11": 156040895,
+    "NC_000024.10": 57227415,
+    "NC_012920.1": 16569,
+    "NT_187361.1": 175055,
+    "NW_009646195.1": 226852,
+  };
+  const HUMAN_ROLES: Record<string, unknown> = {
+    "NC_000001.11": { label: "1", core: true, order: 0 },
+    "NC_000002.12": { label: "2", core: true, order: 1 },
+    "NC_000010.11": { label: "10", core: true, order: 9 },
+    "NC_000011.10": { label: "11", core: true, order: 10 },
+    "NC_000023.11": { label: "X", core: true, order: 22 },
+    "NC_000024.10": { label: "Y", core: true, order: 23 },
+    "NC_012920.1": { label: "MT", core: true, order: 24 },
+    "NT_187361.1": {
+      label: "HSCHR1_CTG1_UNLOCALIZED",
+      core: false,
+      order: 25,
+    },
+    "NW_009646195.1": { label: "HG2058_PATCH", core: false, order: 26 },
+  };
+
+  it("draws only the core chromosomes when roles are known", () => {
+    const view = classifyChromosomes({
+      sequence_names: Object.keys(HUMAN_LENGTHS),
+      sequence_lengths: HUMAN_LENGTHS,
+      sequence_roles: HUMAN_ROLES,
+    });
+    if (view.kind !== "drawable") throw new Error("expected drawable");
+    expect(view.bars.map((b) => b.label)).toEqual([
+      "1",
+      "2",
+      "10",
+      "11",
+      "X",
+      "Y",
+      "MT",
+    ]);
+    // The scaffold and the patch are still reachable, just not drawn.
+    // Non-core entries stay length-ranked, so assert membership not order.
+    expect(view.overflow.map((b) => b.name).sort()).toEqual([
+      "NT_187361.1",
+      "NW_009646195.1",
+    ]);
+  });
+
+  // The #836 rendering bug: X and Y were captioned "23" and "24".
+  it("captions the sex chromosomes X and Y, not 23 and 24", () => {
+    const view = classifyChromosomes({
+      sequence_names: Object.keys(HUMAN_LENGTHS),
+      sequence_lengths: HUMAN_LENGTHS,
+      sequence_roles: HUMAN_ROLES,
+    });
+    if (view.kind !== "drawable") throw new Error("expected drawable");
+    expect(view.bars.find((b) => b.name === "NC_000023.11")?.label).toBe("X");
+    expect(view.bars.find((b) => b.name === "NC_000024.10")?.label).toBe("Y");
+  });
+
+  // Karyotype order, not length order: chr11 is longer than chr10, and MT is
+  // the shortest sequence there is but belongs at the end rather than nowhere.
+  it("orders bars by the assembly's order, not by length", () => {
+    const view = classifyChromosomes({
+      sequence_names: Object.keys(HUMAN_LENGTHS),
+      sequence_lengths: HUMAN_LENGTHS,
+      sequence_roles: HUMAN_ROLES,
+    });
+    if (view.kind !== "drawable") throw new Error("expected drawable");
+    const order = view.bars.map((b) => b.label);
+    expect(order.indexOf("10")).toBeLessThan(order.indexOf("11"));
+    expect(order[order.length - 1]).toBe("MT");
+  });
+
+  // A draft assembly: NCBI answered, but nothing is promoted to chromosome.
+  // Falling back is what keeps the strip from drawing nothing at all.
+  it("falls back to length ranking when no sequence is core", () => {
+    const view = classifyChromosomes({
+      sequence_names: Object.keys(HUMAN_LENGTHS),
+      sequence_lengths: HUMAN_LENGTHS,
+      sequence_roles: {
+        "NT_187361.1": { label: "scaffold_1", core: false, order: 0 },
+        "NW_009646195.1": { label: "scaffold_2", core: false, order: 1 },
+      },
+    });
+    if (view.kind !== "drawable") throw new Error("expected drawable");
+    expect(view.bars.length).toBeGreaterThan(0);
+    expect(view.bars[0].name).toBe("NC_000001.11");
+  });
+
+  // Locally-assembled FASTAs have no roles at all: today's behaviour, intact.
+  it("is unchanged when sequence_roles is absent", () => {
+    const view = classifyChromosomes({
+      sequence_names: Object.keys(YEAST_LENGTHS),
+      sequence_lengths: YEAST_LENGTHS,
+    });
+    if (view.kind !== "drawable") throw new Error("expected drawable");
+    expect(view.bars).toHaveLength(17);
+  });
+
+  it("ignores a wrong-typed sequence_roles", () => {
+    const view = classifyChromosomes({
+      sequence_names: Object.keys(YEAST_LENGTHS),
+      sequence_lengths: YEAST_LENGTHS,
+      sequence_roles: "not an object",
+    });
+    expect(view.kind).toBe("drawable");
+  });
+
+  // The real GCA_000001405.29 case: 709 sequences in the file, 50 recorded,
+  // and the recorded window holds chromosomes 1-18 only. Drawing 18 bars is
+  // honest, but saying nothing about the other six is not.
+  it("flags a strip built from a truncated window", () => {
+    const view = classifyChromosomes({
+      sequence_names: Object.keys(HUMAN_LENGTHS),
+      sequence_lengths: HUMAN_LENGTHS,
+      sequence_roles: HUMAN_ROLES,
+      sequence_count: 709,
+    });
+    if (view.kind !== "drawable") throw new Error("expected drawable");
+    expect(view.truncated).toBe(true);
+  });
+
+  it("does not flag a complete file", () => {
+    const view = classifyChromosomes({
+      sequence_names: Object.keys(HUMAN_LENGTHS),
+      sequence_lengths: HUMAN_LENGTHS,
+      sequence_roles: HUMAN_ROLES,
+      sequence_count: Object.keys(HUMAN_LENGTHS).length,
+    });
+    if (view.kind !== "drawable") throw new Error("expected drawable");
+    expect(view.truncated).toBeUndefined();
+  });
+
+  // A role entry for a sequence the file does not contain must not invent a
+  // bar: a GCF role map against a GCA file, or a subset FASTA.
+  it("only draws sequences the file actually has", () => {
+    const view = classifyChromosomes({
+      sequence_names: ["NC_000001.11"],
+      sequence_lengths: { "NC_000001.11": 248956422 },
+      sequence_roles: HUMAN_ROLES,
+    });
+    if (view.kind !== "drawable") throw new Error("expected drawable");
+    expect(view.bars.map((b) => b.name)).toEqual(["NC_000001.11"]);
+  });
 });
+
 
 describe("focusWindow", () => {
   // A 10 kb virus: 1% is 100 bases, so the 2 kb floor takes over -- a 4 kb

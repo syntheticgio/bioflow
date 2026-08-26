@@ -24,6 +24,11 @@
 # a path filter, but this check should run at full strength regardless --
 # a docs-only PR is exactly where an off-hand subject like "Linting issues"
 # tends to appear.
+#
+# Runs on PRs into the release-stage branches as well as main (#827). On an
+# alpha PR this partly duplicates the check the eventual alpha->main merge
+# will do, but it runs at the only moment the subject is still editable: by
+# the time those commits reach main they are published history.
 name: Commit check
 
 # Release-stage branches included for the same reason build-check.yml lists
@@ -34,11 +39,7 @@ name: Commit check
 # whose notes are about to be published.
 on:
   pull_request:
-    branches:
-      - main
-      - 'alpha/**'
-      - 'beta/**'
-      - 'release/**'
+    branches: [main, "alpha/**", "beta/**", "release/**"]
   workflow_dispatch:
 
 jobs:

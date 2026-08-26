@@ -144,6 +144,13 @@ export function ChromosomeStrip({ facts }: { facts: Record<string, unknown> }) {
         </div>
       )}
 
+      {view.truncated && (
+        <div className="chrom-note">
+          Only the first sequences in this file were recorded, so chromosomes
+          past them aren’t shown. Re-running QC records more.
+        </div>
+      )}
+
       {view.overflow.length > 0 && (
         <select
           className="chrom-overflow"
@@ -153,6 +160,7 @@ export function ChromosomeStrip({ facts }: { facts: Record<string, unknown> }) {
           <option value="">…and {view.overflow.length} more</option>
           {view.overflow.map((bar) => (
             <option key={bar.name} value={bar.name}>
+              {bar.label ? `${bar.label} · ` : ""}
               {bar.name} · {formatBases(bar.length)}
             </option>
           ))}

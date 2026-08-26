@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import mastheadImg from "./assets/broadhead-masthead.png";
+import { LAUNCHER_VERSION_LABEL } from "./version";
 import {
   dockerReady,
   runFirstSetup,
@@ -124,7 +125,7 @@ export function SetupWizard({ onInstalled }: Props) {
           <div className="masthead-rule-thick" />
           <div className="status-line">
             <span>Setup</span>
-            <span>{dockerIsReady ? "Docker ready" : "Docker not detected"} · Launcher 0.1.0</span>
+            <span>{dockerIsReady ? "Docker ready" : "Docker not detected"} · {LAUNCHER_VERSION_LABEL}</span>
           </div>
           <div className="masthead-rule-thin" />
         </header>
@@ -193,7 +194,7 @@ export function SetupWizard({ onInstalled }: Props) {
         <div className="masthead-rule-thick" />
         <div className={`status-line${hasProblems ? " status-line-warn" : ""}`}>
           <span>{setupStatusText({ storageProblem, portProblem })}</span>
-          <span>{dockerIsReady ? "Docker ready" : "Docker not detected"} · Launcher 0.1.0</span>
+          <span>{dockerIsReady ? "Docker ready" : "Docker not detected"} · {LAUNCHER_VERSION_LABEL}</span>
         </div>
         <div className="masthead-rule-thin" />
       </header>

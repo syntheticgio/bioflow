@@ -203,6 +203,15 @@ if [ "$LINE" = "app" ]; then
   WRITTEN+=("frontend/package-lock.json")
 fi
 
+# The launcher's lockfile needs the same treatment, on *both* lines: an app cut
+# bumps launcher/package.json too (bump_app calls bump_launcher, #335), so
+# gating this on "$LINE" the way the frontend does would leave it stale. It had
+# been stale since 0.1.0 until #808.
+cd "$REPO_ROOT/launcher"
+npm install --package-lock-only --silent
+cd "$REPO_ROOT"
+WRITTEN+=("launcher/package-lock.json")
+
 # Regenerate CHANGELOG.md so the release commit carries the section for this
 # tag. The changelog tracks the app line only (#106); the launcher line keeps
 # its GitHub release notes. `--unreleased --tag` renders the commits since the
@@ -224,6 +233,15 @@ if [ "$LINE" = "app" ]; then
   # Move the release commit onto the stage branch, then push branch and tag
   # together: a pushed tag whose commit never landed is a tag CI cannot check
   # out.
+  #
+  # This push CREATES alpha/X.Y.Z the first time a version is cut, and the
+  # "Protect main and version branches" ruleset carries a `creation` rule that
+  # now matches alpha/**, beta/** and release/** (#827 -- before that its
+  # patterns were written against the *tag* namespace, `v0.3.0`, and so matched
+  # no branch at all). The push works only because that ruleset grants the
+  # admin repository role `bypass_mode: always`, and releases are cut by an
+  # admin. Cut one as a non-admin -- a CI token, a future contributor -- and
+  # this line fails with a ruleset rejection, not a git error.
   if git rev-parse -q --verify "refs/heads/$TARGET" >/dev/null; then
     git switch "$TARGET"            # at HEAD, guaranteed by the preflight
   else
