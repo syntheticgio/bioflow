@@ -6,6 +6,7 @@ genuinely still running).
 """
 
 import time
+from datetime import UTC, datetime
 from pathlib import Path
 
 from beanie import PydanticObjectId
@@ -137,6 +138,9 @@ async def assemble_upload(ctx: JobContext) -> dict:
     Idempotent: assembly truncates its target, placement is content-addressed,
     and a session already completed short-circuits. A retry after a crash
     therefore converges rather than duplicating work.
+
+    On failure the session is moved to FAILED and the object to ERROR so the
+    user sees what happened and can retry without re-uploading from zero.
     """
     import asyncio
 
@@ -176,53 +180,72 @@ async def assemble_upload(ctx: JobContext) -> dict:
             pct=round(done / session.total_size, 4) if session.total_size else 1.0,
         )
 
-    digest, size = await asyncio.to_thread(
-        chunk_assembly.assemble_and_hash,
-        chunk_paths,
-        assembled,
-        cancel_event=ctx.cancel_event,
-        progress_cb=on_progress,
-    )
-
-    # The client's own digest is checked here rather than trusted: a mismatch
-    # means the file we assembled is not the file they meant to send.
-    if session.client_sha256 and digest != session.client_sha256:
-        assembled.unlink(missing_ok=True)
-        raise PermanentError(
-            f"Assembled digest {digest} does not match the client-supplied "
-            f"{session.client_sha256}; the upload is corrupt"
+    try:
+        digest, size = await asyncio.to_thread(
+            chunk_assembly.assemble_and_hash,
+            chunk_paths,
+            assembled,
+            cancel_event=ctx.cancel_event,
+            progress_cb=on_progress,
         )
 
-    ctx.progress(phase="placing", pct=1.0)
+        # The client's own digest is checked here rather than trusted: a mismatch
+        # means the file we assembled is not the file they meant to send.
+        if session.client_sha256 and digest != session.client_sha256:
+            assembled.unlink(missing_ok=True)
+            raise PermanentError(
+                f"Assembled digest {digest} does not match the client-supplied "
+                f"{session.client_sha256}; the upload is corrupt"
+            )
 
-    existing = await blob_service.find_present_blob(digest)
-    if existing is not None and _blob_present_on_disk(existing):
-        assembled.unlink(missing_ok=True)
-        placement = "dedup"
-    else:
-        await asyncio.to_thread(cas.place_blob, assembled, digest, size)
-        placement = "created"
+        ctx.progress(phase="placing", pct=1.0)
 
-    await blob_service.attach_blob_to_object(
-        object_id=obj.id, digest=digest, size=size, storage=BlobStorage.MANAGED
-    )
-    await project_service.bump_counters(obj.project_id, objects=1, total_bytes=size)
-    # The object's own owner, rather than a "local" placeholder: this reaches an
-    # object that already exists, so its stamped owner is the real answer and
-    # stays correct once upload_service starts setting a non-"local" one.
-    await object_service.enqueue_ingest(obj, owner=obj.owner, digest=digest)
+        existing = await blob_service.find_present_blob(digest)
+        if existing is not None and _blob_present_on_disk(existing):
+            assembled.unlink(missing_ok=True)
+            placement = "dedup"
+        else:
+            await asyncio.to_thread(cas.place_blob, assembled, digest, size)
+            placement = "created"
 
-    await session.set(
-        {
-            UploadSession.state: UploadState.COMPLETED,
-            UploadSession.resulting_sha256: digest,
-            UploadSession.assembled_path: None,
-        }
-    )
-    await asyncio.to_thread(upload_service.cleanup_staging, session.staging_dir)
+        await blob_service.attach_blob_to_object(
+            object_id=obj.id, digest=digest, size=size, storage=BlobStorage.MANAGED
+        )
+        await project_service.bump_counters(obj.project_id, objects=1, total_bytes=size)
+        # The object's own owner, rather than a "local" placeholder: this reaches an
+        # object that already exists, so its stamped owner is the real answer and
+        # stays correct once upload_service starts setting a non-"local" one.
+        await object_service.enqueue_ingest(obj, owner=obj.owner, digest=digest)
 
-    log.info("upload_assembled", digest=digest, size=size, placement=placement)
-    return {"sha256": digest, "size": size, "placement": placement}
+        await session.set(
+            {
+                UploadSession.state: UploadState.COMPLETED,
+                UploadSession.resulting_sha256: digest,
+                UploadSession.assembled_path: None,
+            }
+        )
+        await asyncio.to_thread(upload_service.cleanup_staging, session.staging_dir)
+
+        log.info("upload_assembled", digest=digest, size=size, placement=placement)
+        return {"sha256": digest, "size": size, "placement": placement}
+
+    except Exception:
+        # Any failure during assembly leaves the session and object wedged.
+        # Move them to FAILED/ERROR so the user can retry without re-uploading.
+        try:
+            await session.set(
+                {
+                    UploadSession.state: UploadState.FAILED,
+                    UploadSession.updated_at: datetime.now(UTC),
+                }
+            )
+        except Exception as e:
+            log.error("upload_assembly_fail_mark_failed", session_id=session_id, error=str(e))
+        try:
+            await obj.set({DataObject.status: ObjectStatus.ERROR})
+        except Exception as e:
+            log.error("upload_assembly_fail_mark_error", object_id=object_id, error=str(e))
+        raise
 
 
 def _blob_present_on_disk(blob) -> bool:
