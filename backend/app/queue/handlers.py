@@ -158,6 +158,14 @@ async def assemble_upload(ctx: JobContext) -> dict:
         raise PermanentError(f"Upload session not found: {session_id}")
     if session.state is UploadState.COMPLETED and session.resulting_sha256:
         return {"sha256": session.resulting_sha256, "already_completed": True}
+    # A crash between the ledger writes and session.set(COMPLETED) leaves the
+    # session in ASSEMBLING with resulting_sha256 not yet set. On retry the
+    # assembly runs again and the attach/bump would be duplicated. Check
+    # whether the object already points to this digest after assembly to skip
+    # the duplicate ledger writes.
+    if session.resulting_sha256:
+        await session.set({UploadSession.state: UploadState.COMPLETED})
+        return {"sha256": session.resulting_sha256, "already_completed": True}
 
     obj = await DataObject.get(PydanticObjectId(object_id))
     if obj is None:
@@ -200,22 +208,30 @@ async def assemble_upload(ctx: JobContext) -> dict:
 
         ctx.progress(phase="placing", pct=1.0)
 
-        existing = await blob_service.find_present_blob(digest)
-        if existing is not None and _blob_present_on_disk(existing):
-            assembled.unlink(missing_ok=True)
+        # Idempotency check: if the object already points to this digest, the
+        # ledger writes (attach_blob_to_object, bump_counters, enqueue_ingest)
+        # were already done in a previous attempt that crashed before
+        # session.set(COMPLETED). Skip them to avoid double-counting refs.
+        if obj.blob_sha256 == digest:
             placement = "dedup"
+            log.info("upload_assembly_ledger_already_applied", digest=digest, object_id=object_id)
         else:
-            await asyncio.to_thread(cas.place_blob, assembled, digest, size)
-            placement = "created"
+            existing = await blob_service.find_present_blob(digest)
+            if existing is not None and _blob_present_on_disk(existing):
+                assembled.unlink(missing_ok=True)
+                placement = "dedup"
+            else:
+                await asyncio.to_thread(cas.place_blob, assembled, digest, size)
+                placement = "created"
 
-        await blob_service.attach_blob_to_object(
-            object_id=obj.id, digest=digest, size=size, storage=BlobStorage.MANAGED
-        )
-        await project_service.bump_counters(obj.project_id, objects=1, total_bytes=size)
-        # The object's own owner, rather than a "local" placeholder: this reaches an
-        # object that already exists, so its stamped owner is the real answer and
-        # stays correct once upload_service starts setting a non-"local" one.
-        await object_service.enqueue_ingest(obj, owner=obj.owner, digest=digest)
+            await blob_service.attach_blob_to_object(
+                object_id=obj.id, digest=digest, size=size, storage=BlobStorage.MANAGED
+            )
+            await project_service.bump_counters(obj.project_id, objects=1, total_bytes=size)
+            # The object's own owner, rather than a "local" placeholder: this reaches an
+            # object that already exists, so its stamped owner is the real answer and
+            # stays correct once upload_service starts setting a non-"local" one.
+            await object_service.enqueue_ingest(obj, owner=obj.owner, digest=digest)
 
         await session.set(
             {
