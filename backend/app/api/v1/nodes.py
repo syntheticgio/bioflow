@@ -695,24 +695,17 @@ async def _provision_node(task_id: str, req: ProvisionRequest) -> None:
         await task.save()
 
     try:
-        if req.private_key:
-            key = asyncssh.import_private_key(req.private_key)
-            connect_kw = {"client_keys": [key]}
-        else:
-            connect_kw = {"password": req.password}
-
-        # Phase 1: validate_ssh
+        # Phase 1: validate_ssh with TOFU host key verification
         await _update("validate_ssh", f"Connecting to {req.host}…")
         try:
-            conn = await asyncio.wait_for(
-                asyncssh.connect(
-                    req.host,
-                    port=req.port,
-                    username=req.username,
-                    known_hosts=None,
-                    **connect_kw,
-                ),
-                timeout=15,
+            conn, host_key = await node_ssh.connect_with_tofu(
+                req.host,
+                port=req.port,
+                username=req.username,
+                private_key=req.private_key,
+                password=req.password,
+                stored_host_key=None,  # first connection — capture the key
+                timeout_seconds=15,
             )
         except TimeoutError:
             return await _fail(
