@@ -23,14 +23,17 @@ functions in `app.mcp.tools` takes `owner` as a required keyword argument
 skip resolving a profile.
 """
 
+import functools
 from collections.abc import AsyncIterator, Callable
 from contextlib import AsyncExitStack, asynccontextmanager
 
 from fastapi import FastAPI
 from mcp.server.mcpserver import Context, MCPServer
+from mcp.server.mcpserver.exceptions import ToolError
 from mcp.server.transport_security import TransportSecuritySettings
 from starlette.applications import Starlette
 
+from app.errors import AppError
 from app.mcp import context, resources, tools
 
 MOUNT_PATH = "/api/v1/mcp"
@@ -55,6 +58,50 @@ async def _owner(ctx: Context) -> str:
     return await context.owner_for(profile_param)
 
 
+def _tool(srv: MCPServer, name: str) -> Callable:
+    """`srv.tool`, plus the one thing every wrapper needs and none should
+    have to remember: deliberate `AppError`s reach the caller as their own
+    message.
+
+    The `mcp` library splits exceptions two ways (`Tool.run` in
+    `mcp.server.mcpserver.tools.base`). A `ToolError` is "the tool said no
+    on purpose" and its message is forwarded to the model; anything else is
+    "the tool crashed" and its text is deliberately withheld, on the sound
+    general principle that an unplanned traceback should not be handed to a
+    caller.
+
+    Every error this package raises on purpose is an `AppError` --
+    `ProfileUnresolvedError`, `NotFoundError`, `ValidationError` -- and each
+    one carries a message written to be *acted on* ("Add ?profile=<id> to
+    the server URL"). Under the library's default that guidance was replaced
+    by "Error executing tool bioflow_whoami", which tells an agent nothing
+    it can use. Translating at the boundary restores it without weakening
+    the rule for genuine crashes: a non-`AppError` still propagates
+    untouched and still reaches the model as an opaque error.
+
+    Applied as a decorator factory rather than inside each of the 16
+    wrappers so a tool added later cannot silently opt out of it.
+
+    Keep the `name=` keyword at every call site: `tests/test_pi_skills.py`
+    enumerates the real tool names by grepping this module's *source* for
+    `name="bioflow_..."`, so passing the name positionally makes every tool
+    invisible to it and fails that test with a message about skill
+    documentation, nowhere near the actual change.
+    """
+
+    def decorate(fn: Callable) -> Callable:
+        @functools.wraps(fn)
+        async def wrapper(*args, **kwargs):
+            try:
+                return await fn(*args, **kwargs)
+            except AppError as exc:
+                raise ToolError(str(exc)) from exc
+
+        return srv.tool(name=name)(wrapper)
+
+    return decorate
+
+
 def _register_tools(srv: MCPServer) -> None:
     """Wire all 16 tools in app.mcp.tools to MCPServer, each resolving its
     own `owner` from the live request before calling straight through.
@@ -65,19 +112,19 @@ def _register_tools(srv: MCPServer) -> None:
     that a caller would otherwise see immediately as a clear TypeError.
     """
 
-    @srv.tool(name="bioflow_whoami")
+    @_tool(srv, name="bioflow_whoami")
     async def bioflow_whoami(ctx: Context) -> dict:
         return await tools.whoami(owner=await _owner(ctx))
 
-    @srv.tool(name="bioflow_list_projects")
+    @_tool(srv, name="bioflow_list_projects")
     async def bioflow_list_projects(ctx: Context, parent_id: str | None = None) -> dict:
         return await tools.list_projects(owner=await _owner(ctx), parent_id=parent_id)
 
-    @srv.tool(name="bioflow_get_project")
+    @_tool(srv, name="bioflow_get_project")
     async def bioflow_get_project(project_id: str, ctx: Context) -> dict:
         return await tools.get_project(project_id, owner=await _owner(ctx))
 
-    @srv.tool(name="bioflow_create_project")
+    @_tool(srv, name="bioflow_create_project")
     async def bioflow_create_project(
         name: str,
         ctx: Context,
@@ -91,51 +138,51 @@ def _register_tools(srv: MCPServer) -> None:
             parent_id=parent_id,
         )
 
-    @srv.tool(name="bioflow_list_objects")
+    @_tool(srv, name="bioflow_list_objects")
     async def bioflow_list_objects(project_id: str, ctx: Context) -> dict:
         return await tools.list_objects(project_id, owner=await _owner(ctx))
 
-    @srv.tool(name="bioflow_get_object")
+    @_tool(srv, name="bioflow_get_object")
     async def bioflow_get_object(object_id: str, ctx: Context) -> dict:
         return await tools.get_object(object_id, owner=await _owner(ctx))
 
-    @srv.tool(name="bioflow_suggest_next")
+    @_tool(srv, name="bioflow_suggest_next")
     async def bioflow_suggest_next(object_id: str, ctx: Context) -> dict:
         return await tools.suggest_next(object_id, owner=await _owner(ctx))
 
-    @srv.tool(name="bioflow_run_pipeline")
+    @_tool(srv, name="bioflow_run_pipeline")
     async def bioflow_run_pipeline(kind: str, params: dict, ctx: Context) -> dict:
         return await tools.run_pipeline(kind, params, owner=await _owner(ctx))
 
-    @srv.tool(name="bioflow_get_job")
+    @_tool(srv, name="bioflow_get_job")
     async def bioflow_get_job(job_id: str, ctx: Context) -> dict:
         return await tools.get_job(job_id, owner=await _owner(ctx))
 
-    @srv.tool(name="bioflow_list_jobs")
+    @_tool(srv, name="bioflow_list_jobs")
     async def bioflow_list_jobs(ctx: Context, limit: int = 50) -> dict:
         return await tools.list_jobs(owner=await _owner(ctx), limit=limit)
 
-    @srv.tool(name="bioflow_cancel_job")
+    @_tool(srv, name="bioflow_cancel_job")
     async def bioflow_cancel_job(job_id: str, ctx: Context) -> dict:
         return await tools.cancel_job(job_id, owner=await _owner(ctx))
 
-    @srv.tool(name="bioflow_search_objects")
+    @_tool(srv, name="bioflow_search_objects")
     async def bioflow_search_objects(query: str, ctx: Context, limit: int = 50) -> dict:
         return await tools.search_objects(query, owner=await _owner(ctx), limit=limit)
 
-    @srv.tool(name="bioflow_search_ncbi")
+    @_tool(srv, name="bioflow_search_ncbi")
     async def bioflow_search_ncbi(term: str, ctx: Context) -> dict:
         return await tools.search_ncbi(term, owner=await _owner(ctx))
 
-    @srv.tool(name="bioflow_download_reference")
+    @_tool(srv, name="bioflow_download_reference")
     async def bioflow_download_reference(accession: str, project_id: str, ctx: Context) -> dict:
         return await tools.download_reference(accession, project_id, owner=await _owner(ctx))
 
-    @srv.tool(name="bioflow_list_tools")
+    @_tool(srv, name="bioflow_list_tools")
     async def bioflow_list_tools(ctx: Context) -> dict:
         return await tools.list_tools(owner=await _owner(ctx))
 
-    @srv.tool(name="bioflow_get_guide")
+    @_tool(srv, name="bioflow_get_guide")
     async def bioflow_get_guide(topic: str, ctx: Context) -> dict:
         return await tools.get_guide(topic, owner=await _owner(ctx))
 
