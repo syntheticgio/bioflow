@@ -63,6 +63,12 @@ export function useEvents() {
           // if something is mounted and watching. See #80.
           qc.invalidateQueries({ queryKey: ["workflow-runs"] });
           qc.invalidateQueries({ queryKey: ["workflow-run"] });
+          // The project QC panel's "stale / Regenerate" state is derived from
+          // whether a QC job has run since the report was built, so a job
+          // reaching a terminal state is exactly when it changes. It used to
+          // hold its own local state and was invisible here, which left it
+          // stale until remount (#886).
+          qc.invalidateQueries({ queryKey: ["multiqc-status"] });
         }
         if (key === "objects") {
           qc.invalidateQueries({ queryKey: ["objects"] });
