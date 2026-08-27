@@ -15,6 +15,7 @@ it, since this process has no Redis.
 """
 
 import hashlib
+from datetime import UTC, datetime, timedelta
 
 import pytest
 import pytest_asyncio
@@ -323,6 +324,31 @@ class TestPutChunk:
 
         assert resp.status_code == 422, resp.text
 
+    async def test_writing_a_chunk_pushes_the_session_ttl_forward(
+        self, client, two_profiles, a_project
+    ):
+        """A slow but steady upload must not be reaped mid-transfer. Backdate the
+        session so it is already past its deadline, then confirm a single
+        accepted chunk moves it back to ~24h in the future. Without the
+        extension the deadline would still be in the past after the write."""
+        session = await _open_session(client, two_profiles["a_headers"], a_project)
+        sid = session["id"]
+        stored = await UploadSession.get(session["id"])
+        backdated = datetime.now(UTC) - timedelta(hours=1)
+        await stored.set({"expires_at": backdated})
+
+        resp = await client.put(
+            f"/api/v1/uploads/{sid}/chunks/0",
+            content=b"ACGTACGTAC",
+            headers=two_profiles["a_headers"],
+        )
+
+        assert resp.status_code == 200, resp.text
+        fresh = await UploadSession.get(session["id"])
+        # Pushed back to ~now + 24h: clearly in the future again.
+        assert fresh.expires_at is not None
+        assert fresh.expires_at > datetime.now(UTC) + timedelta(hours=23)
+
     async def test_404s_writing_into_another_profiles_session(
         self, client, two_profiles, a_project
     ):
@@ -419,6 +445,35 @@ class TestAbort:
         )
 
         assert resp.status_code == 409, resp.text
+
+    async def test_aborting_while_assembling_is_refused(
+        self, client, two_profiles, a_project, _home
+    ):
+        """complete_session moves the session to ASSEMBLING and starts a job that
+        reads the chunks. Aborting at that point must be refused, not delete the
+        chunks out from under the running assembly and strand the object."""
+        session = await _open_session(client, two_profiles["a_headers"], a_project)
+        sid = session["id"]
+        await client.put(
+            f"/api/v1/uploads/{sid}/chunks/0",
+            content=b"ACGTACGTAC",
+            headers=two_profiles["a_headers"],
+        )
+        resp = await client.post(
+            f"/api/v1/uploads/{sid}/complete", headers=two_profiles["a_headers"]
+        )
+        assert resp.status_code == 202, resp.text
+        stored = await UploadSession.get(session["id"])
+        assert stored.state is UploadState.ASSEMBLING
+        staging = _home / "staging" / sid
+
+        resp = await client.delete(f"/api/v1/uploads/{sid}", headers=two_profiles["a_headers"])
+
+        assert resp.status_code == 409, resp.text
+        # The refusal leaves the session and its chunks exactly as they were.
+        fresh = await UploadSession.get(session["id"])
+        assert fresh.state is UploadState.ASSEMBLING
+        assert staging.is_dir()
 
     async def test_404s_for_another_profiles_session(
         self, client, two_profiles, a_project

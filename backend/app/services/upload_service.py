@@ -258,6 +258,11 @@ async def write_chunk(
             "$set": {
                 f"chunk_digests.{index}": digest,
                 "updated_at": datetime.now(UTC),
+                # A chunk is proof of life: push the TTL forward so a slow but
+                # steady transfer is not reaped mid-flight. An abandoned upload
+                # stops sending chunks, so its expires_at still lapses and it is
+                # reaped exactly as before.
+                "expires_at": datetime.now(UTC) + timedelta(hours=SESSION_TTL_HOURS),
             },
             **({"$inc": {"received_bytes": len(data)}} if not already else {}),
         },
@@ -360,6 +365,16 @@ async def complete_session(
 
 async def abort_session(session_id: PydanticObjectId, *, owner: str) -> None:
     session = await get_session(session_id, owner=owner)
+    if session.state is UploadState.ASSEMBLING:
+        # Assembly is a live job reading the chunks out of staging. Deleting them
+        # now would corrupt the object being built and strand the DataObject
+        # complete_session already created, so a user asking to abort an
+        # in-progress upload gets a clear refusal instead of a half-deleted one.
+        raise ConflictError(
+            "Upload session is assembling; aborting would delete chunks the "
+            "assembly job is reading",
+            details={"state": session.state.value},
+        )
     await session.set(
         {UploadSession.state: UploadState.ABORTED, UploadSession.updated_at: datetime.now(UTC)}
     )
