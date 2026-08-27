@@ -336,3 +336,76 @@ async def test_resources_list_includes_the_derived_and_guide_resources():
     assert "bioflow://tools/installed" in uris
     assert "bioflow://sources" in uris
     assert "bioflow://guides/getting-started" in uris
+
+
+async def test_a_tool_bodys_app_error_also_reaches_the_client_intact():
+    """The same clean-error contract, for an `AppError` raised past
+    `owner_for` by the tool body itself.
+
+    The ambiguous-profile test above only reaches `context.owner_for`, which
+    every tool calls through one shared helper -- so it would still pass if
+    the translation were applied only there, leaving all sixteen tool bodies'
+    own `NotFoundError`/`ValidationError` messages collapsing into the mcp
+    library's opaque `Error executing tool <name>`. `bioflow_get_guide` with
+    an unknown topic raises `ValidationError` from inside `app.mcp.tools`,
+    past a successfully resolved owner, which pins the other half.
+    """
+    await profile_service.create_profile(username="mcp-live-guide-error")
+
+    test_app = _build_test_app()
+    mcp_url = "/api/v1/mcp/"
+
+    async with test_app.router.lifespan_context(test_app):
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=test_app), base_url="http://test"
+        ) as client:
+            init_resp = await client.post(
+                mcp_url,
+                headers=_JSONRPC_HEADERS,
+                json={
+                    "jsonrpc": "2.0",
+                    "id": 1,
+                    "method": "initialize",
+                    "params": {
+                        "protocolVersion": "2024-11-05",
+                        "capabilities": {},
+                        "clientInfo": {"name": "test-client", "version": "0.0.1"},
+                    },
+                },
+            )
+            assert init_resp.status_code == 200, init_resp.text
+            session_id = init_resp.headers["mcp-session-id"]
+            session_headers = {**_JSONRPC_HEADERS, "mcp-session-id": session_id}
+
+            await client.post(
+                mcp_url,
+                headers=session_headers,
+                json={"jsonrpc": "2.0", "method": "notifications/initialized"},
+            )
+
+            call_resp = await client.post(
+                mcp_url,
+                headers=session_headers,
+                json={
+                    "jsonrpc": "2.0",
+                    "id": 2,
+                    "method": "tools/call",
+                    "params": {
+                        "name": "bioflow_get_guide",
+                        "arguments": {"topic": "no-such-guide"},
+                    },
+                },
+            )
+
+    assert call_resp.status_code == 200, call_resp.text
+    payload = _extract_result(call_resp.text)
+
+    assert "error" not in payload, payload
+    assert payload["result"]["isError"] is True, payload
+
+    message = payload["result"]["content"][0]["text"]
+    # The topic that was wrong, and the list of ones that are not: an agent
+    # can correct itself from this, which is the whole point of the message
+    # surviving.
+    assert "no-such-guide" in message
+    assert "getting-started" in message

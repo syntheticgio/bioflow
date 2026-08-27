@@ -6,6 +6,7 @@ genuinely still running).
 """
 
 import time
+from datetime import UTC, datetime
 from pathlib import Path
 
 from beanie import PydanticObjectId
@@ -137,6 +138,9 @@ async def assemble_upload(ctx: JobContext) -> dict:
     Idempotent: assembly truncates its target, placement is content-addressed,
     and a session already completed short-circuits. A retry after a crash
     therefore converges rather than duplicating work.
+
+    On failure the session is moved to FAILED and the object to ERROR so the
+    user sees what happened and can retry without re-uploading from zero.
     """
     import asyncio
 
@@ -153,6 +157,14 @@ async def assemble_upload(ctx: JobContext) -> dict:
     if session is None:
         raise PermanentError(f"Upload session not found: {session_id}")
     if session.state is UploadState.COMPLETED and session.resulting_sha256:
+        return {"sha256": session.resulting_sha256, "already_completed": True}
+    # A crash between the ledger writes and session.set(COMPLETED) leaves the
+    # session in ASSEMBLING with resulting_sha256 not yet set. On retry the
+    # assembly runs again and the attach/bump would be duplicated. Check
+    # whether the object already points to this digest after assembly to skip
+    # the duplicate ledger writes.
+    if session.resulting_sha256:
+        await session.set({UploadSession.state: UploadState.COMPLETED})
         return {"sha256": session.resulting_sha256, "already_completed": True}
 
     obj = await DataObject.get(PydanticObjectId(object_id))
@@ -176,53 +188,80 @@ async def assemble_upload(ctx: JobContext) -> dict:
             pct=round(done / session.total_size, 4) if session.total_size else 1.0,
         )
 
-    digest, size = await asyncio.to_thread(
-        chunk_assembly.assemble_and_hash,
-        chunk_paths,
-        assembled,
-        cancel_event=ctx.cancel_event,
-        progress_cb=on_progress,
-    )
-
-    # The client's own digest is checked here rather than trusted: a mismatch
-    # means the file we assembled is not the file they meant to send.
-    if session.client_sha256 and digest != session.client_sha256:
-        assembled.unlink(missing_ok=True)
-        raise PermanentError(
-            f"Assembled digest {digest} does not match the client-supplied "
-            f"{session.client_sha256}; the upload is corrupt"
+    try:
+        digest, size = await asyncio.to_thread(
+            chunk_assembly.assemble_and_hash,
+            chunk_paths,
+            assembled,
+            cancel_event=ctx.cancel_event,
+            progress_cb=on_progress,
         )
 
-    ctx.progress(phase="placing", pct=1.0)
+        # The client's own digest is checked here rather than trusted: a mismatch
+        # means the file we assembled is not the file they meant to send.
+        if session.client_sha256 and digest != session.client_sha256:
+            assembled.unlink(missing_ok=True)
+            raise PermanentError(
+                f"Assembled digest {digest} does not match the client-supplied "
+                f"{session.client_sha256}; the upload is corrupt"
+            )
 
-    existing = await blob_service.find_present_blob(digest)
-    if existing is not None and _blob_present_on_disk(existing):
-        assembled.unlink(missing_ok=True)
-        placement = "dedup"
-    else:
-        await asyncio.to_thread(cas.place_blob, assembled, digest, size)
-        placement = "created"
+        ctx.progress(phase="placing", pct=1.0)
 
-    await blob_service.attach_blob_to_object(
-        object_id=obj.id, digest=digest, size=size, storage=BlobStorage.MANAGED
-    )
-    await project_service.bump_counters(obj.project_id, objects=1, total_bytes=size)
-    # The object's own owner, rather than a "local" placeholder: this reaches an
-    # object that already exists, so its stamped owner is the real answer and
-    # stays correct once upload_service starts setting a non-"local" one.
-    await object_service.enqueue_ingest(obj, owner=obj.owner, digest=digest)
+        # Idempotency check: if the object already points to this digest, the
+        # ledger writes (attach_blob_to_object, bump_counters, enqueue_ingest)
+        # were already done in a previous attempt that crashed before
+        # session.set(COMPLETED). Skip them to avoid double-counting refs.
+        if obj.blob_sha256 == digest:
+            placement = "dedup"
+            log.info("upload_assembly_ledger_already_applied", digest=digest, object_id=object_id)
+        else:
+            existing = await blob_service.find_present_blob(digest)
+            if existing is not None and _blob_present_on_disk(existing):
+                assembled.unlink(missing_ok=True)
+                placement = "dedup"
+            else:
+                await asyncio.to_thread(cas.place_blob, assembled, digest, size)
+                placement = "created"
 
-    await session.set(
-        {
-            UploadSession.state: UploadState.COMPLETED,
-            UploadSession.resulting_sha256: digest,
-            UploadSession.assembled_path: None,
-        }
-    )
-    await asyncio.to_thread(upload_service.cleanup_staging, session.staging_dir)
+            await blob_service.attach_blob_to_object(
+                object_id=obj.id, digest=digest, size=size, storage=BlobStorage.MANAGED
+            )
+            await project_service.bump_counters(obj.project_id, objects=1, total_bytes=size)
+            # The object's own owner, rather than a "local" placeholder: this reaches an
+            # object that already exists, so its stamped owner is the real answer and
+            # stays correct once upload_service starts setting a non-"local" one.
+            await object_service.enqueue_ingest(obj, owner=obj.owner, digest=digest)
 
-    log.info("upload_assembled", digest=digest, size=size, placement=placement)
-    return {"sha256": digest, "size": size, "placement": placement}
+        await session.set(
+            {
+                UploadSession.state: UploadState.COMPLETED,
+                UploadSession.resulting_sha256: digest,
+                UploadSession.assembled_path: None,
+            }
+        )
+        await asyncio.to_thread(upload_service.cleanup_staging, session.staging_dir)
+
+        log.info("upload_assembled", digest=digest, size=size, placement=placement)
+        return {"sha256": digest, "size": size, "placement": placement}
+
+    except Exception:
+        # Any failure during assembly leaves the session and object wedged.
+        # Move them to FAILED/ERROR so the user can retry without re-uploading.
+        try:
+            await session.set(
+                {
+                    UploadSession.state: UploadState.FAILED,
+                    UploadSession.updated_at: datetime.now(UTC),
+                }
+            )
+        except Exception as e:
+            log.error("upload_assembly_fail_mark_failed", session_id=session_id, error=str(e))
+        try:
+            await obj.set({DataObject.status: ObjectStatus.ERROR})
+        except Exception as e:
+            log.error("upload_assembly_fail_mark_error", object_id=object_id, error=str(e))
+        raise
 
 
 def _blob_present_on_disk(blob) -> bool:
@@ -785,11 +824,24 @@ async def gc_blobs(ctx: JobContext) -> dict:
     External blobs are never unlinked -- we do not own files the user registered
     in place, so only the database record is removed.
 
-    Each managed blob is claimed atomically before unlinking: a find_one_and_update
-    sets ref_count to a tombstone (-1) only when it is still ≤ 0, closing the race
-    between the GC query and the unlink.
+    Each managed blob is claimed atomically before unlinking: a
+    `find_one_and_update` sets ref_count to a tombstone (-1) only when it is
+    still <= 0, and returns the document it claimed -- `None` meaning the blob
+    was re-referenced between the candidate query and the claim, so its bytes
+    must be left alone. The claim has to ask for the *document* rather than an
+    update result: a bare `.update()` resolves to an `UpdateResult`, which is
+    never None, so a `is None` guard on it can never fire and every re-referenced
+    blob would be unlinked anyway.
+
+    A blob whose bytes could not be removed keeps its record. `unlink_blob`
+    reports False both for an already-absent file and for a real OSError, and
+    only the latter matters: dropping the record there would orphan bytes that
+    nothing else knows about, so the record stays and the next sweep retries.
     """
     import asyncio
+    from datetime import UTC, datetime
+
+    from beanie.odm.queries.update import UpdateResponse
 
     from app.models import Blob, BlobStorage
     from app.services import blob_service
@@ -808,29 +860,48 @@ async def gc_blobs(ctx: JobContext) -> dict:
     for blob in candidates:
         ctx.check_cancel()
         if blob.storage is BlobStorage.EXTERNAL:
-            # Atomically claim this external record — re-check ref_count at
-            # delete time so a re-reference between query and delete doesn't
-            # silently remove a live blob record.
-            claimed = await Blob.find_one(
-                Blob.id == blob.id, Blob.ref_count <= 0
-            ).delete()
+            # Handled by the aged batch delete below, which applies the same
+            # grace window this candidate list was built with.
             continue
-        # Atomically claim the managed blob for deletion: set ref_count to
-        # a tombstone only if it is still ≤ 0.  If nothing was matched the
-        # blob was re-referenced between query and claim — skip it.
+        # Claim the managed blob for deletion: tombstone the refcount only
+        # while it is still <= 0, and take the claimed document back so a
+        # re-reference in the meantime is visible as None.
         claimed = await Blob.find_one(
             Blob.id == blob.id, Blob.ref_count <= 0
-        ).update({"$set": {Blob.ref_count: -1}})
+        ).update(
+            {"$set": {Blob.ref_count: -1}},
+            response_type=UpdateResponse.NEW_DOCUMENT,
+        )
         if claimed is None:
             continue
-        if await asyncio.to_thread(cas.unlink_blob, blob.id):
-            unlinked += 1
-        await Blob.find_one(Blob.id == blob.id).delete()
 
-    # External records with no references carry no bytes to reclaim.
-    # Batch-delete in one round trip rather than N+1 per-blob deletes.
+        removed = await asyncio.to_thread(cas.unlink_blob, blob.id)
+        if removed:
+            unlinked += 1
+            await Blob.find_one(Blob.id == blob.id).delete()
+            continue
+
+        # The bytes are still there (or their absence could not be confirmed).
+        # Restore the record to a collectable state instead of deleting it, so
+        # the next sweep tries again rather than losing track of the file.
+        if not blob_path(blob.id).exists():
+            # Already gone -- nothing to orphan, so the record can go too.
+            unlinked += 1
+            await Blob.find_one(Blob.id == blob.id).delete()
+        else:
+            log.warning("gc_unlink_failed_record_kept", digest=blob.id)
+            await Blob.find_one(Blob.id == blob.id).update(
+                {"$set": {Blob.ref_count: 0}}
+            )
+
+    # External records with no references carry no bytes to reclaim, but they
+    # get the same grace window as managed ones: a refcount that dipped to zero
+    # moments ago may be about to come back (a detach mid-flight, a re-reference
+    # racing this sweep), and an unaged delete gave those no protection at all.
     external_result = await Blob.find(
-        Blob.ref_count <= 0, Blob.storage == BlobStorage.EXTERNAL
+        Blob.ref_count <= 0,
+        Blob.storage == BlobStorage.EXTERNAL,
+        Blob.updated_at < datetime.now(UTC) - blob_service.GC_GRACE,
     ).delete()
     external_pruned = external_result.deleted_count
 

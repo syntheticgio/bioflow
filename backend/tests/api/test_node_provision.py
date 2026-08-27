@@ -441,20 +441,15 @@ async def test_provision_stores_encrypted_key_not_the_password():
     # sleep in production, where it lets a crash-looping worker die before
     # the state is read. Nothing here asserts on settle timing, so leaving it
     # unpatched costs five seconds of wall clock for nothing.
-    with patch("app.api.v1.nodes.asyncssh") as ssh, \
+    conn = MagicMock()
+    conn.run = AsyncMock(return_value=type("R", (), {
+        "exit_status": 0, "stdout": "", "stderr": "",
+    })())
+    with patch("app.services.node_ssh.connect_with_tofu",
+               AsyncMock(return_value=(conn, "ssh-ed25519 FAKEHOSTKEY"))), \
          patch("app.services.node_ssh.verify_key", _verify_key_mock()), \
          patch("app.api.v1.nodes._VERIFY_SETTLE_SECONDS", 0), \
          patch("app.api.v1.nodes.asyncssh.scp", AsyncMock()):
-        conn = ssh.connect.return_value
-        conn.run = AsyncMock(return_value=type("R", (), {
-            "exit_status": 0, "stdout": "", "stderr": "",
-        })())
-        # `patch(module)` gives every attribute a plain MagicMock, including
-        # `connect` -- but `_provision_node` awaits `asyncssh.connect(...)`,
-        # which needs the call itself to return an awaitable, not just its
-        # `.return_value` to be pre-set. Without this, `asyncio.wait_for`
-        # raises on a non-awaitable MagicMock before any phase runs.
-        ssh.connect = AsyncMock(return_value=conn)
         await _provision_node("t-key", req)
 
     node = await Node.find_one(Node.node_id == "keynode")
@@ -482,17 +477,15 @@ async def test_provision_fails_loudly_when_key_cannot_be_installed():
         host="10.0.0.10", username="ops", password="pw", node_name="badkey",
     )
 
-    with patch("app.api.v1.nodes.asyncssh") as ssh, \
+    conn = MagicMock()
+    conn.run = AsyncMock(return_value=type("R", (), {
+        "exit_status": 0, "stdout": "", "stderr": "",
+    })())
+    with patch("app.services.node_ssh.connect_with_tofu",
+               AsyncMock(return_value=(conn, "ssh-ed25519 FAKEHOSTKEY"))), \
          patch("app.services.node_ssh.install_public_key",
                AsyncMock(side_effect=KeyInstallError("read-only home"))), \
          patch("app.api.v1.nodes.asyncssh.scp", AsyncMock()):
-        conn = ssh.connect.return_value
-        conn.run = AsyncMock(return_value=type("R", (), {
-            "exit_status": 0, "stdout": "", "stderr": "",
-        })())
-        # See the sibling test above for why `connect` itself must be an
-        # AsyncMock, not just its return_value.
-        ssh.connect = AsyncMock(return_value=conn)
         await _provision_node("t-badkey", req)
 
     task = await NodeProvisionTask.find_one(NodeProvisionTask.task_id == "t-badkey")
@@ -692,18 +685,18 @@ async def test_provision_emits_the_documented_phase_sequence():
         phases.append(self.phase)
         return await real_save(self)
 
-    with patch("app.api.v1.nodes.asyncssh") as ssh, \
+    conn = MagicMock()
+    # `running` because the verify phase reads this command's stdout as
+    # the worker's container state; an empty stdout means "not present".
+    conn.run = AsyncMock(return_value=type("R", (), {
+        "exit_status": 0, "stdout": "running", "stderr": "",
+    })())
+    with patch("app.services.node_ssh.connect_with_tofu",
+               AsyncMock(return_value=(conn, "ssh-ed25519 FAKEHOSTKEY"))), \
          patch("app.services.node_ssh.verify_key", _verify_key_mock()), \
          patch("app.api.v1.nodes.asyncssh.scp", AsyncMock()), \
          patch("app.api.v1.nodes._VERIFY_SETTLE_SECONDS", 0), \
          patch.object(NodeProvisionTask, "save", _record):
-        conn = ssh.connect.return_value
-        # `running` because the verify phase reads this command's stdout as
-        # the worker's container state; an empty stdout means "not present".
-        conn.run = AsyncMock(return_value=type("R", (), {
-            "exit_status": 0, "stdout": "running", "stderr": "",
-        })())
-        ssh.connect = AsyncMock(return_value=conn)
         await _provision_node("t-phases", req)
 
     # Consecutive duplicates collapsed: what matters is the order of distinct
@@ -814,13 +807,13 @@ async def test_provision_fails_when_the_worker_exits_after_starting():
             return _FakeResult(0, stdout="exited")
         return _FakeResult(0)
 
-    with patch("app.api.v1.nodes.asyncssh") as ssh, \
+    conn = MagicMock()
+    conn.run = _run
+    with patch("app.services.node_ssh.connect_with_tofu",
+               AsyncMock(return_value=(conn, "ssh-ed25519 FAKEHOSTKEY"))), \
          patch("app.services.node_ssh.verify_key", _verify_key_mock()), \
          patch("app.api.v1.nodes.asyncssh.scp", AsyncMock()), \
          patch("app.api.v1.nodes._VERIFY_SETTLE_SECONDS", 0):
-        conn = ssh.connect.return_value
-        conn.run = _run
-        ssh.connect = AsyncMock(return_value=conn)
         await _provision_node("t-crash", req)
 
     task = await NodeProvisionTask.find_one(NodeProvisionTask.task_id == "t-crash")

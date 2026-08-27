@@ -5,6 +5,89 @@ All notable changes to BioFlow, generated from Conventional Commits by
 the first paragraph of the body where one exists; only `feat` and `fix`
 reach the notes. See AGENTS.md "Release notes" for the contract.
 
+## [0.6.0-beta] - 2026-08-26
+
+
+
+
+### 🚀 Features
+
+- *(ui)* draw the agent panel's header controls, not emoji (#833)
+* feat(icons): draw agent settings, delete chat and restart agent
+
+
+
+
+
+### 🐛 Bug Fixes
+
+- *(queue)* rebuild reservation counters on reconcile, not leak them forever
+The `bp:conc:{cpu,mem_mb,io_heavy}` counters are the admission gate claim.lua
+reads to decide whether a job fits. claim.lua INCRBYs them on grant and
+release.lua DECRBYs on every terminal outcome, but…
+
+- *(ui)* say when a strip is missing chromosomes, and backfill stored ones
+Two loose ends from drawing only an assembly's core chromosomes.
+
+- *(ui)* draw a reference's actual chromosomes, not its longest sequences
+The strip ranked every sequence by length and drew the top 24. For a human
+reference that mixed chromosomes with scaffolds and patches, captioned the
+sex chromosomes "23" and "24" from their accession…
+
+- *(metadata)* label every chromosome, not one chromosome's scaffolds
+NCBI's `sort_order` is the chromosome number, not a global rank: on GRCh38
+all 44 scaffolds, patches and alt loci of chromosome 1 also report
+`sort_order: 1`. Sorting on it alone and truncating at 50 …
+
+- *(metadata)* label every chromosome, not just the first and its scaffolds
+A GRCh38.p14 reference drew accession digits ("664", "665") where
+chromosome numbers belonged. `sequence_labels` held 50 entries covering
+only 10 of the 50 sequences the strip draws, so every chromoso…
+
+- *(ops)* run CI on PRs into alpha, beta and release branches
+Both gating workflows were scoped to `main`, so a PR into alpha/X.Y.Z or
+beta/X.Y.Z ran nothing but cla-check: no frontend check, no backend tests,
+no launcher build, no Conventional Commits check. `g…
+
+- *(api)* repoint a node's stale Mongo URL when updating it, not never
+A compute node's .env is written exactly once, at provisioning, and nothing
+ever rewrote it afterwards. So a node provisioned before #803 keeps the
+Docker bridge address that bug wrote -- on the node,…
+
+- *(agent)* let the agent panel actually reach the agent (#828)
+* fix(agent): spawn the agent on projects that have finished jobs
+
+- *(ui)* make the agent panel opaque instead of see-through
+The agent drawer styled itself with `var(--surface)`, `var(--surface-alt)`
+and `var(--text-secondary)` -- a variable vocabulary this app's `:root`
+never defines. An undefined custom property makes `ba…
+
+- *(ui)* keep the "no QC" prompt inside the panel at any width
+The prompt's row did not wrap, so on a narrower detail panel the Run QC
+button ran off the right edge instead of dropping below the text.
+
+- *(ops)* accept -alpha and -beta in the VERSION semver check
+test_version_file_exists_and_is_semver required VERSION to match a bare
+^\d+\.\d+\.\d+$, but ops/release.sh validates
+^[0-9]+\.[0-9]+\.[0-9]+(-alpha|-beta)?$ and bump_version.py writes that
+suffixed v…
+
+- *(icons)* raise the agent icon so its face reads as vertically centred
+The agent glyph was centred on its ink bounding box, but the antenna is a
+hairline and the robot head is a solid block, so the mass the eye tracks
+sat well below the geometric centre: head centre y=15…
+
+- *(ops)* bump the launcher lockfile on release, not just its package.json
+launcher/package-lock.json still declared 0.1.0 while package.json said
+0.6.0-alpha. The lockfile sync added in #491 is gated on `$LINE = app` and
+points at frontend/ only, but bump_app calls bump_lau…
+
+- *(launcher)* report the version it actually is, on every screen
+The launcher showed "Launcher 0.1.0" on six screens and nothing at all on
+the Running screen -- the one a user looks at most. The string was a
+literal, copied into five components at the first release…
+
+
 ## [0.6.0-alpha] - 2026-08-24
 
 

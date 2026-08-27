@@ -308,9 +308,15 @@ async def complete_session(
         )
 
     # Compare-and-swap the state so two concurrent completes cannot both enqueue
-    # assembly for the same session.
+    # assembly for the same session. Allow retrying a FAILED session.
     res = await get_db().upload_sessions.find_one_and_update(
-        {"_id": session_id, "state": UploadState.OPEN.value},
+        {
+            "_id": session_id,
+            "$or": [
+                {"state": UploadState.OPEN.value},
+                {"state": UploadState.FAILED.value},
+            ],
+        },
         {"$set": {"state": UploadState.ASSEMBLING.value, "updated_at": datetime.now(UTC)}},
     )
     if res is None:

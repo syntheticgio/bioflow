@@ -507,7 +507,6 @@ def _parse_fasta(path: Path, compression: Compression, cancel) -> dict:
     facts: dict = {}
     file_size = path.stat().st_size
 
-    names: list[str] = []
     lengths: dict[str, int] = {}
     # Every record's length, uncapped -- unlike `lengths` above, which is
     # bounded to MAX_STORED_CONTIGS for the fact document. N50 needs the true
@@ -530,12 +529,26 @@ def _parse_fasta(path: Path, compression: Compression, cancel) -> dict:
     longest: tuple[str, int] | None = None
     shortest: tuple[str, int] | None = None
 
+    # Every committed record, capped to the window that will be stored. The
+    # window is chosen by length, not file order: a chromosome assembly
+    # interleaves unlocalized scaffolds, so "the first 50" spends the budget
+    # before the last chromosomes are reached and they vanish from the fact
+    # document. Keeping the longest 50 (file order as tie-break) captures
+    # every chromosome-scale sequence for real references while staying
+    # bounded for a 500,000-contig draft.
+    chosen: list[tuple[str, int, int]] = []
+    record_index = 0
+
     def commit() -> None:
-        nonlocal longest, shortest
+        nonlocal longest, shortest, record_index
         if current_name is None:
             return
-        if len(lengths) < MAX_STORED_CONTIGS:
-            lengths[current_name] = current_len
+        if len(chosen) < MAX_STORED_CONTIGS:
+            chosen.append((current_name, current_len, record_index))
+        elif current_len > min(c[1] for c in chosen):
+            chosen.remove(min(chosen, key=lambda c: (c[1], c[2])))
+            chosen.append((current_name, current_len, record_index))
+        record_index += 1
         all_lengths.append(current_len)
         # Extremes track every record, not just the stored window: capping them
         # would report the wrong longest contig for most real assemblies.
@@ -551,8 +564,6 @@ def _parse_fasta(path: Path, compression: Compression, cancel) -> dict:
                 commit()
                 count += 1
                 name = line[1:].strip().split()[0] if line[1:].strip() else ""
-                if len(names) < MAX_STORED_CONTIGS:
-                    names.append(name)
                 current_name = name
                 current_len = 0
                 in_gap = False
@@ -596,6 +607,12 @@ def _parse_fasta(path: Path, compression: Compression, cancel) -> dict:
         # number computed from the wrong population, not an estimate of the
         # right one.
         facts.update(_contiguity_stats(all_lengths, total_gap_bases, total_gap_count))
+
+    # The stored window, in file order: names and lengths must stay aligned
+    # with each other so a reader can pair them by position.
+    chosen.sort(key=lambda c: c[2])
+    names = [c[0] for c in chosen]
+    lengths = {c[0]: c[1] for c in chosen}
 
     if names:
         facts["sequence_names"] = names
