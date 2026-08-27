@@ -23,7 +23,7 @@ from app.models.node_update import NodeUpdateTask
 from app.queue import node_stats as node_stats_mod
 from app.queue import worker_registry
 from app.queue.worker import _own_image_digest
-from app.services import node_ssh, node_update_service
+from app.services import node_ssh, node_storage_probe, node_update_service
 from app.services.ai import crypto
 from app.version import __version__
 
@@ -78,6 +78,19 @@ class ProvisionRequest(BaseModel):
     node_name: str
     storage_location: str = "/data/scratch"
     worker_replicas: int = 2
+    # Enrol a node even though it cannot read the primary's BIOINFO_HOME.
+    #
+    # Default False is the decision, not a formality: an unshared node
+    # provisions cleanly, heartbeats green, claims a bucket of a chunked
+    # alignment, and fails on a missing input file hours later -- naming the
+    # file rather than the cause. Refusing at provisioning is the treatment
+    # #803 already gives an unroutable primary address.
+    #
+    # An opt-in rather than a hard refusal because an unshared node is not a
+    # broken node: it can still run work that fetches its own inputs (SRA
+    # downloads, NCBI assembly fetches), and #845 withholds only the work it
+    # cannot do. Setting this says "I know, enrol it anyway."
+    allow_unshared_storage: bool = False
 
     @field_validator("node_name")
     @classmethod
@@ -723,6 +736,30 @@ async def _check_worker_not_restarting(conn, install_dir: str, host: str) -> str
     )
 
 
+def _unshared_storage_message(req: ProvisionRequest, detail: str) -> str:
+    """Why an unshared node was refused, and what to do about it.
+
+    Shaped like the #803 refusal: what was found, why it is wrong, the remedy,
+    then "provision the node again."
+    """
+    return (
+        f"{req.host} cannot read the primary's storage. BioFlow wrote a file "
+        f"into {settings.bioinfo_home} on this machine and could not read it "
+        f"back at {req.storage_location} on {req.host} ({detail}).\n\n"
+        "That matters because work is handed out on the assumption that every "
+        "node reads the same files. A chunked alignment fans out one job per "
+        "reference bucket with no node targeting, so this node would claim a "
+        "bucket and fail on a missing input -- hours in, with an error naming "
+        "the file rather than the cause.\n\n"
+        f"To fix it, make {req.storage_location} on {req.host} the same "
+        f"storage as {settings.bioinfo_home} here -- a network share mounted "
+        "there -- and provision the node again.\n\n"
+        "Or set allow_unshared_storage to enrol it anyway. It will still run "
+        "jobs that fetch their own inputs, such as SRA downloads, and will be "
+        "kept away from work that reads the primary's files."
+    )
+
+
 # --- Provisioning executor ---
 
 async def _provision_node(task_id: str, req: ProvisionRequest) -> None:
@@ -868,13 +905,41 @@ async def _provision_node(task_id: str, req: ProvisionRequest) -> None:
                 task.phase = e.step.phase
                 return await _fail(e.reason)
 
-            # Phase 5: install_key
+            # Phase 5: check_storage
             #
-            # Before the image is pulled, so a node that cannot take the key
-            # costs nothing. Failing here leaves the node unprovisioned rather
-            # than provisioned-but-not-updatable: a fallback to storing the
-            # user's own credential would make the security property depend on
-            # a condition nobody observed.
+            # Prove by round trip that this node reads the primary's
+            # BIOINFO_HOME, rather than inferring it from a matching path.
+            # Runs after write_env because it needs the storage_location the
+            # node was configured with, and before pull_image because a node
+            # that cannot see the data should cost nothing to find out about.
+            #
+            # A probe that cannot be carried out is not a `False`: it raises,
+            # and provisioning fails rather than recording a verified negative
+            # for what is really an infrastructure fault. That is why
+            # StorageProbeError is caught separately below and is not subject
+            # to allow_unshared_storage -- the user cannot wave through an
+            # answer nobody obtained.
+            await _update("check_storage", f"Checking shared storage on {req.host}…")
+            try:
+                probe = await node_storage_probe.probe_shared_storage(
+                    conn, req.storage_location
+                )
+            except node_storage_probe.StorageProbeError as e:
+                task.phase = "check_storage"
+                return await _fail(str(e))
+            if not probe.shared and not req.allow_unshared_storage:
+                task.phase = "check_storage"
+                return await _fail(_unshared_storage_message(req, probe.detail))
+
+            # Phase 6: install_key
+            #
+            # Together with check_storage above, this is the pre-pull_image
+            # gate: both run before the image is pulled, so a node that cannot
+            # see the storage or cannot take the key costs nothing to reject.
+            # Failing here leaves the node unprovisioned rather than
+            # provisioned-but-not-updatable: a fallback to storing the user's
+            # own credential would make the security property depend on a
+            # condition nobody observed.
             await _update("install_key", "Installing the BioFlow update key…")
             private_pem, public_line = node_ssh.generate_keypair(req.node_name)
             await node_ssh.install_public_key(conn, public_line)
@@ -893,6 +958,14 @@ async def _provision_node(task_id: str, req: ProvisionRequest) -> None:
             node_doc.ssh_key_enc = crypto.encrypt(private_pem)
             node_doc.ssh_key_installed_at = datetime.now(UTC)
             node_doc.host_key = host_key
+            # The three storage fields are written together or not at all --
+            # `storage_checked_at` is null if and only if `storage_shared` is
+            # None, and that invariant is what lets #846 find the never-probed
+            # nodes. Recorded here rather than at `enrolled` because this is
+            # the only place the document is saved.
+            node_doc.storage_location = req.storage_location
+            node_doc.storage_shared = probe.shared
+            node_doc.storage_checked_at = datetime.now(UTC)
             await node_doc.save()
 
             # Phases 6-7: pull_image, start_worker.
