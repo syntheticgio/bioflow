@@ -111,8 +111,11 @@ async def probe_shared_storage(conn, storage_location: str) -> ProbeResult:
         ) from e
 
     try:
-        # Quote it: `storage_location` has no validator on the request model
-        # and is interpolated straight into a remote command.
+        # Quote it. `ProvisionRequest` now validates `storage_location`
+        # (#871/#938), so this is defence in depth rather than the only guard
+        # -- but the probe also runs from the re-check endpoint against a path
+        # read back out of the database, which was written before that
+        # validator existed and is not re-validated on the way out.
         command = f"cat {node_ssh.quote_for_shell(remote_path)}"
         try:
             result = await asyncio.wait_for(
