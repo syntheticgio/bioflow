@@ -1176,6 +1176,94 @@ async def update_status(task_id: str) -> dict:
     }
 
 
+@router.post("/{node_id}/check-storage")
+async def check_node_storage(node_id: str) -> dict:
+    """Re-run the shared-storage probe against an already-enrolled node.
+
+    R14: a node's storage status must be checkable without re-provisioning it.
+    A share can be unmounted, a node's disk can be swapped, and every node
+    enrolled before this field existed reads as unknown until something asks.
+    #846's migration is this endpoint applied across the fleet.
+
+    Synchronous, unlike provisioning: this is one connect and one `cat`, and a
+    caller that has to poll a task document for that is carrying the cost of
+    provisioning's structure without its reason.
+
+    Grouped with the other per-node SSH operations rather than with the
+    provisioning endpoints, because that is what it is.
+    """
+    node = await Node.find_one(Node.node_id == node_id)
+    if node is None:
+        raise NotFoundError(f"Node {node_id!r} not found")
+
+    # R15. Refuse rather than guess. A self-enrolled node has no managed key,
+    # so there is no way to reach it -- and recording `false` for a node we
+    # simply cannot ask would be the same lie the tri-state exists to avoid.
+    private_pem = crypto.decrypt(node.ssh_key_enc) if node.ssh_key_enc else None
+    if not private_pem or not node.ssh_host or not node.ssh_username:
+        raise ValidationError(
+            f"Node {node_id!r} has no stored SSH credentials, so BioFlow cannot "
+            "reach it to check its storage. This node enrolled itself rather "
+            "than being provisioned from here; provision it to make it "
+            "checkable."
+        )
+
+    if not node.storage_location:
+        raise ValidationError(
+            f"Node {node_id!r} has no recorded storage location, so there is no "
+            "path to probe. It was enrolled before BioFlow recorded one. "
+            "Provision it again, or supply the path it uses."
+        )
+
+    conn = None
+    try:
+        conn, _ = await node_ssh.connect_with_tofu(
+            node.ssh_host,
+            node.ssh_port,
+            node.ssh_username,
+            private_pem,
+            stored_host_key=node.host_key,
+            timeout_seconds=20,
+        )
+    except (TimeoutError, asyncssh.Error, ValueError) as e:
+        # Unreachable is not an answer. Leave what is recorded alone.
+        raise ValidationError(
+            f"Could not reach {node.ssh_host}: {e}. The machine may be off, or "
+            "the update key may have been removed. Its storage status is "
+            "unchanged."
+        ) from e
+
+    try:
+        probe = await node_storage_probe.probe_shared_storage(
+            conn, node.storage_location
+        )
+    except node_storage_probe.StorageProbeError as e:
+        raise ValidationError(
+            f"{e} Its storage status is unchanged."
+        ) from e
+    finally:
+        conn.close()
+
+    # The three fields move together, so `storage_checked_at` is null if and
+    # only if `storage_shared` is None.
+    node.storage_shared = probe.shared
+    node.storage_checked_at = datetime.now(UTC)
+    await node.save()
+
+    log.info(
+        "node_storage_probed",
+        node_id=node_id,
+        storage_shared=probe.shared,
+    )
+    return {
+        "node_id": node_id,
+        "storage_shared": probe.shared,
+        "storage_location": node.storage_location,
+        "storage_checked_at": node.storage_checked_at.isoformat(),
+        "detail": probe.detail,
+    }
+
+
 @router.get("/{node_id}/status")
 async def node_status(node_id: str) -> dict:
     """Check whether a node is still active.
