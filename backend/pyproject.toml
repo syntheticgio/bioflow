@@ -14,7 +14,6 @@ dependencies = [
     "structlog>=24.4",
     "python-slugify>=8.0",
     "psutil>=6.1",
-    "aiofiles>=24.1",
     "sse-starlette>=2.1",
     "pysam>=0.23",
     # Fernet, for API keys at rest. See services/ai/crypto.py -- the threat
