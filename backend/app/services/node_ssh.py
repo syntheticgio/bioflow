@@ -209,3 +209,13 @@ async def verify_key(
 def _quote(value: str) -> str:
     """Single-quote a value for a POSIX shell."""
     return "'" + value.replace("'", "'\\''") + "'"
+
+
+# The same helper, under a name another module may use. `_quote` stays private
+# because every module that builds a shell command has its own -- the pipeline
+# runners each define one (`align_runner`, `ivar_runner`, `variant_runner`) and
+# reaching across for someone else's underscore-prefixed function would break
+# that convention rather than follow it. `node_storage_probe` interpolates a
+# user-supplied `storage_location` into a remote `cat`, needs exactly this
+# quoting, and should not carry a fourth copy of two lines.
+quote_for_shell = _quote
