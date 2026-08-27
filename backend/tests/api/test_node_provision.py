@@ -1348,3 +1348,194 @@ async def test_the_probe_reads_the_storage_location_that_was_requested():
         await _provision_node("t-path", req)
 
     assert probe.await_args.args[1] == "/srv/genomes"
+
+
+# ---- POST /nodes/{node_id}/check-storage (#844) ----
+
+@asyncio_module_loop
+async def test_check_storage_reprobes_an_enrolled_node(client):
+    """R14. An enrolled node can be re-probed without re-provisioning it."""
+    from app.models.node import Node
+    from app.services.ai import crypto
+
+    node = Node(
+        node_id="reprobe-node",
+        ssh_host="10.0.0.30",
+        ssh_username="ops",
+        ssh_key_enc=crypto.encrypt("FAKE-PEM"),
+        host_key="ssh-ed25519 FAKEHOSTKEY",
+        storage_location="/mnt/shared",
+    )
+    await node.insert()
+    assert node.storage_shared is None  # never probed
+
+    conn = MagicMock()
+    conn.close = MagicMock()
+    with patch("app.services.node_ssh.connect_with_tofu",
+               AsyncMock(return_value=(conn, "ssh-ed25519 FAKEHOSTKEY"))), \
+         patch("app.api.v1.nodes.node_storage_probe.probe_shared_storage",
+               _shared()):
+        res = await client.post("/nodes/reprobe-node/check-storage")
+
+    assert res.status_code == 200
+    assert res.json()["storage_shared"] is True
+
+    refreshed = await Node.find_one(Node.node_id == "reprobe-node")
+    assert refreshed.storage_shared is True
+    assert refreshed.storage_checked_at is not None
+
+
+@asyncio_module_loop
+async def test_check_storage_records_a_negative_answer(client):
+    """A share that was unmounted since enrolment is caught by re-probing."""
+    from datetime import UTC, datetime
+
+    from app.models.node import Node
+    from app.services.ai import crypto
+
+    node = Node(
+        node_id="regressed-node",
+        ssh_host="10.0.0.31",
+        ssh_username="ops",
+        ssh_key_enc=crypto.encrypt("FAKE-PEM"),
+        storage_location="/mnt/shared",
+        storage_shared=True,
+        storage_checked_at=datetime.now(UTC),
+    )
+    await node.insert()
+
+    conn = MagicMock()
+    conn.close = MagicMock()
+    with patch("app.services.node_ssh.connect_with_tofu",
+               AsyncMock(return_value=(conn, "ssh-ed25519 FAKEHOSTKEY"))), \
+         patch("app.api.v1.nodes.node_storage_probe.probe_shared_storage",
+               _unshared()):
+        res = await client.post("/nodes/regressed-node/check-storage")
+
+    assert res.status_code == 200
+    refreshed = await Node.find_one(Node.node_id == "regressed-node")
+    assert refreshed.storage_shared is False
+
+
+@asyncio_module_loop
+async def test_check_storage_refuses_a_node_with_no_stored_key(client):
+    """R15. A self-enrolled node cannot be reached, so it is not guessed at."""
+    from app.models.node import Node
+
+    node = Node(node_id="selfenrolled-node", storage_location="/mnt/shared")
+    await node.insert()
+
+    res = await client.post("/nodes/selfenrolled-node/check-storage")
+
+    assert res.status_code == 422
+    # Unchanged: refusing must not write an answer.
+    refreshed = await Node.find_one(Node.node_id == "selfenrolled-node")
+    assert refreshed.storage_shared is None
+    assert refreshed.storage_checked_at is None
+
+
+@asyncio_module_loop
+async def test_check_storage_refuses_a_node_with_no_recorded_path(client):
+    """Every pre-#844 node looks like this: there is nothing to probe yet."""
+    from app.models.node import Node
+    from app.services.ai import crypto
+
+    node = Node(
+        node_id="nopath-node",
+        ssh_host="10.0.0.32",
+        ssh_username="ops",
+        ssh_key_enc=crypto.encrypt("FAKE-PEM"),
+    )
+    await node.insert()
+
+    res = await client.post("/nodes/nopath-node/check-storage")
+
+    assert res.status_code == 422
+    assert "storage location" in res.json()["message"].lower()
+
+
+@asyncio_module_loop
+async def test_check_storage_leaves_status_alone_when_the_node_is_unreachable(client):
+    """An unreachable node is unknown, not not-shared."""
+    from datetime import UTC, datetime
+
+    from app.models.node import Node
+    from app.services.ai import crypto
+
+    checked = datetime.now(UTC)
+    node = Node(
+        node_id="offline-node",
+        ssh_host="10.0.0.33",
+        ssh_username="ops",
+        ssh_key_enc=crypto.encrypt("FAKE-PEM"),
+        storage_location="/mnt/shared",
+        storage_shared=True,
+        storage_checked_at=checked,
+    )
+    await node.insert()
+
+    with patch("app.services.node_ssh.connect_with_tofu",
+               AsyncMock(side_effect=TimeoutError("no route to host"))):
+        res = await client.post("/nodes/offline-node/check-storage")
+
+    assert res.status_code == 422
+    refreshed = await Node.find_one(Node.node_id == "offline-node")
+    # Still True: an unreachable node teaches nothing, so nothing is rewritten.
+    assert refreshed.storage_shared is True
+
+
+@asyncio_module_loop
+async def test_check_storage_unknown_node_returns_404(client):
+    res = await client.post("/nodes/no-such-node/check-storage")
+    assert res.status_code == 404
+
+
+@asyncio_module_loop
+async def test_check_storage_leaves_status_alone_when_the_probe_cannot_run(client):
+    """A probe that reached the node but could not answer records nothing.
+
+    The endpoint's counterpart to R11. Connecting succeeded, so this is not
+    the unreachable case -- the probe itself failed, and turning that into
+    `false` would exclude a working node from filesystem-dependent work on
+    the strength of a fault nobody diagnosed.
+    """
+    from datetime import UTC, datetime
+
+    from app.models.node import Node
+    from app.services.ai import crypto
+
+    node = Node(
+        node_id="probefail-node",
+        ssh_host="10.0.0.34",
+        ssh_username="ops",
+        ssh_key_enc=crypto.encrypt("FAKE-PEM"),
+        storage_location="/mnt/shared",
+        storage_shared=True,
+        storage_checked_at=datetime.now(UTC),
+    )
+    await node.insert()
+
+    conn = MagicMock()
+    conn.close = MagicMock()
+    with patch("app.services.node_ssh.connect_with_tofu",
+               AsyncMock(return_value=(conn, "ssh-ed25519 FAKEHOSTKEY"))), \
+         patch("app.api.v1.nodes.node_storage_probe.probe_shared_storage",
+               AsyncMock(side_effect=probe_mod.StorageProbeError("timed out"))):
+        res = await client.post("/nodes/probefail-node/check-storage")
+
+    assert res.status_code == 422
+    refreshed = await Node.find_one(Node.node_id == "probefail-node")
+    assert refreshed.storage_shared is True
+    # And the connection is closed even on the failure path.
+    conn.close.assert_called_once()
+
+
+@asyncio_module_loop
+async def test_check_storage_never_probes_an_unknown_node(client):
+    """A missing node must not reach the SSH layer at all."""
+    connect = AsyncMock()
+    with patch("app.services.node_ssh.connect_with_tofu", connect):
+        res = await client.post("/nodes/ghost-node/check-storage")
+
+    assert res.status_code == 404
+    connect.assert_not_awaited()
