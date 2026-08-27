@@ -44,3 +44,63 @@ export const useUploadStore = create<UploadState>((set) => ({
       items: s.items.filter((i) => i.status === "uploading" || i.status === "queued"),
     })),
 }));
+
+/** Whether anything is still transferring. */
+export function hasActiveUploads(items: UploadItem[]): boolean {
+  return items.some((i) => i.status === "uploading" || i.status === "queued");
+}
+
+/**
+ * Warn before the tab closes while an upload is in flight.
+ *
+ * Closing mid-transfer aborts a multi-gigabyte chunked upload silently. Resume
+ * exists, but it needs the original File re-selected -- handles do not survive
+ * a reload -- and the user may no longer have it to hand. Nothing warned them
+ * (#893).
+ *
+ * Registered against the store rather than from a component effect, because
+ * the upload keeps running whether or not any particular view is mounted, and
+ * a guard that depends on the uploads panel being open would miss exactly the
+ * case that matters. The listener is added only while something is active, so
+ * an idle tab closes without a prompt -- browsers ignore the prompt entirely
+ * unless the user has interacted with the page, which starting an upload
+ * necessarily involves.
+ *
+ * `target` is injectable only so the attach/detach rule can be tested: this
+ * repo has no jsdom, so a test cannot reach a real `window`.
+ */
+export interface UnloadTarget {
+  addEventListener(type: "beforeunload", listener: () => void): void;
+  removeEventListener(type: "beforeunload", listener: () => void): void;
+}
+
+export function installUnloadGuard(
+  target: UnloadTarget = window as unknown as UnloadTarget,
+): () => void {
+  const onBeforeUnload = ((e: BeforeUnloadEvent) => {
+    e.preventDefault();
+    // Assigning returnValue is what actually triggers the prompt in some
+    // browsers; the string itself is ignored and a generic message is shown.
+    e.returnValue = "";
+  }) as () => void;
+
+  let attached = false;
+  const sync = (items: UploadItem[]) => {
+    const active = hasActiveUploads(items);
+    if (active && !attached) {
+      target.addEventListener("beforeunload", onBeforeUnload);
+      attached = true;
+    } else if (!active && attached) {
+      target.removeEventListener("beforeunload", onBeforeUnload);
+      attached = false;
+    }
+  };
+
+  sync(useUploadStore.getState().items);
+  const unsubscribe = useUploadStore.subscribe((s) => sync(s.items));
+
+  return () => {
+    unsubscribe();
+    if (attached) target.removeEventListener("beforeunload", onBeforeUnload);
+  };
+}
