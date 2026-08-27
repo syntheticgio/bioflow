@@ -14,7 +14,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from app.config import settings
-from app.errors import PermanentError, RetryableError
+from app.errors import PermanentError, RetryableError, ValidationError
 from app.logging import get_logger
 from app.models import IoClass, JobClass, JobResources
 from app.pipelines import (
@@ -30,7 +30,7 @@ from app.pipelines.aligners import Aligner
 from app.queue.executor import run_subprocess
 from app.queue.pipeline_handlers import _failure, _prepare_workdir, _retain_multiqc_input
 from app.queue.registry import HandlerMode, JobContext, handler
-from app.storage.paths import blob_path
+from app.storage.paths import blob_path, resolve_job_input_path
 
 log = get_logger(__name__)
 
@@ -79,7 +79,13 @@ def _resolve_digest_or_path(
     duplicating the resolve-then-verify logic itself.
     """
     if path_str:
-        path = Path(path_str)
+        # Payloads are not trusted input -- see resolve_job_input_path. A
+        # ValidationError here is permanent by nature: the same payload will be
+        # refused on every retry.
+        try:
+            path = resolve_job_input_path(path_str)
+        except ValidationError as e:
+            raise PermanentError(str(e)) from e
     elif digest:
         path = blob_path(digest)
     else:

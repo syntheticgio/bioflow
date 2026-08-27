@@ -199,3 +199,29 @@ async def beanie_models():
         yield
 
     await client.close()
+
+
+
+@pytest.fixture(autouse=True)
+def _register_roots_cover_tmp_path(request, monkeypatch):
+    """Let `tmp_path` count as an allowed root for job-payload input paths.
+
+    Handlers resolve `*_path` payload values through
+    `storage.paths.resolve_job_input_path`, which refuses anything outside the
+    register roots and BioFlow's own directories (#873). Tests build their
+    inputs under `tmp_path`, which is neither, so without this every handler
+    test that passes a path would fail on containment rather than on the thing
+    it is testing.
+
+    Deliberately widens the allowlist rather than disabling the check: the
+    resolution, the symlink handling and the refusal all still run in every one
+    of these tests, against a root that happens to be the test's own directory.
+    A test that wants to prove the *refusal* names a path outside `tmp_path`.
+    """
+    if "tmp_path" not in request.fixturenames:
+        return
+    tmp_path = request.getfixturevalue("tmp_path")
+    existing = settings.bioinfo_register_roots
+    monkeypatch.setattr(
+        settings, "bioinfo_register_roots", f"{existing}:{tmp_path}"
+    )
