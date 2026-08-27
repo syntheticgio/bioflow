@@ -21,12 +21,20 @@ import { computeTimingLabel, estimateSubtext } from "../lib/jobTiming";
 export function IngestProgress({ objectId }: { objectId: string }) {
   const [now, setNow] = useState(Date.now());
 
+  // Filtered server-side, matching the query key. It used to fetch the newest
+  // 20 jobs across the whole installation and filter locally, so launching
+  // "QC all reads" over 20+ files pushed this object's ingest job out of the
+  // window and the progress bar vanished while ingest was still running (#885).
   const { data: jobs } = useQuery({
     queryKey: ["jobs", "object", objectId],
-    queryFn: () => api.listJobs({ limit: 20 }),
+    queryFn: () => api.listJobs({ objectId, states: "active", limit: 20 }),
     refetchInterval: 2000,
   });
 
+  // The object_id check is now redundant with the server filter, and the state
+  // check with `states: "active"`. Both stay: this picks the one job to show,
+  // and a widened filter upstream should not silently start showing a
+  // finished job's progress.
   const active = jobs?.find(
     (j) =>
       j.object_id === objectId &&
