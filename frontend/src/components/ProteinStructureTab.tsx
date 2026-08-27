@@ -31,6 +31,38 @@ function PlddtLegend() {
 }
 
 /**
+ * What clicking the Predict button should do, given the state it is showing.
+ *
+ * Extracted because the bug it exists to prevent was precisely a divergence
+ * between the *label* and the *action*: the label switched to "View prediction"
+ * on completion while the handler went on calling startProteinPrediction
+ * unconditionally, so the button that said "view" re-queued the expensive job
+ * (#884). Deriving both from one function is what keeps them in step, and makes
+ * the rule testable without a DOM.
+ */
+export function predictButtonAction(
+  state: PredictionState | "loading",
+): "start" | "show" | "none" {
+  if (state === "completed") return "show";
+  if (state === "running" || state === "loading") return "none";
+  return "start";
+}
+
+/** The label for a given state. Paired with `predictButtonAction` above. */
+export function predictButtonLabel(
+  state: PredictionState | "loading",
+  progress: { pct: number } | null,
+): string {
+  if (state === "loading") return "Checking…";
+  if (state === "running") {
+    return progress ? `Predicting… (${Math.round(progress.pct)}%)` : "Predicting…";
+  }
+  if (state === "failed") return "Retry prediction";
+  if (state === "completed") return "View prediction";
+  return "Predict structure";
+}
+
+/**
  * Stateful Predict button that checks prediction status, starts predictions,
  * polls for progress, and shows results.
  */
@@ -48,6 +80,16 @@ function PredictButton({
   const [isStarting, setIsStarting] = useState(false);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const mountedRef = useRef(true);
+  // The completed status, kept so "View prediction" has something to hand back
+  // to the panel. Without it the button had no result to show and the click
+  // fell through to starting another (expensive) prediction.
+  const completedRef = useRef<ProteinPredictionStatus | null>(null);
+
+  // Held in a ref so it is not a dependency of the status-check effect below.
+  // Callers pass an inline arrow, which is a new function on every render, so
+  // depending on it directly re-ran the check on every parent render.
+  const onCompleteRef = useRef(onPredictionComplete);
+  onCompleteRef.current = onPredictionComplete;
 
   // Check prediction status on mount
   useEffect(() => {
@@ -59,7 +101,8 @@ function PredictButton({
         setPredictionState(status.state);
         setProgress(status.progress);
         if (status.state === "completed" && status.prediction) {
-          onPredictionComplete(status);
+          completedRef.current = status;
+          onCompleteRef.current(status);
         }
       })
       .catch(() => {
@@ -72,7 +115,7 @@ function PredictButton({
       mountedRef.current = false;
       if (pollRef.current) clearInterval(pollRef.current);
     };
-  }, [objectId, record.ordinal, onPredictionComplete]);
+  }, [objectId, record.ordinal]);
 
   const startPolling = () => {
     if (pollRef.current) clearInterval(pollRef.current);
@@ -83,7 +126,10 @@ function PredictButton({
         setPredictionState(status.state);
         setProgress(status.progress);
         if (status.state === "completed") {
-          if (status.prediction) onPredictionComplete(status);
+          if (status.prediction) {
+            completedRef.current = status;
+            onCompleteRef.current(status);
+          }
           if (pollRef.current) clearInterval(pollRef.current);
           pollRef.current = null;
         }
@@ -99,6 +145,33 @@ function PredictButton({
   };
 
   const handleClick = async () => {
+    const action = predictButtonAction(predictionState);
+    if (action === "none") return;
+
+    // "View prediction" must show the result that already exists, not queue
+    // another one. The label changed on completion but the handler did not,
+    // so clicking it re-ran the expensive job (#884).
+    if (action === "show") {
+      if (completedRef.current) {
+        onCompleteRef.current(completedRef.current);
+        return;
+      }
+      // Completed but nothing cached -- the status arrived without a
+      // prediction body. Re-fetch rather than silently doing nothing, and
+      // still never start a new job from this branch.
+      try {
+        const status = await api.proteinRecordPrediction(objectId, record.ordinal);
+        if (!mountedRef.current) return;
+        if (status.prediction) {
+          completedRef.current = status;
+          onCompleteRef.current(status);
+        }
+      } catch {
+        if (mountedRef.current) setPredictionState("failed");
+      }
+      return;
+    }
+
     setIsStarting(true);
     try {
       await api.startProteinPrediction(objectId, record.ordinal);
@@ -115,12 +188,7 @@ function PredictButton({
   const isRunning = predictionState === "running";
   const isDisabled = isRunning || isStarting || predictionState === "loading";
 
-  let buttonText = "Predict structure";
-  if (predictionState === "loading") buttonText = "Checking…";
-  if (isRunning && progress) buttonText = `Predicting… (${Math.round(progress.pct)}%)`;
-  if (isRunning && !progress) buttonText = "Predicting…";
-  if (predictionState === "failed") buttonText = "Retry prediction";
-  if (predictionState === "completed") buttonText = "View prediction";
+  const buttonText = predictButtonLabel(predictionState, progress);
 
   return (
     <div>
@@ -445,25 +513,12 @@ export function ProteinStructureTab({ objectId }: { objectId: string }) {
             onPredictionStatusChange={setSelectedPredictionStatus}
           />
         ) : (
-          <div>
-            <div className="chrom-note">
-              Select a protein on the left to look up its structure.
-            </div>
-            <div style={{ marginTop: 8 }}>
-              <PredictButton
-                objectId={objectId}
-                record={
-                  {
-                    ordinal: 0,
-                    identifier: "",
-                    description: "",
-                    length: 0,
-                    has_reference: false,
-                  } as ProteinRecordRow
-                }
-                onPredictionComplete={() => {}}
-              />
-            </div>
+          /* No Predict button here: with nothing selected there is no record
+             to predict. It used to render one against a fabricated
+             {ordinal: 0} record, so clicking it launched a prediction for the
+             file's *first* protein and threw the result away (#884). */
+          <div className="chrom-note">
+            Select a protein on the left to look up its structure.
           </div>
         )}
       </div>
