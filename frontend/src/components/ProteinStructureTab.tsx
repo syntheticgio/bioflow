@@ -7,6 +7,7 @@ import type {
   ProteinRecordRow,
   ProteinStructureState,
 } from "../api/types";
+import { clickableRow } from "../lib/clickableRow";
 import { useDebounced } from "../lib/useDebounced";
 import { Icn3dFrame } from "./Icn3dFrame";
 
@@ -367,6 +368,13 @@ export function ProteinStructureTab({ objectId }: { objectId: string }) {
   const [selected, setSelected] = useState<ProteinRecordRow | null>(null);
   const [selectedPredictionStatus, setSelectedPredictionStatus] = useState<ProteinPredictionStatus | null>(null);
 
+  /** Selecting a row clears the previous record's prediction, so the panel
+   *  never shows one protein's structure under another's name. */
+  const selectRow = (row: ProteinRecordRow) => {
+    setSelected(row);
+    setSelectedPredictionStatus(null);
+  };
+
   const search = useDebounced(searchInput, 300);
 
   useEffect(() => {
@@ -434,10 +442,12 @@ export function ProteinStructureTab({ objectId }: { objectId: string }) {
                 {rows.map((row) => (
                   <tr
                     key={row.ordinal}
-                    onClick={() => {
-                      setSelected(row);
-                      setSelectedPredictionStatus(null);
-                    }}
+                    className="protein-row"
+                    onClick={() => selectRow(row)}
+                    // Selecting a protein is how this whole tab is driven, and
+                    // it was mouse-only (#895).
+                    {...clickableRow(() => selectRow(row))}
+                    aria-selected={selected?.ordinal === row.ordinal}
                     style={{
                       cursor: "pointer",
                       background:

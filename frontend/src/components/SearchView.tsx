@@ -3,6 +3,7 @@ import { useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { api } from "../api/client";
 import { formatBytes, formatKindLabel } from "../lib/format";
+import { clickableRow } from "../lib/clickableRow";
 import { useDebounced } from "../lib/useDebounced";
 import { BulkEditBar } from "./BulkEditBar";
 
@@ -93,6 +94,13 @@ export function SearchView() {
   // Every page reports the same total, so the first is as good as any.
   const total = data?.pages[0]?.total ?? 0;
 
+  /** What an unmodified click (or an Enter/Space) does: select just this row. */
+  const selectOnly = (id: string) => {
+    setSelected(new Set());
+    setLastClicked(id);
+    update((p) => p.set("sel", `object:${id}`));
+  };
+
   const clickRow = (id: string, e: React.MouseEvent) => {
     // Shift-click extends the selection, matching every file browser.
     if (e.shiftKey && lastClicked) {
@@ -112,9 +120,7 @@ export function SearchView() {
       setLastClicked(id);
       return;
     }
-    setSelected(new Set());
-    setLastClicked(id);
-    update((p) => p.set("sel", `object:${id}`));
+    selectOnly(id);
   };
 
   return (
@@ -239,6 +245,11 @@ export function SearchView() {
                 : undefined
             }
             onClick={(e) => clickRow(o.id, e)}
+            // Keyboard activation is the plain select: shift- and meta-click
+            // extend or toggle the selection and have no keyboard equivalent
+            // here, so Enter/Space does what an unmodified click does (#895).
+            {...clickableRow(() => selectOnly(o.id))}
+            aria-pressed={sel === `object:${o.id}`}
           >
             <input
               type="checkbox"
