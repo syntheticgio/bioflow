@@ -109,6 +109,12 @@ services:
       # reported success (#803). Unset is safe -- provisioning refuses to
       # enroll a node rather than guessing.
       PRIMARY_HOSTNAME: ${PRIMARY_HOSTNAME:-}
+      # Extra Host header values the API will answer to, comma-separated.
+      # Local and LAN names are accepted without any configuration; this is
+      # only for a deliberate public or reverse-proxied name, which the host
+      # guard would otherwise refuse as a possible DNS-rebinding attempt.
+      # See backend/app/middleware/host_guard.py.
+      BIOFLOW_ALLOWED_HOSTS: ${BIOFLOW_ALLOWED_HOSTS:-}
     volumes:
       - ${BIOINFO_HOME:-/Volumes/FastDataExtension/BioinfoHelper}:/data
       # The api never *runs* a sibling container -- the worker does -- but it
