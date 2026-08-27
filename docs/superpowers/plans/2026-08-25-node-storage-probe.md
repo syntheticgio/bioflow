@@ -20,6 +20,66 @@ change what gets written, not just whether it is right:
 
 Do not start item 1 with these open.
 
+### Resolved 2026-08-27, against the live deployment
+
+All six, checked against the running stack and the one enrolled node
+(`ai-gen-desktop`, 192.168.1.237) rather than by reasoning.
+
+1. **`.biopipe/` is writable from the API container at probe time.** Confirmed
+   by writing and unlinking a file under `settings.meta_dir` (`/data/.biopipe`)
+   from `biopipe-api-1` in a request-shaped context. `initialize_home()` both
+   creates the directory (`storage/home.py:67`) and write-probes it at startup
+   (`_assert_writable`, `:86`), so the probe is reusing an established
+   guarantee rather than assuming a new one.
+
+2. **A missing file gives exit status 1, empty stdout, and the message on
+   stderr.** Verified over the real SSH connection:
+   `cat: <path>: No such file or directory (os error 2)` on stderr, `''` on
+   stdout, `exit_status=1`. **The probe therefore keys on exit status and
+   stdout content, and must not route detection through `_command_output`**
+   (`nodes.py:516-522`) -- that helper is stderr-first *for display*, so a
+   missing sentinel would come back as a non-empty string and read as success.
+   Item 1's comparison stays `token in result.stdout`.
+
+3. **`storage_location` must be quoted.** `node_ssh._quote` (`:209-210`) is a
+   plain POSIX single-quoter and is the right tool. Still no validator on
+   `ProvisionRequest.storage_location`, so the quoting is load-bearing, not
+   defensive.
+
+4. **SMB read-after-write latency cannot be measured yet, and the probe reads
+   once.** There is no CIFS mount anywhere in the deployment to measure against
+   (`mount | grep -iE 'cifs|nfs|smb'` on the node returns nothing), and the
+   spec is explicit that this must not be settled by reasoning about the
+   protocol. So: **read once now**, and #848 -- which creates the first real
+   mount -- owns re-testing this and adding a bounded retry if it proves
+   necessary. Recorded there rather than left implicit here.
+
+5. **`connect_with_tofu` works against a node provisioned by the current
+   code.** Connected to `ai-gen-desktop` with its stored `ssh_key_enc` and
+   `host_key`; the presented key matched the stored one and the connection was
+   accepted. Worth having checked -- every existing test mocks
+   `asyncssh.connect`, so nothing else exercises this path.
+
+6. **`enumerate_nodes` fixtures** -- audited with item 8.
+
+### What the probe found on the live deployment
+
+Running the real nonce probe against `ai-gen-desktop`'s actual
+`BIOINFO_HOME` (`/mnt/55e23b05-a79b-415d-be50-6862163c8a38`, read from its
+`~/.bioflow/.env`) returns **not shared**: exit 1, no sentinel.
+
+That node is `status: active` and has been eligible to claim `align_reads`
+sub-jobs it cannot read the inputs for. This is the failure #843 was written
+to remove, present in the deployment right now.
+
+**And it confirms Q1 empirically.** The node's `.biopipe/VERSION` contains
+`'biopipe-home-v1\n'` -- byte-identical to the primary's, because both ran
+`initialize_home()` against their own local disk. A probe comparing the
+existing sentinel would report **shared** for this node. The nonce probe
+reports **not shared**. The design decision not to reuse `SENTINEL_CONTENT` is
+therefore not a theoretical precaution; it is the difference between a right
+and a wrong answer on the only node this deployment has.
+
 ## Changes
 
 ### 1. New probe module — `backend/app/services/node_storage_probe.py`
