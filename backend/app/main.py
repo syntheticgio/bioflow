@@ -15,6 +15,7 @@ from app.errors import StorageUnavailableError, register_exception_handlers
 from app.logging import configure_logging, get_logger
 from app.mcp.server import mount_mcp_app
 from app.metadata.platform_migration import split_platform_from_instrument_model
+from app.middleware.host_guard import host_guard
 from app.pipelines import tool_cache
 from app.queue.registry import load_handlers
 from app.services.agent_service import agent_service
@@ -140,6 +141,13 @@ def create_app() -> FastAPI:
             return await call_next(request)
         finally:
             target_node_ctx.reset(token)
+
+    # Registered *last* so it runs *outermost*: Starlette applies http
+    # middleware in reverse registration order, so a request under a rebound
+    # hostname is refused before it reaches extract_target_node or any route.
+    # Moving this call earlier in create_app silently makes it innermost --
+    # test_guard_runs_outside_the_other_middleware is what catches that.
+    app.middleware("http")(host_guard)
 
     app.include_router(health_router)
     app.include_router(api_router)
