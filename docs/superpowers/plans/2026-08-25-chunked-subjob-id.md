@@ -3,8 +3,10 @@
 Issue: [#851](https://github.com/syntheticgio/bioflow/issues/851)
 Design: `docs/superpowers/specs/2026-08-25-chunked-subjob-id-design.md`
 
-Status: **ready.** No dependencies. Small diff, but it is the difference between
-chunked alignment never working and working.
+Status: **SHIPPED** in `55ad31e2` ("fix(queue): collect chunked sub-job ids as
+ids, not Job objects"); #851 is closed. Retained as the design record for that
+fix. No dependencies. Small diff, but it was the difference between chunked
+alignment never working and working.
 
 ## Start here: make the test suite able to fail
 

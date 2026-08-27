@@ -132,14 +132,23 @@ enum.
 
 ### 5. `backend/app/api/v1/nodes.py` — record the fields on the `Node`
 
-Find where `_provision_node` creates or updates the `Node` document (in the
-`enrolled` region, ~:892-900) and set:
+**Corrected 2026-08-27:** an earlier draft of this item said the `Node` is
+written "in the `enrolled` region, ~:892-900". It is not. `_provision_node`
+creates and saves the document at **:830-839**, immediately after
+`node_ssh.verify_key` and *before* `pull_image` -- there is no second save
+later. Writing the storage fields in an `enrolled` region would need either a
+relocation or a second `save()`.
+
+Set them on `node_doc` at :830-839, alongside the SSH fields, in the same save:
 
 ```python
-node.storage_location = req.storage_location
-node.storage_shared = probe.shared
-node.storage_checked_at = datetime.now(UTC)
+node_doc.storage_location = req.storage_location
+node_doc.storage_shared = probe.shared
+node_doc.storage_checked_at = datetime.now(UTC)
 ```
+
+This is also the natural site: `check_storage` runs before :830 (item 4), so
+`probe` is already in hand when the document is built.
 
 R16 (`storage_checked_at` null iff `storage_shared is None`) is maintained by
 always writing the three together. Never write one without the others.
