@@ -67,6 +67,55 @@ def resolve_registerable(path_str: str) -> Path:
     )
 
 
+def resolve_job_input_path(path_str: str) -> Path:
+    """Resolve a `*_path` value from a job payload, or refuse it.
+
+    Job payloads are not trusted input. Anything that can enqueue a job could
+    otherwise name any file the worker can read -- `/data/.biopipe/secret.key`,
+    `/etc/passwd` -- and have a pipeline consume it, with the content
+    potentially surfacing in outputs. The reachable route is the MCP
+    `run_pipeline` tool, whose `params` become the payload verbatim, so a
+    prompt-injected agent (file content is untrusted) could do exactly this.
+    The normal UI launch path only writes digests, which are already validated.
+
+    Wider than `resolve_registerable` by exactly BioFlow's own managed
+    directories: a handler that fans out sub-jobs writes intermediate inputs
+    under `tmp_dir` and passes them by path -- `align_reads_chunked` does this
+    with its per-bucket reference FASTAs. Those are files BioFlow itself just
+    wrote, so they are legitimate, but they are not register roots and would
+    otherwise be refused as soon as BIOINFO_REGISTER_ROOTS was set to anything
+    but its default.
+    """
+    candidate = Path(path_str)
+    if not candidate.is_absolute():
+        raise ValidationError("Job input path must be absolute")
+
+    # Resolve before comparing, so a symlink pointing outside an allowed root
+    # is rejected rather than followed.
+    real = candidate.resolve()
+    roots = [*settings.register_roots, *_managed_roots()]
+    for root in roots:
+        try:
+            real.relative_to(root)
+        except ValueError:
+            continue
+        return real
+
+    raise ValidationError(
+        f"Job input path is outside the allowed roots: {real}",
+        details={"allowed_roots": [str(r) for r in roots]},
+    )
+
+
+def _managed_roots() -> list[Path]:
+    """BioFlow's own directories, which handlers legitimately pass by path."""
+    return [
+        settings.objects_dir.resolve(),
+        settings.staging_dir.resolve(),
+        settings.tmp_dir.resolve(),
+    ]
+
+
 def resolve_report_file(root: Path, report_path: str) -> Path:
     """Resolve a client-supplied report path inside `root`, or raise.
 

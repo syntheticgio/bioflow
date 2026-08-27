@@ -13,7 +13,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from app.config import settings
-from app.errors import JobCancelled, PermanentError, RetryableError
+from app.errors import JobCancelled, PermanentError, RetryableError, ValidationError
 from app.logging import get_logger
 from app.models import IoClass, JobClass, JobResources
 from app.pipelines import (
@@ -30,7 +30,7 @@ from app.pipelines import (
 from app.pipelines.align_runner import ReadChemistry
 from app.queue.executor import run_subprocess
 from app.queue.registry import HandlerMode, JobContext, handler
-from app.storage.paths import blob_path
+from app.storage.paths import blob_path, resolve_job_input_path
 
 log = get_logger(__name__)
 
@@ -934,7 +934,12 @@ def _resolve_input(payload: dict, side: str) -> Path:
     path_str = payload.get(f"{side}_path")
 
     if path_str:
-        path = Path(path_str)
+        # Same containment check align_handlers._resolve_digest_or_path makes:
+        # a payload path is untrusted, whichever resolver it arrives at.
+        try:
+            path = resolve_job_input_path(path_str)
+        except ValidationError as e:
+            raise PermanentError(str(e)) from e
     elif digest:
         path = blob_path(digest)
     else:
