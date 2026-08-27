@@ -44,3 +44,53 @@ export function updateAffordance({
 export function versionLabel(version: string | null): string {
   return version ?? "Unknown";
 }
+
+export type StorageStatus =
+  /** Probed, and the node reads the primary's storage. */
+  | { kind: "shared"; label: string; title: string }
+  /** Probed, and it does not. It is excluded from work that reads those files. */
+  | { kind: "not-shared"; label: string; title: string }
+  /** Never probed. Distinct from "not shared": nobody has asked yet. */
+  | { kind: "unknown"; label: string; title: string };
+
+export interface StorageInputs {
+  /** Tri-state: null means never probed, not "no". */
+  storageShared: boolean | null;
+  /** The path probed, as the node sees it. */
+  storageLocation: string | null;
+}
+
+/** What the Storage column says, and why.
+ *
+ * The tri-state survives all the way to the UI on purpose. "Never probed" and
+ * "probed, cannot see it" call for different actions -- the first is a check
+ * to run, the second is storage to fix -- and collapsing them into one
+ * negative badge would hide which one a user is looking at.
+ */
+export function storageStatus({
+  storageShared,
+  storageLocation,
+}: StorageInputs): StorageStatus {
+  const where = storageLocation ? ` (${storageLocation})` : "";
+
+  if (storageShared === true) {
+    return {
+      kind: "shared",
+      label: "Shared",
+      title: `This node reads the primary's storage${where}, proven by a round-trip check. It can run any job.`,
+    };
+  }
+  if (storageShared === false) {
+    return {
+      kind: "not-shared",
+      label: "Not shared",
+      title: `This node cannot read the primary's storage${where}. It can still run jobs that fetch their own inputs, such as SRA downloads, but not work that reads the primary's files.`,
+    };
+  }
+  return {
+    kind: "unknown",
+    label: "Unchecked",
+    title:
+      "Whether this node reads the primary's storage has never been checked. Until it is, BioFlow withholds work that reads the primary's files — the safe assumption, not a finding.",
+  };
+}

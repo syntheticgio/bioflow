@@ -8,7 +8,7 @@ import type {
   NodeProvisionStatus,
   NodeUpdateStatus,
 } from "../api/types";
-import { updateAffordance, versionLabel } from "../lib/nodeStaleness";
+import { storageStatus, updateAffordance, versionLabel } from "../lib/nodeStaleness";
 import { SettingsNav } from "./SettingsNav";
 
 export function SettingsNodes() {
@@ -143,6 +143,7 @@ export function SettingsNodes() {
               <tr>
                 <th>Node</th>
                 <th>Status</th>
+                <th>Storage</th>
                 <th>Version</th>
                 <th>Workers</th>
                 <th>Running</th>
@@ -525,6 +526,11 @@ function NodeRow({
       ? `${(memMb / 1024).toFixed(1)} GB`
       : `${memMb} MB`;
 
+  const storage = storageStatus({
+    storageShared: node.storage_shared,
+    storageLocation: node.storage_location,
+  });
+
   const affordance = updateAffordance({
     imageDigest: node.image_digest,
     updatable: node.updatable,
@@ -547,6 +553,14 @@ function NodeRow({
             {node.online ? "Online" : "Offline"}
           </span>
         )}
+      </td>
+      <td>
+        <span
+          className={`nodes-storage ${storage.kind}`}
+          title={storage.title}
+        >
+          {storage.label}
+        </span>
       </td>
       <td>{versionLabel(node.version)}</td>
       <td>{node.online_workers}/{node.workers}</td>

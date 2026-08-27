@@ -586,6 +586,16 @@ export const api = {
   getUpdateStatus: (taskId: string) =>
     request<NodeUpdateStatus>(`/nodes/update/${encodeURIComponent(taskId)}`),
 
+  /** Re-run the shared-storage probe against an already-enrolled node. */
+  checkNodeStorage: (nodeId: string) =>
+    request<{
+      node_id: string;
+      storage_shared: boolean;
+      storage_location: string | null;
+      storage_checked_at: string;
+      detail: string;
+    }>(`/nodes/${encodeURIComponent(nodeId)}/check-storage`, { method: "POST" }),
+
   getVersion: () => request<VersionInfo>("/version"),
 
   sources: () => request<DataSources>("/system/sources"),
