@@ -7,16 +7,35 @@ concepts would mean two requests proving the same thing.
 """
 
 import asyncio
+from urllib.parse import urlparse
 
 from bson import ObjectId
 from bson.errors import InvalidId
 
+from app.errors import ValidationError
 from app.logging import get_logger
 from app.models.ai import AiProvider, AiRouting, FailureReason
 from app.services.ai import crypto
 from app.services.ai.adapters import Failure, adapter_for
 
 log = get_logger(__name__)
+
+
+def validate_base_url(base_url: str) -> None:
+    """Refuse a base URL that is not plain http(s) with a host.
+
+    Pointing a provider at your own local model server is the intended feature,
+    so this is not an allowlist of hosts -- 127.0.0.1 and host.docker.internal
+    are exactly what a local Ollama or llama.cpp install needs. What it rules
+    out is a *scheme* that was never meant to be reachable here: `file://`
+    reads the api container's filesystem through urllib, and `gopher://` and
+    friends are the classic SSRF protocol-smuggling vectors.
+    """
+    parsed = urlparse(base_url or "")
+    if parsed.scheme not in ("http", "https"):
+        raise ValidationError("Provider base URL must start with http:// or https://")
+    if not parsed.hostname:
+        raise ValidationError("Provider base URL must include a host")
 
 
 def _oid(provider_id: str) -> ObjectId | None:
@@ -38,6 +57,7 @@ async def get(provider_id: str) -> AiProvider | None:
 async def create(
     *, name: str, kind: str, base_url: str, model: str, api_key: str | None
 ) -> AiProvider:
+    validate_base_url(base_url)
     provider = AiProvider(name=name, kind=kind, base_url=base_url, model=model)
     if api_key:
         provider.api_key_enc = crypto.encrypt(api_key)
@@ -54,10 +74,20 @@ async def update(provider_id: str, changes: dict) -> AiProvider | None:
     present-and-a-string replaces it. This is what lets the UI render a
     write-only key field: the form submits without `api_key` unless the user
     typed one, so editing the model cannot wipe the credential.
+
+    The one exception is a `base_url` that actually changes: the stored key is
+    dropped unless this same request supplies a new one, because a key belongs
+    to the host it was issued for. See the comment on that branch.
     """
     provider = await get(provider_id)
     if provider is None:
         return None
+
+    if "base_url" in changes:
+        validate_base_url(changes["base_url"])
+
+    # Read before the pop below removes it.
+    key_supplied_now = bool(changes.get("api_key"))
 
     if "api_key" in changes:
         api_key = changes.pop("api_key")
@@ -67,6 +97,26 @@ async def update(provider_id: str, changes: dict) -> AiProvider | None:
         else:
             provider.api_key_enc = None
             provider.key_hint = None
+
+    # A key is a credential *for a host*, so moving the host must not carry it
+    # along. The API is unauthenticated, so without this anyone who can reach
+    # it -- including a DNS-rebinding page -- could repoint an existing
+    # provider at a host they control and have the stored key delivered there
+    # in an Authorization header on the next completion.
+    #
+    # Deliberately after the api_key block, so the ordinary "change the URL and
+    # re-enter the key in the same submit" edit still works: a key supplied in
+    # this same request was typed for the *new* host and is kept. Only a key
+    # the user did not re-enter is dropped.
+    if (
+        "base_url" in changes
+        and changes["base_url"] != provider.base_url
+        and not key_supplied_now
+        and provider.api_key_enc is not None
+    ):
+        provider.api_key_enc = None
+        provider.key_hint = None
+        log.info("ai_provider_key_cleared_on_base_url_change", name=provider.name)
 
     for field in ("name", "kind", "base_url", "model"):
         if field in changes:

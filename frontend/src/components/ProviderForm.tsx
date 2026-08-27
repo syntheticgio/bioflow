@@ -27,6 +27,9 @@ export function ProviderForm({
 
   const [name, setName] = useState(provider.name);
   const [baseUrl, setBaseUrl] = useState(provider.base_url);
+  // Whether this edit moves the provider to a different host, which is what
+  // makes the server invalidate the stored key.
+  const baseUrlChanged = baseUrl !== provider.base_url;
   const [model, setModel] = useState(provider.model);
   const [apiKey, setApiKey] = useState("");
 
@@ -135,13 +138,27 @@ export function ProviderForm({
           value={apiKey}
           onChange={(e) => setApiKey(e.target.value)}
           placeholder={
-            provider.has_key
-              ? `Key set (${provider.key_hint}) — leave blank to keep`
-              : "No key set"
+            !provider.has_key
+              ? "No key set"
+              : baseUrlChanged
+                ? "Re-enter the key for the new Base URL"
+                : `Key set (${provider.key_hint}) — leave blank to keep`
           }
           autoComplete="off"
         />
       </label>
+      {provider.has_key && baseUrlChanged && (
+        // The server drops the stored key when base_url actually changes -- a
+        // key is a credential for a host, and carrying it to a new one is how
+        // it gets exfiltrated. Saying so here is the difference between that
+        // being a safeguard and it being a provider that mysteriously stopped
+        // working, since the key field is write-only and shows nothing.
+        <p className="settings-hint settings-hint-warn">
+          Changing the Base URL clears the saved key, because a key belongs to
+          the host it was issued for. Enter the key for the new URL above, or
+          save and add it afterwards.
+        </p>
+      )}
       {provider.has_key && (
         <button
           className="settings-link-button"
