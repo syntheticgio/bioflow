@@ -595,6 +595,13 @@ export const api = {
       storage_checked_at: string;
       detail: string;
     }>(`/nodes/${encodeURIComponent(nodeId)}/check-storage`, { method: "POST" }),
+  /** Revoke a node's enrollment so it can no longer claim jobs. Its workers
+   *  discover this on their next status poll. Does not uninstall anything. */
+  revokeNode: (nodeId: string) =>
+    request<{ node_id: string; status: string }>(
+      `/nodes/${encodeURIComponent(nodeId)}`,
+      { method: "DELETE" },
+    ),
 
   getVersion: () => request<VersionInfo>("/version"),
 
