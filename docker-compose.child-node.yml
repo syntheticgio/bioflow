@@ -10,9 +10,18 @@
 
 name: bioflow-child
 
+# Same reasoning as docker-compose.yml's anchor: the json-file driver grows
+# without bound, and a child node is exactly the machine nobody is watching.
+x-logging: &default-logging
+  driver: "json-file"
+  options:
+    max-size: "10m"
+    max-file: "5"
+
 services:
   worker:
     image: ghcr.io/syntheticgio/bioflow-backend:${BIOFLOW_TAG:-latest}
+    logging: *default-logging
     # The image's PATH puts Medaka's venv first (it must stay there: the
     # polish jobs call `medaka` by bare name), so a bare `python` is Medaka's
     # interpreter and has none of the app's dependencies -- the worker died
