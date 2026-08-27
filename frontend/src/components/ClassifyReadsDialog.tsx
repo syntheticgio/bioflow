@@ -6,6 +6,7 @@ import { notify } from "../stores/messageStore";
 import type { DataObject, ResourceRefusalDetails } from "../api/types";
 import { NodeSelector } from "./NodeSelector";
 import { ResourceRefusalCard } from "./ResourceRefusalCard";
+import { ModalBackdrop } from "./ModalBackdrop";
 
 const DEFAULT_DB_KEY = "standard-8";
 
@@ -108,7 +109,7 @@ export function ClassifyReadsDialog({
   });
 
   return (
-    <div className="modal-backdrop" onClick={onClose}>
+    <ModalBackdrop onClick={onClose}>
       <div className="modal trim-modal" onClick={(e) => e.stopPropagation()}>
         <h2>
           {object.format.kind === "fasta"
@@ -211,6 +212,6 @@ export function ClassifyReadsDialog({
           </button>
         </div>
       </div>
-    </div>
+    </ModalBackdrop>
   );
 }

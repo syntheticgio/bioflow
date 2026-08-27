@@ -6,6 +6,7 @@ import { notify } from "../stores/messageStore";
 import type { DataObject, ResourceRefusalDetails } from "../api/types";
 import { NodeSelector } from "./NodeSelector";
 import { ResourceRefusalCard } from "./ResourceRefusalCard";
+import { ModalBackdrop } from "./ModalBackdrop";
 
 /**
  * Launch compleasm against one assembly.
@@ -120,7 +121,7 @@ export function CompletenessDialog({
   const lineagePresent = status?.present === true;
 
   return (
-    <div className="modal-backdrop" onClick={onClose}>
+    <ModalBackdrop onClick={onClose}>
       <div className="modal trim-modal" onClick={(e) => e.stopPropagation()}>
         <h2>
           Assembly completeness
@@ -248,6 +249,6 @@ export function CompletenessDialog({
           )}
         </div>
       </div>
-    </div>
+    </ModalBackdrop>
   );
 }
