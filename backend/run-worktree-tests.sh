@@ -289,6 +289,8 @@ run_pytest() {
     -v "$REPO_ROOT/backend/tests:/srv/tests" \
     -v "$REPO_ROOT/VERSION:/VERSION:ro" \
     -v "$REPO_ROOT/docker-compose.override.yml:/docker-compose.override.yml:ro" \
+    -v "$REPO_ROOT/docker-compose.yml:/docker-compose.yml:ro" \
+    -v "$REPO_ROOT/docker-compose.child-node.yml:/docker-compose.child-node.yml:ro" \
     -v "$REPO_ROOT/backend/pi-skills:/backend/pi-skills:ro" \
     -v "$DATA_SOURCE:/data" \
     -w /srv \
