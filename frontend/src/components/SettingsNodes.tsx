@@ -199,6 +199,14 @@ export function SettingsNodes() {
 
 /* ── Provision form ── */
 
+// Mirrors the server's ProvisionRequest validators (backend/app/api/v1/nodes.py).
+// Both values are interpolated into commands that run on the remote node, so the
+// server refuses anything outside these shapes; matching here is only so the user
+// gets a sentence naming the field instead of a raw 422. The server remains the
+// authority -- this is a courtesy, not the check.
+const NODE_NAME_RE = /^[A-Za-z0-9_-]{1,64}$/;
+const STORAGE_LOCATION_RE = /^(\/[A-Za-z0-9._-]+)+$/;
+
 type AuthTab = "password" | "key";
 
 interface FormFields {
@@ -259,6 +267,21 @@ function ProvisionForm({
     }
     if (!fields.nodeName.trim()) {
       setError("Node name is required.");
+      return;
+    }
+    if (!NODE_NAME_RE.test(fields.nodeName.trim())) {
+      setError(
+        "Node name may use only letters, digits, underscore and hyphen (max 64 characters).",
+      );
+      return;
+    }
+    if (
+      !STORAGE_LOCATION_RE.test(fields.storage.trim()) ||
+      fields.storage.trim().split("/").includes("..")
+    ) {
+      setError(
+        "Storage location must be an absolute path using letters, digits, dot, underscore and hyphen — no spaces or trailing slash.",
+      );
       return;
     }
 
