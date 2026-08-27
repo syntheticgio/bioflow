@@ -230,6 +230,22 @@ services:
     mem_limit: ${BIOFLOW_HARD_MEM_LIMIT:-0}
     deploy:
       replicas: ${WORKER_REPLICAS:-2}
+    healthcheck:
+      # The service that actually runs jobs was the one with no healthcheck, so
+      # a wedged worker reported "Up" and nothing noticed -- including the
+      # launcher's health panel, which reads compose healthchecks (#878).
+      #
+      # Reads the file _heartbeat_loop touches each beat. See
+      # app/queue/liveness.py for why a file rather than a port or a Redis key,
+      # and why the staleness threshold is a multiple of the heartbeat interval
+      # rather than a fixed number of seconds. The heartbeat is independent of
+      # job execution, so a worker part-way through a multi-hour job stays
+      # healthy; start_period covers the gap before the first beat.
+      test: ["CMD", "/usr/local/bin/python3.12", "-m", "app.queue.liveness"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 60s
     # The default 10s would SIGKILL mid-drain, stranding leases. Drain is 60s.
     stop_grace_period: 90s
     restart: unless-stopped
