@@ -358,14 +358,23 @@ export function WorkflowCanvas() {
   }, [serverErrors]);
 
   function loadDefinition(id: string) {
-    api.getWorkflow(id).then((definition) => {
-      setDefinitionId(definition.id);
-      setName(definition.name);
-      setNodes(definition.nodes);
-      setEdges(definition.edges);
-      setServerErrors([]);
-      setNotice(`Loaded "${definition.name}" (v${definition.version}).`);
-    });
+    api.getWorkflow(id).then(
+      (definition) => {
+        setDefinitionId(definition.id);
+        setName(definition.name);
+        setNodes(definition.nodes);
+        setEdges(definition.edges);
+        setServerErrors([]);
+        setNotice(`Loaded "${definition.name}" (v${definition.version}).`);
+      },
+      // Without this the click did nothing at all -- a workflow deleted since
+      // the list was fetched, or any failed request, was an unhandled rejection
+      // and no notice (#887). Same shape as the derive handler below.
+      (error) =>
+        setNotice(
+          error instanceof Error ? error.message : "Could not load that workflow.",
+        ),
+    );
   }
 
   const inputNodes = useMemo(
