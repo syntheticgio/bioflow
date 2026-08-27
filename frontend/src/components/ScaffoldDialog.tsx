@@ -1,12 +1,11 @@
 import { useState } from "react";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useNavigate } from "react-router-dom";
-import { api, ApiRequestError } from "../api/client";
+import { useQuery } from "@tanstack/react-query";
+import { api } from "../api/client";
+import { useLaunchWithRefusal } from "../hooks/useLaunchWithRefusal";
 import { ModalBackdrop } from "./ModalBackdrop";
 import { NodeSelector } from "./NodeSelector";
 import { ResourceRefusalCard } from "./ResourceRefusalCard";
-import { notify } from "../stores/messageStore";
-import type { DataObject, ResourceRefusalDetails } from "../api/types";
+import type { DataObject, ScaffoldRequest } from "../api/types";
 
 const DIVERGENCE_OPTIONS = [
   { value: "same_species", label: "Same species", hint: "minimap2 -x asm5 (default)" },
@@ -49,9 +48,6 @@ export function ScaffoldDialog({
    */
   prefill?: Record<string, unknown> | null;
 }) {
-  const qc = useQueryClient();
-  const navigate = useNavigate();
-
   const { data: refs, isLoading: refsLoading } = useQuery({
     queryKey: ["pipelines", "references", object.project_id],
     queryFn: () => api.references(object.project_id),
@@ -65,9 +61,6 @@ export function ScaffoldDialog({
   );
   const [divergence, setDivergence] = useState<string>("same_species");
   const [targetNode, setTargetNode] = useState("");
-  // Populated from a 422's `details`, the same reactive path AssembleDialog
-  // uses -- scaffolding has no client-side estimate to check pre-flight.
-  const [refusal, setRefusal] = useState<ResourceRefusalDetails | null>(null);
 
   const references = (refs?.references ?? []).filter(
     (r) => r.object_id !== object.id,
@@ -75,46 +68,29 @@ export function ScaffoldDialog({
   const preferredId = references.find((r) => r.role === "reference")?.object_id;
   const chosenId = referenceId ?? preferredId ?? references[0]?.object_id ?? null;
 
-  const launch = useMutation({
-    mutationFn: () =>
-      api.launchScaffold({
-        draft_object_id: object.id,
-        reference_object_id: chosenId,
-        divergence,
-      }, targetNode || undefined),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["jobs"] });
-      notify.success("Scaffolding started");
-      onClose();
-      navigate("/activity");
-    },
-    onError: (e: Error) => {
-      if (e instanceof ApiRequestError && "refusal" in e.details) {
-        setRefusal(e.details as unknown as ResourceRefusalDetails);
-        return;
-      }
-      notify.error(e.message);
-    },
+  const {
+    launch,
+    launchAnyway,
+    refusal,
+    clearRefusal,
+    isPending,
+    isAnywayPending,
+  } = useLaunchWithRefusal<ScaffoldRequest>({
+    // targetNode on both paths. The hand-written launchAnyway omitted it, so
+    // overriding a refusal silently un-pinned the node the user had chosen --
+    // the kind of drift one shared implementation makes impossible.
+    send: (body) => api.launchScaffold(body, targetNode || undefined),
+    buildBody: (override) => ({
+      draft_object_id: object.id,
+      reference_object_id: chosenId,
+      divergence,
+      ...(override ? { resource_override: true } : {}),
+    }),
+    successMessage: "Scaffolding started",
+    onLaunched: onClose,
   });
 
-  const launchAnyway = useMutation({
-    mutationFn: () =>
-      api.launchScaffold({
-        draft_object_id: object.id,
-        reference_object_id: chosenId,
-        divergence,
-        resource_override: true,
-      }),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["jobs"] });
-      notify.success("Launching without the memory check");
-      onClose();
-      navigate("/activity");
-    },
-    onError: (e: Error) => notify.error(e.message),
-  });
-
-  const ready = chosenId != null && !launch.isPending;
+  const ready = chosenId != null && !isPending;
 
   return (
     <ModalBackdrop onClick={onClose}>
@@ -200,10 +176,10 @@ export function ScaffoldDialog({
               }
               replan={refusal.replan ?? null}
               onCancel={onClose}
-              onEdit={() => setRefusal(null)}
-              onLaunchAnyway={() => launchAnyway.mutate()}
-              launchAnywayPending={launchAnyway.isPending}
-              onAcceptReplan={() => setRefusal(null)}
+              onEdit={clearRefusal}
+              onLaunchAnyway={launchAnyway}
+              launchAnywayPending={isAnywayPending}
+              onAcceptReplan={clearRefusal}
             />
           )}
         </div>
@@ -218,9 +194,9 @@ export function ScaffoldDialog({
             type="button"
             className="primary"
             disabled={!ready}
-            onClick={() => launch.mutate()}
+            onClick={launch}
           >
-            {launch.isPending ? "Starting…" : "Scaffold"}
+            {isPending ? "Starting…" : "Scaffold"}
           </button>
         </div>
       </div>
