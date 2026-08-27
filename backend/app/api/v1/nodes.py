@@ -12,7 +12,7 @@ from uuid import uuid4
 
 import asyncssh
 from fastapi import APIRouter, HTTPException, Request
-from pydantic import BaseModel, model_validator
+from pydantic import BaseModel, field_validator, model_validator
 
 from app.config import settings
 from app.errors import ConflictError, NotFoundError, ValidationError
@@ -37,6 +37,38 @@ _OFFLINE_THRESHOLD_SECONDS = 60
 
 # --- Provisioning request/response models ---
 
+# `node_name` and `storage_location` are interpolated into commands that run on
+# the remote node -- most consequentially into the body of a quoted heredoc
+# (`_render_node_env`, written at the write_env step). The quoted delimiter
+# stops `$`-expansion but not *delimiter* injection: a value carrying a newline
+# followed by the delimiter ends the heredoc early and everything after it runs
+# as shell on the remote machine. `node_name` also becomes the comment on a
+# generated SSH key that is appended to the node's authorized_keys, where a
+# newline forges an extra key line.
+#
+# The endpoint is unauthenticated, so with a rebound hostname (#871) a web page
+# could drive this against a host the victim has credentials for. Validating
+# here, in the model, is what makes that unreachable rather than escaped-so-far:
+# every path out of this request is covered at once, and a new call site cannot
+# forget to quote.
+_NODE_NAME_RE = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
+# An absolute path of ordinary path segments. Deliberately no shell
+# metacharacters, no whitespace, no "..", and no trailing slash -- this is a
+# storage directory being named, not an arbitrary string.
+_STORAGE_LOCATION_RE = re.compile(r"^(/[A-Za-z0-9._-]+)+$")
+
+
+def _sanitize_node_name(raw: str) -> str:
+    """Coerce a hostname-derived string into something `_NODE_NAME_RE` accepts.
+
+    Only for values *this* code suggests, never for user input -- a request
+    that fails validation must be refused, not quietly rewritten into a
+    different node than the caller asked for.
+    """
+    cleaned = re.sub(r"[^A-Za-z0-9_-]", "-", raw).strip("-")[:64]
+    return cleaned or "compute-node"
+
+
 class ProvisionRequest(BaseModel):
     host: str
     port: int = 22
@@ -46,6 +78,27 @@ class ProvisionRequest(BaseModel):
     node_name: str
     storage_location: str = "/data/scratch"
     worker_replicas: int = 2
+
+    @field_validator("node_name")
+    @classmethod
+    def _check_node_name(cls, v: str) -> str:
+        if not _NODE_NAME_RE.match(v):
+            raise ValueError(
+                "node_name must be 1-64 characters of letters, digits, "
+                "underscore or hyphen"
+            )
+        return v
+
+    @field_validator("storage_location")
+    @classmethod
+    def _check_storage_location(cls, v: str) -> str:
+        if not _STORAGE_LOCATION_RE.match(v) or ".." in v.split("/"):
+            raise ValueError(
+                "storage_location must be an absolute path made of letters, "
+                "digits, dot, underscore or hyphen -- no whitespace, shell "
+                "metacharacters, or '..' segments"
+            )
+        return v
 
     @model_validator(mode="after")
     def _check_credential(self) -> "ProvisionRequest":
@@ -239,12 +292,16 @@ async def connection_details(request: Request) -> dict:
     mongo = _rewrite_host(settings.mongo_url, host)
     redis = _rewrite_host(settings.redis_url, host)
 
-    # Suggest a node name from the primary's hostname.
+    # Suggest a node name from the primary's hostname, sanitized to what
+    # ProvisionRequest will actually accept. platform.node() routinely returns
+    # a dotted mDNS name ("Johns-MacBook-Pro.local"), and offering the user a
+    # default their own form then rejects is a worse bug than the one the
+    # validation closes.
     try:
         primary_hostname = platform.node() or "primary"
     except Exception:
         primary_hostname = "primary"
-    suggested = f"{primary_hostname}-node"
+    suggested = _sanitize_node_name(f"{primary_hostname}-node")
 
     return {
         "mongo_url": mongo,
