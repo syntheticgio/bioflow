@@ -21,7 +21,7 @@ class _Response:
     def __init__(self, payload: dict):
         self._payload = payload
 
-    def read(self):
+    def read(self, amount=None):
         return json.dumps(self._payload).encode()
 
     def __enter__(self):
@@ -54,7 +54,7 @@ def capture(monkeypatch):
             }
         )
 
-    monkeypatch.setattr(adapters.urllib.request, "urlopen", _capture)
+    monkeypatch.setattr(adapters, "_urlopen", _capture)
     return seen
 
 

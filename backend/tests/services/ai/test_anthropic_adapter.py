@@ -22,7 +22,7 @@ class _Response:
     def __init__(self, payload: dict):
         self._payload = payload
 
-    def read(self):
+    def read(self, amount=None):
         return json.dumps(self._payload).encode()
 
     def __enter__(self):
@@ -50,7 +50,7 @@ def capture(monkeypatch):
         seen["body"] = json.loads(request.data) if request.data else None
         return _Response(MESSAGES_OK)
 
-    monkeypatch.setattr(adapters.urllib.request, "urlopen", _capture)
+    monkeypatch.setattr(adapters, "_urlopen", _capture)
     return seen
 
 
@@ -83,7 +83,7 @@ class TestComplete:
 
     def test_unparseable_body_is_bad_response(self, adapter, monkeypatch):
         monkeypatch.setattr(
-            adapters.urllib.request, "urlopen", lambda *a, **k: _Response({"nope": 1})
+            adapters, "_urlopen", lambda *a, **k: _Response({"nope": 1})
         )
         result = adapter.complete(system="s", user="u", model="claude-x", max_tokens=10)
         assert isinstance(result, Failure)

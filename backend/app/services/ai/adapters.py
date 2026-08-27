@@ -110,6 +110,39 @@ def _reason_for_status(code: int) -> FailureReason:
     return FailureReason.UNREACHABLE
 
 
+# A model list or completion is kilobytes. This is a bound on a *hostile or
+# broken* upstream, not a real limit: without it, `response.read()` will happily
+# buffer whatever an attacker-controlled base_url decides to send, in the api
+# process.
+_MAX_RESPONSE_BYTES = 32 * 1024 * 1024
+
+
+class _NoRedirects(urllib.request.HTTPRedirectHandler):
+    """Refuse redirects instead of following them.
+
+    `urlopen` follows them by default, which would undo the base_url scheme
+    validation done when the provider was saved: a validated `https://` host
+    can answer 302 with `file:///etc/passwd` or an internal address, and the
+    key travels along in the Authorization header. No legitimate provider's
+    `/v1/models` needs a redirect, so refusing is both safe and unobtrusive.
+    """
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
+
+
+# Built once: constructing an opener per request is pure overhead, and this one
+# holds no per-request state. `_urlopen` rather than `urllib.request.urlopen`
+# is the seam the adapter tests patch -- calling urlopen directly would silently
+# reintroduce redirect-following, since urlopen uses the *global* opener and
+# takes no handler argument.
+_opener = urllib.request.build_opener(_NoRedirects)
+
+
+def _urlopen(request, timeout: float):
+    return _opener.open(request, timeout=timeout)
+
+
 class _BaseAdapter:
     """Shared request plumbing. Subclasses supply paths, headers, and shapes."""
 
@@ -129,8 +162,14 @@ class _BaseAdapter:
             method="POST" if body is not None else "GET",
         )
         try:
-            with urllib.request.urlopen(request, timeout=timeout) as response:
-                parsed = json.loads(response.read().decode())
+            with _urlopen(request, timeout=timeout) as response:
+                # One byte over the cap so a response *at* the limit is not
+                # mistaken for a truncated one.
+                raw = response.read(_MAX_RESPONSE_BYTES + 1)
+                if len(raw) > _MAX_RESPONSE_BYTES:
+                    log.warning("ai_response_too_large", url=url)
+                    return Failure(FailureReason.BAD_RESPONSE)
+                parsed = json.loads(raw.decode())
             if not isinstance(parsed, dict):
                 log.warning(
                     "ai_response_not_a_dict", url=url, type=type(parsed).__name__

@@ -16,7 +16,7 @@ class _Response:
     def __init__(self, payload: dict):
         self._payload = payload
 
-    def read(self):
+    def read(self, amount=None):
         return json.dumps(self._payload).encode()
 
     def __enter__(self):
@@ -39,7 +39,7 @@ def capture(monkeypatch):
         seen["body"] = json.loads(request.data) if request.data else None
         return _Response({"content": [{"type": "text", "text": "hi"}]})
 
-    monkeypatch.setattr(adapters.urllib.request, "urlopen", _capture)
+    monkeypatch.setattr(adapters, "_urlopen", _capture)
     return seen
 
 
@@ -83,7 +83,7 @@ class TestParsingToolUse:
             ]
         }
         monkeypatch.setattr(
-            adapters.urllib.request, "urlopen", lambda *a, **k: _Response(payload)
+            adapters, "_urlopen", lambda *a, **k: _Response(payload)
         )
         result = adapter.complete(
             system="s", user="u", model="claude-x", max_tokens=100, tools=[SEARCH_TOOL]
@@ -99,7 +99,7 @@ class TestParsingToolUse:
         parsed. Passing a dict straight through (no json.loads) is correct."""
         payload = {"content": [{"type": "tool_use", "id": "t1", "name": "x", "input": {"a": 1}}]}
         monkeypatch.setattr(
-            adapters.urllib.request, "urlopen", lambda *a, **k: _Response(payload)
+            adapters, "_urlopen", lambda *a, **k: _Response(payload)
         )
         result = adapter.complete(
             system="s", user="u", model="claude-x", max_tokens=100, tools=[SEARCH_TOOL]
@@ -116,7 +116,7 @@ class TestParsingToolUse:
             ]
         }
         monkeypatch.setattr(
-            adapters.urllib.request, "urlopen", lambda *a, **k: _Response(payload)
+            adapters, "_urlopen", lambda *a, **k: _Response(payload)
         )
         result = adapter.complete(
             system="s", user="u", model="claude-x", max_tokens=100, tools=[SEARCH_TOOL]
@@ -129,7 +129,7 @@ class TestParsingToolUse:
     ):
         payload = {"content": [{"type": "text", "text": "the answer is 4"}]}
         monkeypatch.setattr(
-            adapters.urllib.request, "urlopen", lambda *a, **k: _Response(payload)
+            adapters, "_urlopen", lambda *a, **k: _Response(payload)
         )
         result = adapter.complete(
             system="s", user="u", model="claude-x", max_tokens=100, tools=[SEARCH_TOOL]
@@ -147,7 +147,7 @@ class TestParsingToolUse:
             ]
         }
         monkeypatch.setattr(
-            adapters.urllib.request, "urlopen", lambda *a, **k: _Response(payload)
+            adapters, "_urlopen", lambda *a, **k: _Response(payload)
         )
         result = adapter.complete(
             system="s", user="u", model="claude-x", max_tokens=100, tools=[SEARCH_TOOL]
@@ -157,7 +157,7 @@ class TestParsingToolUse:
 
     def test_empty_content_list_is_bad_response(self, adapter, monkeypatch):
         monkeypatch.setattr(
-            adapters.urllib.request, "urlopen", lambda *a, **k: _Response({"content": []})
+            adapters, "_urlopen", lambda *a, **k: _Response({"content": []})
         )
         result = adapter.complete(
             system="s", user="u", model="claude-x", max_tokens=100, tools=[SEARCH_TOOL]
