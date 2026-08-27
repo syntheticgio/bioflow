@@ -212,7 +212,12 @@ class TestRemoteCommand:
 
     @pytest.mark.asyncio
     async def test_storage_location_is_shell_quoted(self, home):
-        """`storage_location` has no validator and reaches a remote shell."""
+        """A path from the database reaches a remote shell, so quote it.
+
+        `ProvisionRequest` validates this field now, but the re-check endpoint
+        probes a value read back out of a `Node` document -- written before
+        that validator existed, and not re-validated on the way out.
+        """
         conn = _conn(exit_status=1)
 
         await probe_shared_storage(conn, "/mnt/my data; rm -rf /")
