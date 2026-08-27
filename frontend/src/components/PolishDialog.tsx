@@ -1,9 +1,7 @@
 import { useState } from "react";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { useNavigate } from "react-router-dom";
-import { api, ApiRequestError } from "../api/client";
-import { notify } from "../stores/messageStore";
-import type { DataObject, ResourceRefusalDetails } from "../api/types";
+import { api } from "../api/client";
+import { useLaunchWithRefusal } from "../hooks/useLaunchWithRefusal";
+import type { DataObject } from "../api/types";
 import { NodeSelector } from "./NodeSelector";
 import { ResourceRefusalCard } from "./ResourceRefusalCard";
 
@@ -33,54 +31,27 @@ export function PolishDialog({
    */
   prefill?: Record<string, unknown> | null;
 }) {
-  const qc = useQueryClient();
-  const navigate = useNavigate();
-
   const [bacteria, setBacteria] = useState<boolean>(
     () => (prefill?.bacteria as boolean) ?? false,
   );
   const [targetNode, setTargetNode] = useState("");
-  // Populated from a 422's `details`, the same reactive path CompletenessDialog
-  // uses -- a polish run can be refused for exceeding the memory budget, and
-  // the user gets the "launch anyway" escape rather than a dead-end error.
-  const [refusal, setRefusal] = useState<ResourceRefusalDetails | null>(null);
-
-  const launch = useMutation({
-    mutationFn: () =>
-      api.launchSuggestion(
-        "/pipelines/polish-long",
-        { ...(prefill ?? {}), bacteria },
-        targetNode || undefined,
-      ),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["jobs"] });
-      notify.success("Long-read polishing started");
-      onClose();
-      navigate("/activity");
-    },
-    onError: (e: Error) => {
-      if (e instanceof ApiRequestError && "refusal" in e.details) {
-        setRefusal(e.details as unknown as ResourceRefusalDetails);
-        return;
-      }
-      notify.error(e.message);
-    },
-  });
-
-  const launchAnyway = useMutation({
-    mutationFn: () =>
-      api.launchSuggestion(
-        "/pipelines/polish-long",
-        { ...(prefill ?? {}), bacteria, resource_override: true },
-        targetNode || undefined,
-      ),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["jobs"] });
-      notify.success("Launching without the memory check");
-      onClose();
-      navigate("/activity");
-    },
-    onError: (e: Error) => notify.error(e.message),
+  const {
+    launch,
+    launchAnyway,
+    refusal,
+    clearRefusal,
+    isPending,
+    isAnywayPending,
+  } = useLaunchWithRefusal<Record<string, unknown>>({
+    send: (body) =>
+      api.launchSuggestion("/pipelines/polish-long", body, targetNode || undefined),
+    buildBody: (override) => ({
+      ...(prefill ?? {}),
+      bacteria,
+      ...(override ? { resource_override: true } : {}),
+    }),
+    successMessage: "Long-read polishing started",
+    onLaunched: onClose,
   });
 
   return (
@@ -130,10 +101,10 @@ export function PolishDialog({
               }
               replan={refusal.replan ?? null}
               onCancel={onClose}
-              onEdit={() => setRefusal(null)}
-              onLaunchAnyway={() => launchAnyway.mutate()}
-              launchAnywayPending={launchAnyway.isPending}
-              onAcceptReplan={() => setRefusal(null)}
+              onEdit={clearRefusal}
+              onLaunchAnyway={launchAnyway}
+              launchAnywayPending={isAnywayPending}
+              onAcceptReplan={clearRefusal}
             />
           )}
 
@@ -152,10 +123,10 @@ export function PolishDialog({
           <button
             type="button"
             className="primary"
-            disabled={launch.isPending}
-            onClick={() => launch.mutate()}
+            disabled={isPending}
+            onClick={launch}
           >
-            {launch.isPending ? "Starting…" : "Polish assembly"}
+            {isPending ? "Starting…" : "Polish assembly"}
           </button>
         </div>
       </div>
