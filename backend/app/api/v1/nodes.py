@@ -169,6 +169,14 @@ async def enumerate_nodes() -> dict[str, dict]:
                 "image_digest": doc.image_digest,
                 "version": doc.version,
                 "updatable": doc.ssh_key_enc is not None,
+                # Tri-state, and it stays tri-state out to the UI: None means
+                # never probed, which the user needs to be able to tell from a
+                # node that was probed and cannot see the storage.
+                "storage_shared": doc.storage_shared,
+                "storage_location": doc.storage_location,
+                "storage_checked_at": (
+                    doc.storage_checked_at.isoformat() if doc.storage_checked_at else None
+                ),
             }
     except Exception:
         # Any error here -- including an AttributeError from a Node field this
@@ -229,6 +237,12 @@ async def enumerate_nodes() -> dict[str, dict]:
         entry["image_digest"] = mongo_info.get("image_digest")
         entry["version"] = mongo_info.get("version")
         entry["updatable"] = mongo_info.get("updatable", False)
+        # Defaults to None, not False: a node heartbeating without a Mongo
+        # record has not been probed either, and saying "not shared" about it
+        # would be a claim nobody made.
+        entry["storage_shared"] = mongo_info.get("storage_shared")
+        entry["storage_location"] = mongo_info.get("storage_location")
+        entry["storage_checked_at"] = mongo_info.get("storage_checked_at")
 
     return by_node
 

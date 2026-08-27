@@ -36,7 +36,15 @@ def _patch_settings(**overrides):
 
 
 def _node_doc(node_id="child-1", hostname="child-laptop", status="active"):
-    """Return a mock Node document with async-save support."""
+    """Return a mock Node document with async-save support.
+
+    Must carry every field `enumerate_nodes` reads. Its loop is wrapped in a
+    bare `except Exception` that discards *all* nodes accumulated so far and
+    logs no traceback, so a field missing here does not fail with an
+    AttributeError -- it silently returns an empty list, and the test that
+    breaks looks like a bug in the merge logic. Adding `storage_shared` to
+    the real model broke both tests below in exactly that way.
+    """
     doc = type(
         "MockNode",
         (),
@@ -49,6 +57,9 @@ def _node_doc(node_id="child-1", hostname="child-laptop", status="active"):
             "image_digest": None,
             "version": None,
             "ssh_key_enc": None,
+            "storage_location": None,
+            "storage_shared": None,
+            "storage_checked_at": None,
             "save": AsyncMock(),
             "insert": AsyncMock(),
         },
@@ -465,3 +476,36 @@ async def test_enroll_without_version_leaves_existing_value(client):
     assert node.image_digest == "sha256:old"
     assert node.version == "0.3.0"
     await node.delete()
+
+
+async def test_node_doc_stub_carries_every_field_enumerate_nodes_reads():
+    """The stub above must not drift behind the real Node model.
+
+    `enumerate_nodes`'s loop swallows any exception and discards every node
+    it had accumulated, so a field added to `Node` and read by that loop but
+    missing from `_node_doc` turns into an empty list rather than an error.
+    That is a silent, distant failure -- this asserts the contract directly so
+    the next field lands with a message naming it.
+    """
+    import ast
+    import inspect
+    import textwrap
+
+    from app.api.v1 import nodes as mod
+
+    tree = ast.parse(textwrap.dedent(inspect.getsource(mod.enumerate_nodes)))
+    read = {
+        node.attr
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Attribute)
+        and isinstance(node.value, ast.Name)
+        and node.value.id == "doc"
+    }
+    assert read, "parsed no doc.* reads -- the walker is wrong, not the stub"
+    stub = _node_doc()
+
+    missing = {field for field in read if not hasattr(stub, field)}
+    assert not missing, (
+        f"_node_doc is missing {sorted(missing)}, which enumerate_nodes reads. "
+        "Without them every node-listing test silently returns []."
+    )

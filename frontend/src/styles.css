@@ -5706,6 +5706,30 @@ table.software-matrix thead th.software-matrix-corner {
   color: var(--warn);
 }
 
+/* Storage status. Three states, deliberately: "unchecked" is dim rather than
+   coloured because it is an absence of information, not a fault -- colouring
+   it like "not shared" would report a finding nobody made. */
+.nodes-storage {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 10px;
+  font-size: 11px;
+  font-weight: 600;
+  background: var(--bg-panel);
+  color: var(--text-dim);
+  cursor: help;
+}
+
+.nodes-storage.shared {
+  background: color-mix(in srgb, var(--success) 15%, transparent);
+  color: var(--success);
+}
+
+.nodes-storage.not-shared {
+  background: color-mix(in srgb, var(--warn) 15%, transparent);
+  color: var(--warn);
+}
+
 /* --- Node provisioning form --- */
 
 /* align-self, because the stacked parent stretches its children: without it
