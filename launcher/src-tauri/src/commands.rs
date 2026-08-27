@@ -285,9 +285,14 @@ pub async fn run_stack(app: tauri::AppHandle, state: State<'_, LauncherApp>) -> 
         .or_else(|| web_port_from_env(Path::new(&install_dir)))
         .unwrap_or(DEFAULT_WEB_PORT);
 
+    let bundled_compose_path = app
+        .path()
+        .resolve(BUNDLED_COMPOSE_RESOURCE, BaseDirectory::Resource)
+        .map_err(|e| format!("could not locate the bundled compose file: {e}"))?;
+
     let outcome = tauri::async_runtime::spawn_blocking(move || {
         let docker = ShellDocker::new();
-        actions::run(&docker, &install_dir, RUN_HEALTH_MAX_ATTEMPTS, || {
+        actions::run(&docker, &install_dir, &bundled_compose_path, RUN_HEALTH_MAX_ATTEMPTS, || {
             std::thread::sleep(RUN_HEALTH_POLL_INTERVAL)
         })
     })
@@ -331,12 +336,17 @@ pub async fn stop_stack(app: State<'_, LauncherApp>) -> Result<(), String> {
 /// `docker compose pull` plus `up -d` are both real blocking subprocess
 /// calls, and a pull in particular can run long on a slow connection.
 #[tauri::command]
-pub async fn update_stack(app: State<'_, LauncherApp>) -> Result<(), String> {
+pub async fn update_stack(handle: tauri::AppHandle, app: State<'_, LauncherApp>) -> Result<(), String> {
     let install_dir = install_dir_str_blocking(&app).await.ok_or("not installed")?;
+
+    let bundled_compose_path = handle
+        .path()
+        .resolve(BUNDLED_COMPOSE_RESOURCE, BaseDirectory::Resource)
+        .map_err(|e| format!("could not locate the bundled compose file: {e}"))?;
 
     let outcome = tauri::async_runtime::spawn_blocking(move || {
         let docker = ShellDocker::new();
-        actions::update(&docker, &install_dir)
+        actions::update(&docker, &install_dir, &bundled_compose_path)
     })
     .await
     .map_err(|e| e.to_string())?;
@@ -350,12 +360,17 @@ pub async fn update_stack(app: State<'_, LauncherApp>) -> Result<(), String> {
 }
 
 #[tauri::command]
-pub async fn update_to_stage(app: State<'_, LauncherApp>, tag: String) -> Result<(), String> {
+pub async fn update_to_stage(handle: tauri::AppHandle, app: State<'_, LauncherApp>, tag: String) -> Result<(), String> {
     let install_dir = install_dir_str_blocking(&app).await.ok_or("not installed")?;
+
+    let bundled_compose_path = handle
+        .path()
+        .resolve(BUNDLED_COMPOSE_RESOURCE, BaseDirectory::Resource)
+        .map_err(|e| format!("could not locate the bundled compose file: {e}"))?;
 
     let outcome = tauri::async_runtime::spawn_blocking(move || {
         let docker = ShellDocker::new();
-        actions::update_to_stage(&docker, &install_dir, &tag)
+        actions::update_to_stage(&docker, &install_dir, &bundled_compose_path, &tag)
     })
     .await
     .map_err(|e| e.to_string())?;
