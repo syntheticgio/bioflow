@@ -5730,6 +5730,17 @@ table.software-matrix thead th.software-matrix-corner {
   color: var(--warn);
 }
 
+/* Revoked reads as a state the user chose, not a fault -- but it has to beat
+   Online at a glance, because a revoked node can still be heartbeating. */
+.nodes-status.revoked {
+  background: color-mix(in srgb, var(--error) 15%, transparent);
+  color: var(--error);
+}
+
+.nodes-revoke {
+  margin-left: 6px;
+}
+
 /* --- Node provisioning form --- */
 
 /* align-self, because the stacked parent stretches its children: without it

@@ -280,3 +280,60 @@ async def test_current_version_tolerates_unknown_digest(client):
         res = await client.get("/api/v1/nodes/current-version")
     assert res.status_code == 200
     assert res.json()["image_digest"] is None
+
+
+@pytest.mark.usefixtures("beanie_models")
+@pytest.mark.asyncio(loop_scope="module")
+async def test_a_revoked_node_is_reported_as_revoked(fake_redis):
+    """The listing must carry the revocation, because that is the only thing
+    the UI can distinguish a revoked node by (#913).
+
+    Seeded with a live worker on purpose: a revoked node can still be
+    heartbeating -- enumerate_nodes lists it deliberately for that reason -- and
+    it was exactly that case that rendered as a normal Online row.
+    """
+    from app.models.node import Node
+
+    node = Node(node_id="revoked-node", status="revoked")
+    await node.insert()
+    await _seed_workers(fake_redis, **{"r:1": _worker_blob("revoked-node")})
+
+    try:
+        with patch("app.queue.worker_registry.get_redis", return_value=fake_redis):
+            nodes = await list_nodes()
+
+        entry = next(n for n in nodes if n["node_id"] == "revoked-node")
+        assert entry["enrollment"] == "revoked"
+        # Still online: the badge, not the heartbeat, is what has to say
+        # "revoked". A listing that hid it would be a different bug.
+        assert entry["online"] is True
+    finally:
+        await node.delete()
+
+
+@pytest.mark.usefixtures("beanie_models")
+@pytest.mark.asyncio(loop_scope="module")
+async def test_revoke_endpoint_sets_the_status_the_listing_reads(client):
+    """Ties the two ends together: what DELETE writes is the field the listing
+    reports, so revoking from the UI is visible afterwards."""
+    from app.models.node import Node
+
+    node = Node(node_id="doomed-node")
+    await node.insert()
+
+    try:
+        resp = await client.delete("/api/v1/nodes/doomed-node")
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["status"] == "revoked"
+
+        reloaded = await Node.find_one(Node.node_id == "doomed-node")
+        assert reloaded.status == "revoked"
+    finally:
+        await (await Node.find_one(Node.node_id == "doomed-node")).delete()
+
+
+@pytest.mark.usefixtures("beanie_models")
+@pytest.mark.asyncio(loop_scope="module")
+async def test_revoking_an_unknown_node_is_a_404(client):
+    resp = await client.delete("/api/v1/nodes/never-existed")
+    assert resp.status_code == 404
