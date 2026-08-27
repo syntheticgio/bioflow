@@ -209,7 +209,34 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return res.json() as Promise<T>;
 }
 
+/**
+ * A pipeline path with the optional `?target_node=` clause appended.
+ *
+ * Twenty call sites each re-spelled this same ternary inside a template
+ * literal, which is twenty chances to forget the encodeURIComponent (#900).
+ * Exported so it can be tested without issuing a request.
+ */
+export function withTargetNode(path: string, targetNode?: string): string {
+  if (!targetNode) return path;
+  const sep = path.includes("?") ? "&" : "?";
+  return `${path}${sep}target_node=${encodeURIComponent(targetNode)}`;
+}
+
 export const api = {
+  /**
+   * Queue a pipeline run, optionally pinned to one compute node.
+   *
+   * The shared implementation behind the `launch*` family: every one of them
+   * is a POST to a pipeline path with the same optional `?target_node=`
+   * clause, and they had twenty separate copies of it. New launch endpoints
+   * should call this rather than adding a twenty-first.
+   */
+  launch: <T>(path: string, body: unknown, targetNode?: string) =>
+    request<T>(withTargetNode(path, targetNode), {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+
   /**
    * The generic verb surface. Prefer these for new endpoints over adding
    * another named wrapper: `api.post<Project>("/projects", { name })` says the
@@ -734,35 +761,21 @@ export const api = {
     body: TrimRequest,
     targetNode?: string,
   ) =>
-    request<JobSummary>(
-      `/pipelines/trim${targetNode ? `?target_node=${encodeURIComponent(targetNode)}` : ""}`,
-      {
-        method: "POST",
-        body: JSON.stringify(body),
-      },
-    ),
+    api.launch<JobSummary>("/pipelines/trim", body, targetNode),
 
   /** Queue a Filtlong long-read length/quality filtering run. */
   launchFilterLongReads: (
     body: FilterLongReadsRequest,
     targetNode?: string,
   ) =>
-    request<JobSummary>(
-      `/pipelines/filter-long-reads${targetNode ? `?target_node=${encodeURIComponent(targetNode)}` : ""}`,
-      {
-        method: "POST",
-        body: JSON.stringify(body),
-      },
-    ),
+    api.launch<JobSummary>("/pipelines/filter-long-reads", body, targetNode),
 
   /** Queue a QC run. Read-only: produces a report, derives no files. */
   launchQC: (objectId: string, targetNode?: string) =>
-    request<JobSummary>(
-      `/pipelines/qc${targetNode ? `?target_node=${encodeURIComponent(targetNode)}` : ""}`,
-      {
-        method: "POST",
-        body: JSON.stringify({ object_id: objectId }),
-      }),
+    request<JobSummary>(withTargetNode("/pipelines/qc", targetNode), {
+      method: "POST",
+      body: JSON.stringify({ object_id: objectId }),
+    }),
 
   /**
    * Whether a local model is up and could write a summary right now.
@@ -781,23 +794,19 @@ export const api = {
       "/pipelines/de-summary/status"
     ),
   launchDeSummary: (objectId: string, targetNode?: string) =>
-    request<JobSummary>(
-      `/pipelines/de-summary${targetNode ? `?target_node=${encodeURIComponent(targetNode)}` : ""}`,
-      {
-        method: "POST",
-        body: JSON.stringify({ object_id: objectId }),
-      }),
+    request<JobSummary>(withTargetNode("/pipelines/de-summary", targetNode), {
+      method: "POST",
+      body: JSON.stringify({ object_id: objectId }),
+    }),
   variantSummaryStatus: () =>
     request<{ available: boolean; reason?: string; model?: string | null; provider_name?: string }>(
       "/pipelines/variant-summary/status"
     ),
   launchVariantSummary: (objectId: string, targetNode?: string) =>
-    request<JobSummary>(
-      `/pipelines/variant-summary${targetNode ? `?target_node=${encodeURIComponent(targetNode)}` : ""}`,
-      {
-        method: "POST",
-        body: JSON.stringify({ object_id: objectId }),
-      }),
+    request<JobSummary>(withTargetNode("/pipelines/variant-summary", targetNode), {
+      method: "POST",
+      body: JSON.stringify({ object_id: objectId }),
+    }),
 
   /** The known-provider table. Static; safe to cache indefinitely. */
   aiPresets: () => request<AiPreset[]>("/settings/ai/presets"),
@@ -888,12 +897,10 @@ export const api = {
 
   /** Queue a narrative summary of a file's QC data and metadata. */
   launchSummary: (objectId: string, targetNode?: string) =>
-    request<JobSummary>(
-      `/pipelines/summary${targetNode ? `?target_node=${encodeURIComponent(targetNode)}` : ""}`,
-      {
-        method: "POST",
-        body: JSON.stringify({ object_id: objectId, force: true }),
-      }),
+    request<JobSummary>(withTargetNode("/pipelines/summary", targetNode), {
+      method: "POST",
+      body: JSON.stringify({ object_id: objectId, force: true }),
+    }),
 
   /**
    * URL of a generated QC report.
@@ -1068,13 +1075,10 @@ export const api = {
     body: Record<string, unknown>,
     targetNode?: string,
   ) =>
-    request<JobSummary>(
-      `${endpoint}${targetNode ? `?target_node=${encodeURIComponent(targetNode)}` : ""}`,
-      {
-        method: "POST",
-        body: JSON.stringify(body),
-      },
-    ),
+    request<JobSummary>(withTargetNode(`${endpoint}`, targetNode), {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
 
   buildIndex: (body: {
     reference_id: string;
@@ -1087,12 +1091,7 @@ export const api = {
     }),
 
   launchAlignment: (body: AlignRequest, targetNode?: string) =>
-    request<JobSummary>(
-      `/pipelines/align${targetNode ? `?target_node=${encodeURIComponent(targetNode)}` : ""}`,
-      {
-        method: "POST",
-        body: JSON.stringify(body),
-      }),
+    api.launch<JobSummary>("/pipelines/align", body, targetNode),
 
   /** Propose a fitting configuration for a refused job, or say why there is
    * none. Feeds the resource-refusal card's Auto-adjust button. */
@@ -1121,31 +1120,16 @@ export const api = {
     request<Partial<AssemblyParams>>(`/pipelines/assemble/defaults/${objectId}`),
 
   launchAssembly: (body: AssembleRequest, targetNode?: string) =>
-    request<JobSummary>(
-      `/pipelines/assemble${targetNode ? `?target_node=${encodeURIComponent(targetNode)}` : ""}`,
-      {
-        method: "POST",
-        body: JSON.stringify(body),
-      }),
+    api.launch<JobSummary>("/pipelines/assemble", body, targetNode),
 
   completenessDefaults: (objectId: string) =>
     request<CompletenessDefaults>(`/pipelines/completeness/defaults/${objectId}`),
 
   launchCompleteness: (body: CompletenessRequest, targetNode?: string) =>
-    request<JobSummary>(
-      `/pipelines/completeness${targetNode ? `?target_node=${encodeURIComponent(targetNode)}` : ""}`,
-      {
-        method: "POST",
-        body: JSON.stringify(body),
-      }),
+    api.launch<JobSummary>("/pipelines/completeness", body, targetNode),
 
   launchScaffold: (body: ScaffoldRequest, targetNode?: string) =>
-    request<JobSummary>(
-      `/pipelines/scaffold${targetNode ? `?target_node=${encodeURIComponent(targetNode)}` : ""}`,
-      {
-        method: "POST",
-        body: JSON.stringify(body),
-      }),
+    api.launch<JobSummary>("/pipelines/scaffold", body, targetNode),
 
   downloadLineage: (body: LineageDownloadRequest) =>
     request<JobSummary>("/pipelines/completeness/lineage", {
@@ -1166,23 +1150,13 @@ export const api = {
   krakenDbs: () => request<KrakenDbInfo[]>("/pipelines/kraken-dbs"),
 
   launchClassifyReads: (body: ClassifyReadsRequest, targetNode?: string) =>
-    request<JobSummary>(
-      `/pipelines/classify-reads${targetNode ? `?target_node=${encodeURIComponent(targetNode)}` : ""}`,
-      {
-        method: "POST",
-        body: JSON.stringify(body),
-      }),
+    api.launch<JobSummary>("/pipelines/classify-reads", body, targetNode),
 
   variantDefaults: (bamId: string) =>
     request<VariantDefaults>(`/pipelines/variants/defaults/${bamId}`),
 
   launchVariantCalling: (body: VariantRequest, targetNode?: string) =>
-    request<JobSummary>(
-      `/pipelines/variants${targetNode ? `?target_node=${encodeURIComponent(targetNode)}` : ""}`,
-      {
-        method: "POST",
-        body: JSON.stringify(body),
-      }),
+    api.launch<JobSummary>("/pipelines/variants", body, targetNode),
 
   /** Counting defaults for one BAM: the annotation it would use, and the
    * strandedness read off its alignment. */
@@ -1190,12 +1164,7 @@ export const api = {
     request<QuantifyDefaults>(`/pipelines/quantify/defaults/${bamId}`),
 
   launchQuantify: (body: QuantifyRequest, targetNode?: string) =>
-    request<JobSummary>(
-      `/pipelines/quantify${targetNode ? `?target_node=${encodeURIComponent(targetNode)}` : ""}`,
-      {
-        method: "POST",
-        body: JSON.stringify(body),
-      }),
+    api.launch<JobSummary>("/pipelines/quantify", body, targetNode),
 
   /** The samples, conditions and contrast the DE dialog opens with.
    * Project-scoped, unlike every other defaults route here -- differential
@@ -1204,12 +1173,7 @@ export const api = {
     request<DeDefaults>(`/pipelines/differential-expression/defaults/${projectId}`),
 
   launchDifferentialExpression: (body: DeRequest, targetNode?: string) =>
-    request<JobSummary>(
-      `/pipelines/differential-expression${targetNode ? `?target_node=${encodeURIComponent(targetNode)}` : ""}`,
-      {
-        method: "POST",
-        body: JSON.stringify(body),
-      }),
+    api.launch<JobSummary>("/pipelines/differential-expression", body, targetNode),
 
   /** The project's assembled-transcript GTFs, for the merge dialog. */
   mergeTranscriptsDefaults: (projectId: string) =>
@@ -1218,12 +1182,7 @@ export const api = {
     ),
 
   launchMergeTranscripts: (body: MergeTranscriptsRequest, targetNode?: string) =>
-    request<JobSummary>(
-      `/pipelines/merge-transcripts${targetNode ? `?target_node=${encodeURIComponent(targetNode)}` : ""}`,
-      {
-        method: "POST",
-        body: JSON.stringify(body),
-      }),
+    api.launch<JobSummary>("/pipelines/merge-transcripts", body, targetNode),
 
   /** A page of a DE results table, sorted and filtered server-side. */
   deResults: (
@@ -1253,12 +1212,10 @@ export const api = {
   /** Queue the Results computation for a BAM. Read-only: produces facts and
    * one TSV report, no derived objects. */
   launchBamStats: (objectId: string, targetNode?: string) =>
-    request<JobSummary>(
-      `/pipelines/bamstats${targetNode ? `?target_node=${encodeURIComponent(targetNode)}` : ""}`,
-      {
-        method: "POST",
-        body: JSON.stringify({ object_id: objectId }),
-      }),
+    request<JobSummary>(withTargetNode("/pipelines/bamstats", targetNode), {
+      method: "POST",
+      body: JSON.stringify({ object_id: objectId }),
+    }),
 
   /** Queue the RNA-seq transcript QC computation for a BAM against a GTF
    * annotation. Read-only: produces facts only, no derived objects. */
@@ -1299,12 +1256,10 @@ export const api = {
   /** Queue the Results computation for a VCF/BCF. Read-only: produces facts
    * and a variants TSV, no derived objects. */
   launchVcfStats: (objectId: string, targetNode?: string) =>
-    request<JobSummary>(
-      `/pipelines/vcfstats${targetNode ? `?target_node=${encodeURIComponent(targetNode)}` : ""}`,
-      {
-        method: "POST",
-        body: JSON.stringify({ object_id: objectId }),
-      }),
+    request<JobSummary>(withTargetNode("/pipelines/vcfstats", targetNode), {
+      method: "POST",
+      body: JSON.stringify({ object_id: objectId }),
+    }),
 
   /** A page of the variant table. Filters are applied server-side against
    *  the SQLite index rather than by slicing a TSV -- a plant VCF holds
@@ -1426,12 +1381,10 @@ export const api = {
   /** Queue the Results computation for a GFF/GTF/BED. Read-only: produces
    * facts and a SQLite feature index, no derived objects. */
   launchAnnotationStats: (objectId: string, targetNode?: string) =>
-    request<JobSummary>(
-      `/pipelines/annotationstats${targetNode ? `?target_node=${encodeURIComponent(targetNode)}` : ""}`,
-      {
-        method: "POST",
-        body: JSON.stringify({ object_id: objectId }),
-      }),
+    request<JobSummary>(withTargetNode("/pipelines/annotationstats", targetNode), {
+      method: "POST",
+      body: JSON.stringify({ object_id: objectId }),
+    }),
 
   /** A page of the feature table. Rows are top-level features unless a type
    *  filter is set, in which case the server searches children too. */
@@ -1709,13 +1662,10 @@ export const api = {
     },
     targetNode?: string,
   ) =>
-    request<WorkflowRunSummary>(
-      `/workflows/${id}/runs${targetNode ? `?target_node=${encodeURIComponent(targetNode)}` : ""}`,
-      {
-        method: "POST",
-        body: JSON.stringify(body),
-      },
-    ),
+    request<WorkflowRunSummary>(withTargetNode(`/workflows/${id}/runs`, targetNode), {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
 
   // --- Agent chat ---
   askAgent: (projectId: string, message: string) =>
