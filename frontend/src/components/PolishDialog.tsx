@@ -6,6 +6,7 @@ import { notify } from "../stores/messageStore";
 import type { DataObject, ResourceRefusalDetails } from "../api/types";
 import { NodeSelector } from "./NodeSelector";
 import { ResourceRefusalCard } from "./ResourceRefusalCard";
+import { ModalBackdrop } from "./ModalBackdrop";
 
 /**
  * Launch Medaka polishing against one assembly, with the optional
@@ -84,7 +85,7 @@ export function PolishDialog({
   });
 
   return (
-    <div className="modal-backdrop" onClick={onClose}>
+    <ModalBackdrop onClick={onClose}>
       <div className="modal trim-modal" onClick={(e) => e.stopPropagation()}>
         <h2>
           Polish assembly (long reads)
@@ -159,6 +160,6 @@ export function PolishDialog({
           </button>
         </div>
       </div>
-    </div>
+    </ModalBackdrop>
   );
 }
