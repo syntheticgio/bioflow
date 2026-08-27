@@ -9,7 +9,7 @@ const ACTIVE_STATES = new Set(["pending", "queued", "delayed", "running"]);
 export function JobList({ projectId, limit = 10 }: { projectId?: string; limit?: number }) {
   const qc = useQueryClient();
 
-  const { data: jobs } = useQuery({
+  const { data: jobs, isPending, isError } = useQuery({
     queryKey: ["jobs", projectId ?? "all"],
     queryFn: () => api.listJobs({ projectId, limit }),
     refetchInterval: (q) => {
@@ -40,6 +40,22 @@ export function JobList({ projectId, limit = 10 }: { projectId?: string; limit?:
     },
     onError: (e: Error) => notify.error(e.message),
   });
+
+  // "No jobs yet." is a statement of fact, so it must wait for a fact. The
+  // three states were collapsed into one, so every load asserted there were no
+  // jobs before the list had arrived -- briefly, but definitively, and wrongly
+  // (#892).
+  if (isPending) {
+    return <div style={{ color: "var(--text-faint)", fontSize: 13 }}>Loading jobs…</div>;
+  }
+
+  if (isError) {
+    return (
+      <div style={{ color: "var(--text-faint)", fontSize: 13 }}>
+        Could not load jobs.
+      </div>
+    );
+  }
 
   if (!jobs || jobs.length === 0) {
     return <div style={{ color: "var(--text-faint)", fontSize: 13 }}>No jobs yet.</div>;
