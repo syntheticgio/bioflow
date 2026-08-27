@@ -378,6 +378,37 @@ The rules easy to get backwards:
 - **Nothing is cherry-picked forward** from `main` into an existing alpha or
   beta. Alpha is cut *from* `main` once; after that the flow is alpha → main.
 
+### An issue fixed on a release branch stays open until the backflow
+
+`Closes #NN` only auto-closes on the default branch. That is GitHub's
+behaviour and it is not configurable -- and it is the behaviour you want,
+because an alpha or beta can be recut or abandoned, so a fix landing there is
+not delivered yet.
+
+What that used to cost was visibility: the fix was written, the issue looked
+untouched, and nothing on it said otherwise. So the state is carried by a
+label instead, and it is fully automatic:
+
+- **Merging a PR into `alpha/**`, `beta/**` or `release/**`** makes
+  `release-branch-fixes.yml` read `Closes #NN` from the *PR body*, add
+  **`status:fixed-in-release-branch`** to each issue, and comment with the
+  branch and PR. Nothing changes about how you write the PR.
+- **Merging the backflow PR into `main`** closes those issues natively.
+- **Closing any issue** strips the label. It means "fixed, awaiting
+  backflow" and nothing else, so the closed state replaces it.
+
+**The backflow PR's body must carry every `Closes #NN`** -- that is the only
+thing that actually closes anything, and a body assembled by hand is the step
+that gets forgotten. Generate it:
+
+```bash
+ops/backflow-pr-body.sh beta/0.6.0
+```
+
+It reads the merged PRs' bodies -- the same source the workflow labels from,
+so a labelled issue and a closed issue cannot drift apart -- and omits any
+issue already closed (`--all` includes them).
+
 Which number to bump:
 
 - **Major** (`X.0.0`) -- platform-level; allowed to break features, config,
