@@ -853,7 +853,10 @@ RUN set -e \
     && apt-get install -y --no-install-recommends nodejs=${NODE_VERSION}-1nodesource1 \
     && node --version \
     # Restore the no-curl end state the purge scripts above established.
-    && apt-get purge -y curl \
+    # gnupg goes with it: it was installed for NodeSource's signing key and is
+    # used nowhere else, so leaving it behind cost ~15MB and made the claim
+    # above only half true.
+    && apt-get purge -y curl gnupg \
     && apt-get autoremove -y \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/* /tmp/setup-node.sh
