@@ -19,7 +19,7 @@ class _Response:
         self._payload = payload
         self.status = status
 
-    def read(self):
+    def read(self, amount=None):
         return json.dumps(self._payload).encode()
 
     def __enter__(self):
@@ -47,7 +47,7 @@ CHAT_OK = {"choices": [{"message": {"content": "The reads look usable."}}]}
 class TestComplete:
     def test_returns_the_text_and_model(self, adapter, monkeypatch):
         monkeypatch.setattr(
-            adapters.urllib.request, "urlopen", lambda *a, **k: _Response(CHAT_OK)
+            adapters, "_urlopen", lambda *a, **k: _Response(CHAT_OK)
         )
         result = adapter.complete(system="s", user="u", model="m", max_tokens=100)
         assert isinstance(result, Completion)
@@ -63,7 +63,7 @@ class TestComplete:
             "choices": [{"message": {"content": "ok"}}],
         }
         monkeypatch.setattr(
-            adapters.urllib.request, "urlopen", lambda *a, **k: _Response(payload)
+            adapters, "_urlopen", lambda *a, **k: _Response(payload)
         )
         result = adapter.complete(system="s", user="u", model="requested", max_tokens=10)
         assert isinstance(result, Completion)
@@ -72,7 +72,7 @@ class TestComplete:
     def test_falls_back_to_the_requested_model_when_absent(self, adapter, monkeypatch):
         """Some servers omit the `model` field; the requested name then stands."""
         monkeypatch.setattr(
-            adapters.urllib.request, "urlopen", lambda *a, **k: _Response(CHAT_OK)
+            adapters, "_urlopen", lambda *a, **k: _Response(CHAT_OK)
         )
         result = adapter.complete(system="s", user="u", model="m", max_tokens=100)
         assert isinstance(result, Completion)
@@ -86,7 +86,7 @@ class TestComplete:
             seen["body"] = json.loads(request.data)
             return _Response(CHAT_OK)
 
-        monkeypatch.setattr(adapters.urllib.request, "urlopen", capture)
+        monkeypatch.setattr(adapters, "_urlopen", capture)
         adapter.complete(system="s", user="u", model="m", max_tokens=100)
         assert seen["auth"] == "Bearer sk-test123456"
 
@@ -99,7 +99,7 @@ class TestComplete:
             seen["body"] = json.loads(request.data)
             return _Response(CHAT_OK)
 
-        monkeypatch.setattr(adapters.urllib.request, "urlopen", capture)
+        monkeypatch.setattr(adapters, "_urlopen", capture)
         adapter.complete(system="be brief", user="hello", model="m", max_tokens=100)
         assert seen["body"]["messages"] == [
             {"role": "system", "content": "be brief"},
@@ -114,7 +114,7 @@ class TestComplete:
             seen["auth"] = request.get_header("Authorization")
             return _Response(CHAT_OK)
 
-        monkeypatch.setattr(adapters.urllib.request, "urlopen", capture)
+        monkeypatch.setattr(adapters, "_urlopen", capture)
         OpenAICompatAdapter(base_url="http://m:1", api_key=None).complete(
             system="s", user="u", model="m", max_tokens=10
         )
@@ -131,7 +131,7 @@ class TestComplete:
         ],
     )
     def test_maps_http_status_to_a_reason(self, adapter, monkeypatch, code, reason):
-        monkeypatch.setattr(adapters.urllib.request, "urlopen", _http_error(code))
+        monkeypatch.setattr(adapters, "_urlopen", _http_error(code))
         result = adapter.complete(system="s", user="u", model="m", max_tokens=10)
         assert isinstance(result, Failure)
         assert result.reason == reason
@@ -140,14 +140,14 @@ class TestComplete:
         def refuse(*a, **k):
             raise OSError("connection refused")
 
-        monkeypatch.setattr(adapters.urllib.request, "urlopen", refuse)
+        monkeypatch.setattr(adapters, "_urlopen", refuse)
         result = adapter.complete(system="s", user="u", model="m", max_tokens=10)
         assert isinstance(result, Failure)
         assert result.reason == FailureReason.UNREACHABLE
 
     def test_unparseable_200_is_bad_response(self, adapter, monkeypatch):
         monkeypatch.setattr(
-            adapters.urllib.request, "urlopen", lambda *a, **k: _Response({"weird": 1})
+            adapters, "_urlopen", lambda *a, **k: _Response({"weird": 1})
         )
         result = adapter.complete(system="s", user="u", model="m", max_tokens=10)
         assert isinstance(result, Failure)
@@ -156,7 +156,7 @@ class TestComplete:
     def test_empty_text_is_bad_response(self, adapter, monkeypatch):
         payload = {"choices": [{"message": {"content": "   "}}]}
         monkeypatch.setattr(
-            adapters.urllib.request, "urlopen", lambda *a, **k: _Response(payload)
+            adapters, "_urlopen", lambda *a, **k: _Response(payload)
         )
         result = adapter.complete(system="s", user="u", model="m", max_tokens=10)
         assert isinstance(result, Failure)
@@ -179,7 +179,7 @@ class TestComplete:
             ]
         }
         monkeypatch.setattr(
-            adapters.urllib.request, "urlopen", lambda *a, **k: _Response(payload)
+            adapters, "_urlopen", lambda *a, **k: _Response(payload)
         )
         result = adapter.complete(system="s", user="u", model="m", max_tokens=16)
         assert isinstance(result, Failure)
@@ -204,7 +204,7 @@ class TestComplete:
             ]
         }
         monkeypatch.setattr(
-            adapters.urllib.request, "urlopen", lambda *a, **k: _Response(payload)
+            adapters, "_urlopen", lambda *a, **k: _Response(payload)
         )
         result = adapter.complete(system="s", user="u", model="m", max_tokens=400)
         assert isinstance(result, Failure)
@@ -220,7 +220,7 @@ class TestComplete:
                 "http://x", 401, "err", {}, _BodyIO(b"bad key sk-test123456")
             )
 
-        monkeypatch.setattr(adapters.urllib.request, "urlopen", raise_with_key)
+        monkeypatch.setattr(adapters, "_urlopen", raise_with_key)
         result = adapter.complete(system="s", user="u", model="m", max_tokens=10)
         assert "sk-test123456" not in (result.detail or "")
 
@@ -229,7 +229,7 @@ class _BodyIO:
     def __init__(self, data: bytes):
         self._data = data
 
-    def read(self):
+    def read(self, amount=None):
         return self._data
 
     def close(self):
@@ -242,7 +242,7 @@ class TestListModels:
     def test_returns_sorted_ids(self, adapter, monkeypatch):
         payload = {"data": [{"id": "zeta"}, {"id": "alpha"}]}
         monkeypatch.setattr(
-            adapters.urllib.request, "urlopen", lambda *a, **k: _Response(payload)
+            adapters, "_urlopen", lambda *a, **k: _Response(payload)
         )
         assert adapter.list_models() == ["alpha", "zeta"]
 
@@ -252,12 +252,12 @@ class TestListModels:
         resident model is the better default -- opportunistic, never required."""
         payload = {"data": [{"id": "alpha"}, {"id": "zeta", "loaded": True}]}
         monkeypatch.setattr(
-            adapters.urllib.request, "urlopen", lambda *a, **k: _Response(payload)
+            adapters, "_urlopen", lambda *a, **k: _Response(payload)
         )
         assert adapter.list_models() == ["zeta", "alpha"]
 
     def test_maps_401_to_invalid_key(self, adapter, monkeypatch):
-        monkeypatch.setattr(adapters.urllib.request, "urlopen", _http_error(401))
+        monkeypatch.setattr(adapters, "_urlopen", _http_error(401))
         result = adapter.list_models()
         assert isinstance(result, Failure)
         assert result.reason == FailureReason.INVALID_KEY
@@ -266,7 +266,7 @@ class TestListModels:
         """A reachable server with no models loaded is configured correctly and
         merely empty -- the key is valid, which is what the fetch proves."""
         monkeypatch.setattr(
-            adapters.urllib.request, "urlopen", lambda *a, **k: _Response({"data": []})
+            adapters, "_urlopen", lambda *a, **k: _Response({"data": []})
         )
         assert adapter.list_models() == []
 
@@ -275,8 +275,7 @@ class TestListModels:
         bare JSON array from /v1/models -- must not raise AttributeError out
         of list_models() when the code calls result.get("data")."""
         monkeypatch.setattr(
-            adapters.urllib.request,
-            "urlopen",
+            adapters, "_urlopen",
             lambda *a, **k: _Response(["not", "a", "dict"]),
         )
         result = adapter.list_models()
