@@ -1,19 +1,31 @@
 -- Release a running job's lease and its reserved resources.
 --
--- Used on every terminal outcome (success, failure, cancellation) and when
--- requeueing on graceful shutdown. Resource counters must be released exactly
--- once: releasing twice would let the queue over-admit forever, so the ZREM
--- return value gates the decrement.
+-- Used on every terminal outcome (success, failure, cancellation), when
+-- requeueing on graceful shutdown, and when scheduling a retry. Resource
+-- counters must be released exactly once: releasing twice would let the queue
+-- over-admit forever, so the ZREM return value gates the decrement.
 --
 -- KEYS[1] running zset    KEYS[2] ready zset
 -- ARGV[1] job_id
--- ARGV[2] requeue ("1" to put it back on ready, "0" to drop it)
+-- ARGV[2] mode:
+--           "1"    requeue -- put it back on ready, keep the dispatch hash
+--           "0"    terminal -- drop the hash, the job is finished
+--           "keep" release the lease but keep the hash, and do not requeue.
+--                  For a retry, whose caller places the job on the delayed
+--                  zset itself: the hash carries class/cpu/mem_mb/io/score,
+--                  which promote_delayed and claim.lua both read when the
+--                  backoff elapses. Dropping it there left a bare id that
+--                  promote_delayed scored with the wall clock and claim.lua
+--                  then discarded as garbage -- the job silently vanished on
+--                  every transient error.
 -- ARGV[3] requeue score
 --
 -- Returns 1 if this call owned the release, 0 if it was already released.
 
 local job_id  = ARGV[1]
-local requeue = ARGV[2] == '1'
+local mode    = ARGV[2]
+local requeue = mode == '1'
+local keep    = mode == 'keep'
 local score   = tonumber(ARGV[3])
 local jkey    = 'bp:job:' .. job_id
 
@@ -48,6 +60,10 @@ end
 
 if requeue then
   redis.call('ZADD', KEYS[2], score, job_id)
+  redis.call('HDEL', jkey, 'worker_id', 'lease_expires', 'started_at')
+elseif keep then
+  -- Same lease teardown as a requeue, without the ready-queue push: the
+  -- caller decides where the job goes next (the delayed zset, for a retry).
   redis.call('HDEL', jkey, 'worker_id', 'lease_expires', 'started_at')
 else
   redis.call('DEL', jkey)

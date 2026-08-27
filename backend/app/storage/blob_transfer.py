@@ -162,11 +162,13 @@ def _fetch(digest: str, dest: Path) -> Path:
                     f.write(chunk)
                     actual.update(chunk)
     except urllib.error.HTTPError as e:
+        tmp.unlink(missing_ok=True)
         if e.code == 404:
             raise _blob_not_on_primary(digest) from e
         raise _fetch_failed(digest, url, str(e)) from e
     except OSError as e:
-        # Network error, DNS failure, timeout — retryable.
+        # Network error, DNS failure, timeout, disk full -- retryable.
+        tmp.unlink(missing_ok=True)
         raise _fetch_failed(digest, url, str(e)) from e
 
     if actual.hexdigest() != digest:
@@ -180,9 +182,15 @@ def _fetch(digest: str, dest: Path) -> Path:
 
 
 def _push(digest: str, path: Path) -> bool:
-    """Upload *path* to the primary via HTTP PUT.  Returns True if uploaded."""
+    """Upload *path* to the primary via HTTP PUT.  Returns True if uploaded.
+
+    The file is streamed in fixed-size chunks with an explicit Content-Length
+    so a multi-GB output is never resident in RAM at once.  A compute node
+    pushing back a large BAM must not OOM the worker at the very end of a long
+    job -- the worst possible moment to lose the output.
+    """
     url = f"{settings.primary_api_url}/api/v1/objects/blob/{digest}"
-    data = path.read_bytes()
+    size = path.stat().st_size
 
     # Quick check: ask the primary if it already has this blob.
     # We use a HEAD request so we don't upload gigabytes unnecessarily.
@@ -197,26 +205,40 @@ def _push(digest: str, path: Path) -> bool:
     except OSError:
         pass  # HEAD failed, try PUT anyway.
 
-    # Validate the local file before uploading.
-    actual = hashlib.sha256(data).hexdigest()
-    if actual != digest:
-        raise _push_failed(digest, url, f"local SHA-256 mismatch: expected {digest}, got {actual}")
+    # Validate the local file before uploading, hashing in chunks so the whole
+    # file is not loaded to verify it.
+    actual = hashlib.sha256()
+    with open(path, "rb") as f:
+        while chunk := f.read(_BLOB_CHUNK):
+            actual.update(chunk)
+    if actual.hexdigest() != digest:
+        raise _push_failed(
+            digest, url, f"local SHA-256 mismatch: expected {digest}, got {actual.hexdigest()}"
+        )
 
     try:
-        put_req = urllib.request.Request(
-            url,
-            data=data,
-            headers={**_auth_header(), "Content-Type": "application/octet-stream"},
-            method="PUT",
-        )
-        with urllib.request.urlopen(put_req, timeout=60) as resp:
-            _check_status(resp, digest)
+        # A file object as data with an explicit Content-Length streams the
+        # upload; urllib would otherwise fall back to chunked transfer, which
+        # the primary endpoint and many proxies handle less well.
+        with open(path, "rb") as f:
+            put_req = urllib.request.Request(
+                url,
+                data=f,
+                headers={
+                    **_auth_header(),
+                    "Content-Type": "application/octet-stream",
+                    "Content-Length": str(size),
+                },
+                method="PUT",
+            )
+            with urllib.request.urlopen(put_req, timeout=60) as resp:
+                _check_status(resp, digest)
     except urllib.error.HTTPError as e:
         raise _push_failed(digest, url, str(e)) from e
     except OSError as e:
         raise _push_failed(digest, url, str(e)) from e
 
-    log.info("blob_pushed", digest=digest, size=len(data))
+    log.info("blob_pushed", digest=digest, size=size)
     return True
 
 

@@ -170,12 +170,23 @@ class JobExecutor:
             started_at=ctx.started_at,
             eta_model_ms=ctx.eta_model_ms,
         )
+        # Plumb the sampler into the context so handlers can register spawned
+        # subprocess PIDs for per-job resource tracking.
+        ctx.sampler = sampler
         outcome = RunOutcome.SUCCEEDED
         try:
             # Compute nodes: fetch input blobs from the primary before running
             # the handler.  No-op on the primary.
+            #
+            # to_thread: _resolve_input_blobs does a synchronous urllib download
+            # of arbitrarily large blobs. Running it directly would freeze the
+            # event loop for the whole transfer -- heartbeats, the cancel
+            # watcher, and the lease renewals that feed the reaper all stop,
+            # so every other running job's lease expires and those jobs get
+            # reaped and re-run while still executing. Off the loop, the fetch
+            # proceeds while those keep ticking.
             if settings.is_compute_node:
-                _resolve_input_blobs(job.payload)
+                await asyncio.to_thread(_resolve_input_blobs, job.payload)
 
             result = await self._dispatch(spec, ctx)
             # Thread-mode handlers cannot touch the database (Beanie is async),
@@ -236,8 +247,15 @@ class JobExecutor:
                 log.error("job_dead", job_id=job_id, attempts=attempts, error=str(e))
             else:
                 outcome = RunOutcome.FAILED
+                # Epoch-fenced like every other queue write: a worker whose lease
+                # was already taken over must not overwrite the live attempt
+                # count with its stale snapshot + 1, which would let the job
+                # retry past max_attempts (stale count lower) or die short of
+                # it (stale count higher). retry_later fences its own write;
+                # this is the attempts counter it leaves to us.
                 await get_db().jobs.update_one(
-                    {"_id": PydanticObjectId(job_id)}, {"$set": {"attempts": attempts}}
+                    {"_id": PydanticObjectId(job_id), "lease.epoch": epoch},
+                    {"$set": {"attempts": attempts}},
                 )
                 await queue.retry_later(job_id, epoch, attempts, error)
                 log.warning("job_failed_retrying", job_id=job_id, attempts=attempts)
@@ -305,12 +323,12 @@ class JobExecutor:
         started_at: datetime | None = None,
         eta_model_ms: int | None = None,
     ) -> tuple[ResourceSampler, asyncio.Task]:
-        """Sample this worker's own process subtree.
+        """Sample this job's own process subtree.
 
-        The worker's baseline is included, which slightly overstates a job's
-        own footprint -- but subprocess tools are spawned as children of this
-        process, so the subtree is what captures them, and two concurrent jobs
-        remain separable because each tool tree is walked from its own root.
+        The sampler starts rooted at the worker PID as a fallback, but once
+        the handler calls `run_subprocess` the spawned PID is registered via
+        `track_subprocess` and the sampler switches to walking only that
+        subprocess tree -- keeping concurrent jobs' resource usage separable.
 
         `psutil.Process(pid)` is constructed exactly once, here, and reused
         for every poll. `cpu_percent(interval=None)` reports the percentage
@@ -664,6 +682,9 @@ def run_subprocess(
         start_new_session=True,
     )
 
+    if ctx.sampler is not None:
+        ctx.sampler.track_subprocess(proc.pid)
+
     try:
         return _wait_cancellable(ctx, proc)
     finally:
@@ -810,6 +831,9 @@ def _run_streaming(
         # Reading raw bytes and splitting on either `\r` or `\n` ourselves is
         # what lets that kind of bar reach `on_line`/`parser` mid-transfer.
     )
+
+    if ctx.sampler is not None:
+        ctx.sampler.track_subprocess(proc.pid)
 
     log_file = open(log_path, "a", encoding="utf-8", errors="replace") if log_path else None
 

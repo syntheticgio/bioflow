@@ -94,7 +94,9 @@ async def test_tofu_client_captures_and_pins_the_host_key():
         """The `_TofuClient` connect_with_tofu would hand to asyncssh."""
         with patch("asyncssh.connect", AsyncMock(return_value=MagicMock())) as m, \
              patch("asyncssh.import_private_key", MagicMock(return_value="KEY")):
-            await node_ssh.connect_with_tofu("10.0.0.5", 22, "ops", "PEM", stored)
+            await node_ssh.connect_with_tofu(
+                "10.0.0.5", 22, "ops", "PEM", stored_host_key=stored,
+            )
         return m.await_args.kwargs["client_factory"]()
 
     # First use: no stored key, so the server's key is accepted and captured.

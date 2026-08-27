@@ -31,12 +31,23 @@ pub enum RunOutcome {
 /// Runs `up`, then polls `health` until it passes or `max_attempts` polls
 /// elapse. `sleep` is injected so tests do not depend on real wall-clock
 /// time -- the same pattern as `state::start_daemon_and_wait`.
+///
+/// The bundled compose file is refreshed before `up` so the stack always
+/// runs with the launcher's latest compose definitions.
 pub fn run<D: DockerBackend>(
     docker: &D,
     install_dir: &str,
+    bundled_compose_path: &Path,
     max_attempts: u32,
     mut sleep: impl FnMut(),
 ) -> RunOutcome {
+    // Refresh the installed compose file before starting the stack.
+    let compose_dest = Path::new(install_dir).join("docker-compose.yml");
+    if let Err(e) = std::fs::copy(bundled_compose_path, &compose_dest) {
+        return RunOutcome::ComposeFailed {
+            output: format!("Failed to refresh compose file: {e}"),
+        };
+    }
     match docker.up(install_dir) {
         ActionResult::Ok => {}
         ActionResult::Failed { output } => return RunOutcome::ComposeFailed { output },
@@ -104,10 +115,27 @@ pub enum UpdateOutcome {
 /// Update is `docker compose pull` followed by a recreate. This function is
 /// only ever called from an explicit UI action -- there is no automatic or
 /// scheduled path to it anywhere in this module.
-pub fn update<D: DockerBackend>(docker: &D, install_dir: &str) -> UpdateOutcome {
+///
+/// The bundled compose file is refreshed before `up` so new env vars, volume
+/// mounts, or service definitions added in a newer launcher build take effect
+/// even on an existing install.
+pub fn update<D: DockerBackend>(
+    docker: &D,
+    install_dir: &str,
+    bundled_compose_path: &Path,
+) -> UpdateOutcome {
     match docker.pull(install_dir) {
         ActionResult::Ok => {}
         ActionResult::Failed { output } => return UpdateOutcome::PullFailed { output },
+    }
+
+    // Refresh the installed compose file to the launcher's bundled copy so
+    // images and compose file stay in step.
+    let compose_dest = Path::new(install_dir).join("docker-compose.yml");
+    if let Err(e) = std::fs::copy(bundled_compose_path, &compose_dest) {
+        return UpdateOutcome::RecreateFailed {
+            output: format!("Failed to refresh compose file: {e}"),
+        };
     }
 
     match docker.up(install_dir) {
@@ -127,9 +155,13 @@ pub enum UpdateToStageOutcome {
 /// Crossing a stage boundary is an explicit user action (confirmed in the UI),
 /// so this function only runs after the user clicked through a confirmation
 /// dialog — it never runs automatically.
+///
+/// The bundled compose file is refreshed before `up` so the stack always
+/// runs with the launcher's latest compose definitions.
 pub fn update_to_stage<D: DockerBackend>(
     docker: &D,
     install_dir: &str,
+    bundled_compose_path: &Path,
     new_tag: &str,
 ) -> UpdateToStageOutcome {
     // 1. Rewrite BIOFLOW_TAG in .env
@@ -148,7 +180,15 @@ pub fn update_to_stage<D: DockerBackend>(
         ActionResult::Failed { output } => return UpdateToStageOutcome::PullFailed { output },
     }
 
-    // 3. Recreate containers
+    // 3. Refresh the installed compose file to the launcher's bundled copy.
+    let compose_dest = Path::new(install_dir).join("docker-compose.yml");
+    if let Err(e) = std::fs::copy(bundled_compose_path, &compose_dest) {
+        return UpdateToStageOutcome::RecreateFailed {
+            output: format!("Failed to refresh compose file: {e}"),
+        };
+    }
+
+    // 4. Recreate containers
     match docker.up(install_dir) {
         ActionResult::Ok => UpdateToStageOutcome::Updated,
         ActionResult::Failed { output } => UpdateToStageOutcome::RecreateFailed { output },
@@ -164,10 +204,15 @@ mod tests {
     fn run_reaches_running_once_health_passes() {
         let docker = FakeDocker::new();
         // Health flips true on the second poll, simulating a cold start.
+        let dir = tempfile::TempDir::new().unwrap();
+        let compose = dir.path().join("docker-compose.yml");
+        std::fs::write(&compose, "services: {}").unwrap();
+        let dir_str = dir.path().to_string_lossy().to_string();
+
         let mut polls = 0u32;
         docker.healthy.set(false);
 
-        let outcome = run(&docker, "/tmp/install", 5, || {
+        let outcome = run(&docker, &dir_str, &compose, 5, || {
             polls += 1;
             if polls == 1 {
                 docker.healthy.set(true);
@@ -184,8 +229,13 @@ mod tests {
             output: "port already in use".to_string(),
         };
 
+        let dir = tempfile::TempDir::new().unwrap();
+        let compose = dir.path().join("docker-compose.yml");
+        std::fs::write(&compose, "services: {}").unwrap();
+        let dir_str = dir.path().to_string_lossy().to_string();
+
         let mut sleeps = 0u32;
-        let outcome = run(&docker, "/tmp/install", 5, || sleeps += 1);
+        let outcome = run(&docker, &dir_str, &compose, 5, || sleeps += 1);
 
         assert_eq!(
             outcome,
@@ -201,8 +251,13 @@ mod tests {
         let docker = FakeDocker::new();
         docker.healthy.set(false);
 
+        let dir = tempfile::TempDir::new().unwrap();
+        let compose = dir.path().join("docker-compose.yml");
+        std::fs::write(&compose, "services: {}").unwrap();
+        let dir_str = dir.path().to_string_lossy().to_string();
+
         let mut sleeps = 0u32;
-        let outcome = run(&docker, "/tmp/install", 3, || sleeps += 1);
+        let outcome = run(&docker, &dir_str, &compose, 3, || sleeps += 1);
 
         assert_eq!(outcome, RunOutcome::NeverBecameHealthy);
         assert_eq!(sleeps, 2, "sleeps between polls, not after the last one");
@@ -226,7 +281,11 @@ mod tests {
     #[test]
     fn update_pulls_then_recreates_in_order() {
         let docker = FakeDocker::new();
-        assert_eq!(update(&docker, "/tmp/install"), UpdateOutcome::Updated);
+        let dir = tempfile::TempDir::new().unwrap();
+        let compose = dir.path().join("docker-compose.yml");
+        std::fs::write(&compose, "services: {}").unwrap();
+        let dir_str = dir.path().to_string_lossy().to_string();
+        assert_eq!(update(&docker, &dir_str, &compose), UpdateOutcome::Updated);
     }
 
     #[test]
@@ -236,8 +295,13 @@ mod tests {
             output: "offline".to_string(),
         };
 
+        let dir = tempfile::TempDir::new().unwrap();
+        let compose = dir.path().join("docker-compose.yml");
+        std::fs::write(&compose, "services: {}").unwrap();
+        let dir_str = dir.path().to_string_lossy().to_string();
+
         assert_eq!(
-            update(&docker, "/tmp/install"),
+            update(&docker, &dir_str, &compose),
             UpdateOutcome::PullFailed {
                 output: "offline".to_string()
             }
@@ -251,8 +315,13 @@ mod tests {
             output: "disk full".to_string(),
         };
 
+        let dir = tempfile::TempDir::new().unwrap();
+        let compose = dir.path().join("docker-compose.yml");
+        std::fs::write(&compose, "services: {}").unwrap();
+        let dir_str = dir.path().to_string_lossy().to_string();
+
         assert_eq!(
-            update(&docker, "/tmp/install"),
+            update(&docker, &dir_str, &compose),
             UpdateOutcome::RecreateFailed {
                 output: "disk full".to_string()
             }
@@ -263,11 +332,13 @@ mod tests {
     fn update_to_stage_success() {
         let docker = FakeDocker::new();
         let dir = tempfile::TempDir::new().unwrap();
+        let compose = dir.path().join("docker-compose.yml");
+        std::fs::write(&compose, "services: {}").unwrap();
         let env_path = dir.path().join(".env");
         std::fs::write(&env_path, "BIOINFO_HOME=/data\nBIOFLOW_TAG=0.3.0-alpha\n").unwrap();
         let dir_str = dir.path().to_string_lossy().to_string();
 
-        let outcome = update_to_stage(&docker, &dir_str, "0.4.0-alpha");
+        let outcome = update_to_stage(&docker, &dir_str, &compose, "0.4.0-alpha");
         assert_eq!(outcome, UpdateToStageOutcome::Updated);
 
         let new_env = std::fs::read_to_string(&env_path).unwrap();
@@ -282,10 +353,12 @@ mod tests {
             output: "registry unreachable".to_string(),
         };
         let dir = tempfile::TempDir::new().unwrap();
+        let compose = dir.path().join("docker-compose.yml");
+        std::fs::write(&compose, "services: {}").unwrap();
         std::fs::write(dir.path().join(".env"), "BIOFLOW_TAG=0.3.0-alpha\n").unwrap();
         let dir_str = dir.path().to_string_lossy().to_string();
 
-        let outcome = update_to_stage(&docker, &dir_str, "0.4.0-alpha");
+        let outcome = update_to_stage(&docker, &dir_str, &compose, "0.4.0-alpha");
         assert_eq!(
             outcome,
             UpdateToStageOutcome::PullFailed {
@@ -301,10 +374,12 @@ mod tests {
             output: "disk full".to_string(),
         };
         let dir = tempfile::TempDir::new().unwrap();
+        let compose = dir.path().join("docker-compose.yml");
+        std::fs::write(&compose, "services: {}").unwrap();
         std::fs::write(dir.path().join(".env"), "BIOFLOW_TAG=0.3.0-alpha\n").unwrap();
         let dir_str = dir.path().to_string_lossy().to_string();
 
-        let outcome = update_to_stage(&docker, &dir_str, "0.4.0-alpha");
+        let outcome = update_to_stage(&docker, &dir_str, &compose, "0.4.0-alpha");
         assert_eq!(
             outcome,
             UpdateToStageOutcome::RecreateFailed {
@@ -317,9 +392,11 @@ mod tests {
     fn update_to_stage_rewrites_env_before_pull() {
         let docker = FakeDocker::new();
         let dir = tempfile::TempDir::new().unwrap();
+        let compose = dir.path().join("docker-compose.yml");
+        std::fs::write(&compose, "services: {}").unwrap();
         let dir_str = dir.path().to_string_lossy().to_string();
 
-        let outcome = update_to_stage(&docker, &dir_str, "0.4.0-alpha");
+        let outcome = update_to_stage(&docker, &dir_str, &compose, "0.4.0-alpha");
         assert_eq!(outcome, UpdateToStageOutcome::Updated);
 
         let new_env = std::fs::read_to_string(dir.path().join(".env")).unwrap();

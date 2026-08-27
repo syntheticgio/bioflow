@@ -74,8 +74,9 @@ async def connect_with_tofu(
     host: str,
     port: int,
     username: str,
-    private_key: str,
-    stored_host_key: str | None,
+    private_key: str | None = None,
+    password: str | None = None,
+    stored_host_key: str | None = None,
     *,
     timeout_seconds: int = _VERIFY_TIMEOUT_SECONDS,
 ) -> tuple[asyncssh.SSHClientConnection, str]:
@@ -84,6 +85,9 @@ async def connect_with_tofu(
     If `stored_host_key` is provided, it is enforced: the server must present
     a matching key or the connection is refused. If None, the server's key is
     captured on first use and returned so the caller can persist it.
+
+    Authentication uses `private_key` (PEM string) or `password`, never both.
+    At least one must be provided.
 
     Returns (connection, actual_host_key).
 
@@ -100,7 +104,11 @@ async def connect_with_tofu(
     disables host key validation altogether, which would silently turn TOFU
     pinning off instead of enforcing it.
     """
-    key = asyncssh.import_private_key(private_key)
+    if not private_key and not password:
+        raise ValueError("connect_with_tofu: provide private_key or password")
+    if private_key and password:
+        raise ValueError("connect_with_tofu: provide private_key or password, not both")
+
     captured_key: list[str] = []
 
     class _TofuClient(asyncssh.SSHClient):
@@ -122,15 +130,20 @@ async def connect_with_tofu(
             captured_key.append(actual)
             return True
 
+    connect_kw: dict = {
+        "host": host,
+        "port": port,
+        "username": username,
+        "client_factory": _TofuClient,
+    }
+    if private_key:
+        connect_kw["client_keys"] = [asyncssh.import_private_key(private_key)]
+    if password:
+        connect_kw["password"] = password
+
     try:
         conn = await asyncio.wait_for(
-            asyncssh.connect(
-                host,
-                port=port,
-                username=username,
-                client_factory=_TofuClient,
-                client_keys=[key],
-            ),
+            asyncssh.connect(**connect_kw),
             timeout=timeout_seconds,
         )
     except (TimeoutError, asyncssh.Error, ValueError) as e:

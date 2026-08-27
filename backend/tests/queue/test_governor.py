@@ -281,6 +281,46 @@ class TestOtherPressureSignals:
         gov.ewma = self._metrics(disk_free_bytes=0, disk_free_percent=100.0)
         assert gov.evaluate() is AdmissionState.OPEN
 
+    def test_holds_closed_in_the_disk_byte_band(self, gov, clock):
+        """#866: on a small disk the byte and percent open thresholds disagree.
+
+        The governor closes on EITHER the percent OR the byte threshold, but
+        used to reopen as soon as the *percent* cleared its open threshold --
+        ignoring the bytes. So free space sitting in the band between the two
+        byte thresholds (bytes above the close-bytes but below the open-bytes)
+        would flap OPEN/CLOSED every dwell. It must now hold CLOSED until free
+        space clears the higher open-bytes band."""
+        # Establish CLOSED on a genuine byte breach.
+        clock.advance(DWELL_SECONDS + 1)
+        gov.ewma = self._metrics(disk_free_percent=4.0, disk_free_bytes=15 * 1024**3)
+        assert gov.evaluate() is AdmissionState.CLOSED
+
+        # Free space recovers into the band: no longer below the close-bytes
+        # threshold, and the percent clears its open threshold, but the bytes
+        # are still below the higher open-bytes band. Must stay CLOSED.
+        for _ in range(3):
+            clock.advance(DWELL_SECONDS + 1)
+            gov.ewma = self._metrics(
+                disk_free_percent=40.0, disk_free_bytes=25 * 1024**3
+            )
+            assert gov.evaluate() is AdmissionState.CLOSED, (
+                "governor flapped: reopened while free bytes were still in the "
+                "close band"
+            )
+
+    def test_reopens_once_disk_clears_the_open_bytes_band(self, gov, clock):
+        """The mirror of the band test: once free space clears the higher
+        open-bytes threshold, the governor reopens (no deadlock)."""
+        clock.advance(DWELL_SECONDS + 1)
+        gov.ewma = self._metrics(disk_free_percent=4.0, disk_free_bytes=15 * 1024**3)
+        assert gov.evaluate() is AdmissionState.CLOSED
+
+        clock.advance(DWELL_SECONDS + 1)
+        gov.ewma = self._metrics(
+            disk_free_percent=40.0, disk_free_bytes=40 * 1024**3
+        )
+        assert gov.evaluate() is AdmissionState.OPEN
+
 
 class TestEwmaSmoothing:
     def test_single_spike_does_not_move_the_average_far(self, gov, monkeypatch):

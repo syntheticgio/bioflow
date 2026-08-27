@@ -15,6 +15,7 @@ class UploadState(StrEnum):
     ASSEMBLING = "assembling"
     HASHING = "hashing"
     COMPLETED = "completed"
+    FAILED = "failed"
     ABORTED = "aborted"
     EXPIRED = "expired"
 
