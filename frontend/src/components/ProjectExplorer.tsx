@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { api } from "../api/client";
 import { formatBytes, formatKindLabel } from "../lib/format";
+import { clickableRow } from "../lib/clickableRow";
 import { readQuality } from "../lib/readQuality";
 import { recordProjectVisit } from "../lib/recentProjects";
 import { notify } from "../stores/messageStore";
@@ -663,6 +664,10 @@ function FileRow({
     <div
       className={`row ${selected ? "selected" : ""}${inPair ? " row-in-pair" : ""}`}
       onClick={onSelect}
+      // The app's most-used control, and it was mouse-only: no way to reach or
+      // activate it from the keyboard, and no role for a screen reader (#895).
+      {...clickableRow(onSelect)}
+      aria-pressed={selected}
     >
       {/* The grade rides the icon's corner; the word stays in the metadata
           line below, so the tier never depends on reading the mark alone. */}
