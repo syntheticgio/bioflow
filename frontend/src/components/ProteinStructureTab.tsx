@@ -17,15 +17,61 @@ function uniprotUrl(accession: string): string {
   return `https://www.uniprot.org/uniprotkb/${encodeURIComponent(accession)}`;
 }
 
-/** Confidence key rendered below predicted structures. */
+/** The AlphaFold pLDDT bands, in the viewer's own colours.
+ *
+ * These are fixed by the structure viewer -- it colours the model by them --
+ * so they cannot be swapped for theme tokens. What can change is where they
+ * are applied: as *text* colours, #ffff00 was invisible on the light theme's
+ * background and #0055ff nearly unreadable on the dark one, and since the app
+ * follows the system theme one of the two was always broken (#896).
+ */
+const PLDDT_BANDS: { color: string; label: string }[] = [
+  { color: "#0055ff", label: "Very high (90+)" },
+  { color: "#66ccff", label: "Confident (70-90)" },
+  { color: "#ffff00", label: "Low (50-70)" },
+  { color: "#ff6600", label: "Very low (<50)" },
+];
+
+/** Confidence key rendered below predicted structures.
+ *
+ * The band colour is a swatch and the text is `var(--text)`, so legibility no
+ * longer depends on the swatch's contrast against the page. The swatch carries
+ * a thin border for the same reason: a pale band on a pale background would
+ * otherwise have no edge.
+ */
 function PlddtLegend() {
   return (
-    <div style={{ fontSize: 11, color: "var(--text-faint)", marginTop: 4 }}>
-      Confidence:{" "}
-      <span style={{ color: "#0055ff" }}>██ Very high (90+)</span>{" "}
-      <span style={{ color: "#66ccff" }}>██ Confident (70-90)</span>{" "}
-      <span style={{ color: "#ffff00" }}>██ Low (50-70)</span>{" "}
-      <span style={{ color: "#ff6600" }}>██ Very low ({'<'}50)</span>
+    <div
+      style={{
+        fontSize: 11,
+        color: "var(--text)",
+        marginTop: 4,
+        display: "flex",
+        flexWrap: "wrap",
+        alignItems: "center",
+        gap: 10,
+      }}
+    >
+      <span style={{ color: "var(--text-faint)" }}>Confidence:</span>
+      {PLDDT_BANDS.map((band) => (
+        <span
+          key={band.label}
+          style={{ display: "inline-flex", alignItems: "center", gap: 4 }}
+        >
+          <span
+            aria-hidden="true"
+            style={{
+              display: "inline-block",
+              width: 12,
+              height: 12,
+              borderRadius: 2,
+              background: band.color,
+              border: "1px solid var(--border)",
+            }}
+          />
+          {band.label}
+        </span>
+      ))}
     </div>
   );
 }
