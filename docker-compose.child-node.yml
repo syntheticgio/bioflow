@@ -72,6 +72,14 @@ services:
       # Docker socket so the worker can start sibling containers for tools
       # too large to vendor into the image (e.g. DeepVariant).
       - /var/run/docker.sock:/var/run/docker.sock
+    healthcheck:
+      # Same probe the primary's worker uses; see the comment there and
+      # app/queue/liveness.py.
+      test: ["CMD", "/usr/local/bin/python3.12", "-m", "app.queue.liveness"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 60s
     extra_hosts:
       - "host.docker.internal:host-gateway"
     mem_limit: ${BIOFLOW_HARD_MEM_LIMIT:-0}
