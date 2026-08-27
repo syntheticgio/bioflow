@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useState } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api/client";
 import { formatRelative } from "../lib/format";
 import type { MultiqcStatus } from "../api/types";
@@ -61,38 +62,35 @@ export function ProjectQcSummary({
 }: {
   projectId: string;
 }): JSX.Element | null {
-  const [status, setStatus] = useState<MultiqcStatus | null>(null);
   const [launching, setLaunching] = useState(false);
 
-  const load = useCallback(async () => {
-    try {
-      setStatus(await api.multiqcStatus(projectId));
-    } catch {
-      // A panel that cannot read its own state says nothing rather than
-      // showing an error where a report link belongs. The report is a
-      // convenience; the files below it are the page.
-      setStatus(null);
-    }
-  }, [projectId]);
+  // useQuery rather than useState-plus-fetch so this panel is reachable by the
+  // centralised SSE invalidation in hooks/useEvents.ts. On its own local state
+  // it was invisible to that, and a QC job finishing anywhere else in the app
+  // left the stale/Regenerate state unshown until the component remounted --
+  // the one view in a consistently SSE-driven app that behaved differently
+  // (#886). The ["multiqc-status"] key is invalidated on job events there.
+  const { data: status } = useQuery({
+    queryKey: ["multiqc-status", projectId],
+    queryFn: () => api.multiqcStatus(projectId),
+    // A panel that cannot read its own state says nothing rather than showing
+    // an error where a report link belongs. The report is a convenience; the
+    // files below it are the page. `null` on failure preserves that.
+    retry: false,
+    // Poll only while a run is in flight. The job takes about two seconds, so
+    // this is a short burst rather than a standing timer -- and it stops on
+    // its own when `running` goes false, without needing the job id.
+    refetchInterval: (q) =>
+      (q.state.data as MultiqcStatus | undefined)?.running ? 1500 : false,
+  });
 
-  useEffect(() => {
-    void load();
-  }, [load]);
-
-  // Poll only while a run is in flight. The job takes about two seconds, so
-  // this is a short burst rather than a standing timer -- and it stops on
-  // its own when `running` goes false, without needing the job id.
-  useEffect(() => {
-    if (!status?.running) return;
-    const t = setInterval(() => void load(), 1500);
-    return () => clearInterval(t);
-  }, [status?.running, load]);
+  const qc = useQueryClient();
 
   const regenerate = useCallback(async () => {
     setLaunching(true);
     try {
       await api.launchMultiqc(projectId);
-      await load();
+      await qc.invalidateQueries({ queryKey: ["multiqc-status", projectId] });
     } catch {
       // Swallowed deliberately: the next poll reports the real state, and
       // a conflict here means a run is already going -- which is what the
@@ -100,7 +98,7 @@ export function ProjectQcSummary({
     } finally {
       setLaunching(false);
     }
-  }, [projectId, load]);
+  }, [projectId, qc]);
 
   if (!status) return null;
 
