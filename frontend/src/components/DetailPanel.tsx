@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useState } from "react";
+import { Suspense, lazy, useEffect, useState } from "react";
 import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import { api } from "../api/client";
 import { classifyChromosomes } from "../lib/chromosomes";
@@ -24,7 +24,15 @@ import { AiSummary } from "./AiSummary";
 import { AssemblyFacts } from "./AssemblyFacts";
 import { ComparePicker } from "./ComparePicker";
 import { ComparisonView } from "./ComparisonView";
-import { AssemblyGraph } from "./AssemblyGraph";
+// Lazy so cytoscape (~0.5MB) rides its own chunk rather than the main bundle:
+// it backs exactly one panel, on GFA objects only, which most sessions never
+// open (#901). Named export, hence the .then -- lazy() wants a default.
+//
+// Deliberately only this component. routes.tsx avoiding route-level lazy
+// loading is an existing decision and is left alone.
+const AssemblyGraph = lazy(() =>
+  import("./AssemblyGraph").then((m) => ({ default: m.AssemblyGraph })),
+);
 import { ChromosomeStrip } from "./ChromosomeStrip";
 import { FactsColumns } from "./FactsColumns";
 import { QcDialog } from "./QcDialog";
@@ -1581,14 +1589,25 @@ function QcTab({
           {Array.isArray(obj.facts.gfa_segments) &&
             Array.isArray(obj.facts.gfa_links) && (
               <div className="section">
-                <AssemblyGraph
-                  key={obj.id}
-                  objectId={obj.id}
-                  segments={obj.facts.gfa_segments as [string, number][]}
-                  links={
-                    obj.facts.gfa_links as [string, string, string, string][]
+                {/* The graph is the slow part of this panel even when
+                    bundled, so a plain line rather than a spinner: it reads
+                    as the chart loading, not as the page stalling. */}
+                <Suspense
+                  fallback={
+                    <div style={{ fontSize: 11, color: "var(--text-faint)" }}>
+                      Loading assembly graph…
+                    </div>
                   }
-                />
+                >
+                  <AssemblyGraph
+                    key={obj.id}
+                    objectId={obj.id}
+                    segments={obj.facts.gfa_segments as [string, number][]}
+                    links={
+                      obj.facts.gfa_links as [string, string, string, string][]
+                    }
+                  />
+                </Suspense>
               </div>
             )}
 
