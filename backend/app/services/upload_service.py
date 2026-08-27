@@ -258,6 +258,15 @@ async def write_chunk(
             "$set": {
                 f"chunk_digests.{index}": digest,
                 "updated_at": datetime.now(UTC),
+                # The TTL tracks *activity*, not session age. Set once at
+                # creation, it reaped a slow-but-alive upload -- a very large
+                # file, a slow drive, a throttled link -- mid-transfer, taking
+                # its chunks with it (#868). Extended here rather than on a
+                # timer because an accepted chunk is the only evidence the
+                # client is still there; an abandoned upload stops producing
+                # them and is still reaped on schedule.
+                "expires_at": datetime.now(UTC)
+                + timedelta(hours=SESSION_TTL_HOURS),
             },
             **({"$inc": {"received_bytes": len(data)}} if not already else {}),
         },
@@ -358,8 +367,41 @@ async def complete_session(
     return await get_session(session_id, owner=owner), obj, str(job.id) if job else ""
 
 
+# States in which an abort would delete chunks out from under work that is
+# already using them. Assembly reads the staging directory and has already
+# created the DataObject, so aborting mid-flight deleted the chunks the running
+# job was reading and stranded the object behind it (#868).
+_UNABORTABLE = frozenset({UploadState.ASSEMBLING, UploadState.HASHING})
+
+
 async def abort_session(session_id: PydanticObjectId, *, owner: str) -> None:
+    """Abandon an upload and remove its chunks.
+
+    Refused once assembly has started: at that point the upload is no longer
+    the user's to throw away cheaply -- a job is reading the chunks and a
+    DataObject exists. Refusing is better than "handling" it, because the
+    alternative is racing the job for its own inputs, and the wait is bounded
+    (assembly of an upload that has fully arrived is minutes at worst).
+
+    Re-aborting an already aborted, failed or expired session is a no-op rather
+    than an error: abort means "make sure this is gone", so a second click on a
+    stale tab should not fail. A *completed* session is refused, because there
+    the thing to remove is a real DataObject, not an upload.
+    """
     session = await get_session(session_id, owner=owner)
+
+    if session.state in _UNABORTABLE:
+        raise ConflictError(
+            f"Upload session is {session.state.value} and cannot be aborted; "
+            "assembly is already reading its chunks",
+            details={"state": session.state.value},
+        )
+    if session.state is UploadState.COMPLETED:
+        raise ConflictError(
+            "Upload session is already completed; delete the file instead",
+            details={"state": session.state.value},
+        )
+
     await session.set(
         {UploadSession.state: UploadState.ABORTED, UploadSession.updated_at: datetime.now(UTC)}
     )

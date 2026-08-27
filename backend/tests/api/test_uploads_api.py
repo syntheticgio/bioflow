@@ -15,6 +15,7 @@ it, since this process has no Redis.
 """
 
 import hashlib
+from datetime import UTC, datetime, timedelta
 
 import pytest
 import pytest_asyncio
@@ -448,3 +449,117 @@ class TestMissingChunksCap:
 
         assert session["total_chunks"] == 900
         assert len(session["missing_chunks"]) == 500
+
+
+class TestSessionTtlTracksActivity:
+    """expires_at was set once at creation and never moved, so an upload that
+    was slow but demonstrably alive -- a very large file, a slow drive, a
+    throttled link -- crossed the 24h mark and was TTL-deleted mid-transfer,
+    with its chunks reaped underneath it (#868)."""
+
+    async def test_an_accepted_chunk_extends_the_session(
+        self, client, two_profiles, a_project
+    ):
+        session = await _open_session(client, two_profiles["a_headers"], a_project)
+        before = (await UploadSession.get(session["id"])).expires_at
+
+        # Backdate the expiry to just short of the deadline, as a slow upload's
+        # would be after most of a day.
+        stored = await UploadSession.get(session["id"])
+        stored.expires_at = datetime.now(UTC) + timedelta(minutes=1)
+        await stored.save()
+
+        resp = await client.put(
+            f"/api/v1/uploads/{session['id']}/chunks/0",
+            content=b"ACGTACGTAC",
+            headers=two_profiles["a_headers"],
+        )
+        assert resp.status_code == 200, resp.text
+
+        after = (await UploadSession.get(session["id"])).expires_at
+        # Pushed back out to a full TTL from now, not left near the deadline.
+        assert after > datetime.now(UTC) + timedelta(
+            hours=upload_service.SESSION_TTL_HOURS - 1
+        )
+        assert after >= before - timedelta(seconds=5)
+
+    async def test_a_resent_chunk_also_extends_it(
+        self, client, two_profiles, a_project
+    ):
+        """A client retrying a chunk is still alive. The extension must not
+        hang off the not-already-received branch, which a resend skips."""
+        session = await _open_session(client, two_profiles["a_headers"], a_project)
+        for _ in range(2):
+            resp = await client.put(
+                f"/api/v1/uploads/{session['id']}/chunks/0",
+                content=b"ACGTACGTAC",
+                headers=two_profiles["a_headers"],
+            )
+            assert resp.status_code == 200, resp.text
+
+        stored = await UploadSession.get(session["id"])
+        stored.expires_at = datetime.now(UTC) + timedelta(minutes=1)
+        await stored.save()
+
+        await client.put(
+            f"/api/v1/uploads/{session['id']}/chunks/0",
+            content=b"ACGTACGTAC",
+            headers=two_profiles["a_headers"],
+        )
+
+        after = (await UploadSession.get(session["id"])).expires_at
+        assert after > datetime.now(UTC) + timedelta(
+            hours=upload_service.SESSION_TTL_HOURS - 1
+        )
+
+
+class TestAbortDuringAssembly:
+    """abort_session had no state check, so aborting during assembly deleted
+    the chunks out from under the running job and stranded the DataObject it
+    had already created (#868)."""
+
+    @pytest.mark.parametrize("state", [UploadState.ASSEMBLING, UploadState.HASHING])
+    async def test_abort_is_refused_once_assembly_has_started(
+        self, client, two_profiles, a_project, _home, state
+    ):
+        session = await _open_session(client, two_profiles["a_headers"], a_project)
+        stored = await UploadSession.get(session["id"])
+        stored.state = state
+        await stored.save()
+        staging = _home / "staging" / session["id"]
+
+        resp = await client.delete(
+            f"/api/v1/uploads/{session['id']}", headers=two_profiles["a_headers"]
+        )
+
+        assert resp.status_code == 409, resp.text
+        # The point of the refusal: the job's inputs are still there.
+        assert staging.is_dir()
+        assert (await UploadSession.get(session["id"])).state is state
+
+    async def test_re_aborting_an_aborted_session_is_a_no_op(
+        self, client, two_profiles, a_project
+    ):
+        """Abort means "make sure this is gone", so a second click on a stale
+        tab must not fail."""
+        session = await _open_session(client, two_profiles["a_headers"], a_project)
+        for _ in range(2):
+            resp = await client.delete(
+                f"/api/v1/uploads/{session['id']}", headers=two_profiles["a_headers"]
+            )
+            assert resp.status_code == 204, resp.text
+
+    async def test_abort_still_works_while_the_session_is_open(
+        self, client, two_profiles, a_project, _home
+    ):
+        """The ordinary cancel must keep working -- a refusal that catches the
+        normal case is not a fix."""
+        session = await _open_session(client, two_profiles["a_headers"], a_project)
+        staging = _home / "staging" / session["id"]
+
+        resp = await client.delete(
+            f"/api/v1/uploads/{session['id']}", headers=two_profiles["a_headers"]
+        )
+
+        assert resp.status_code == 204, resp.text
+        assert not staging.exists()
