@@ -1066,6 +1066,14 @@ a.btn {
   color: var(--text-dim);
 }
 
+.footer-message-slot {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
 .footer-message {
   flex: 1;
   min-width: 0;
@@ -1084,6 +1092,36 @@ a.btn {
 
 .footer-message.warn {
   color: var(--warn);
+}
+
+.footer-message-dismiss {
+  flex-shrink: 0;
+  width: 18px;
+  height: 18px;
+  display: grid;
+  place-items: center;
+  border: none;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--text-dim);
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.footer-message-dismiss:hover {
+  background: var(--bg-hover);
+  color: var(--text);
+}
+
+.footer-message-count {
+  margin-left: 2px;
+  padding: 0 5px;
+  border-radius: 8px;
+  background: var(--bg-hover);
+  color: var(--text-dim);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
 }
 
 .dot {
@@ -2124,6 +2162,122 @@ a.btn {
 
 .queue-panel-foot a:hover {
   text-decoration: underline;
+}
+
+/* --- Messages log panel (#890) --- */
+.messages-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+}
+
+.messages-panel {
+  position: fixed;
+  right: 12px;
+  bottom: 44px;
+  width: 380px;
+  max-width: calc(100vw - 24px);
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: 0 8px 28px rgb(0 0 0 / 35%);
+  z-index: 41;
+  display: flex;
+  flex-direction: column;
+  animation: queue-rise 0.16s ease-out;
+}
+
+.messages-panel-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 8px 8px 12px;
+  border-bottom: 1px solid var(--border);
+}
+
+.messages-panel-counts {
+  font-size: 11px;
+  color: var(--text-faint);
+  font-variant-numeric: tabular-nums;
+}
+
+.messages-clear {
+  margin-left: auto;
+  border: none;
+  background: transparent;
+  color: var(--text-dim);
+  font-size: 11px;
+  cursor: pointer;
+  padding: 2px 6px;
+  border-radius: var(--radius);
+}
+
+.messages-clear:hover:not(:disabled) {
+  background: var(--bg-hover);
+  color: var(--text);
+}
+
+.messages-clear:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.messages-rows {
+  overflow-y: auto;
+  /* Bounded so the log cannot outgrow the window; older rows scroll. */
+  max-height: 52vh;
+}
+
+.message-row {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--border);
+  font-size: 12px;
+}
+
+.message-row:last-child {
+  border-bottom: none;
+}
+
+.message-row.error {
+  color: var(--error);
+}
+
+.message-row.warn {
+  color: var(--warn);
+}
+
+.message-row.success {
+  color: var(--success);
+}
+
+.message-row-marker {
+  flex-shrink: 0;
+  width: 12px;
+  text-align: center;
+  font-weight: 600;
+}
+
+.message-row-text {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.message-row-time {
+  flex-shrink: 0;
+  font-size: 11px;
+  color: var(--text-faint);
+  font-variant-numeric: tabular-nums;
+}
+
+.messages-empty {
+  padding: 18px 12px;
+  text-align: center;
+  color: var(--text-faint);
+  font-size: 12px;
 }
 
 /* --- Project Q&A chat drawer --- */
