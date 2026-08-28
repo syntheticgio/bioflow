@@ -34,15 +34,6 @@ router = APIRouter(prefix="/nodes", tags=["nodes"])
 # A worker whose last heartbeat is older than this is considered offline.
 _OFFLINE_THRESHOLD_SECONDS = 60
 
-# Allowlists for the two ProvisionRequest fields that are interpolated raw
-# into a quoted heredoc executed over SSH on the remote node. Only
-# shell-inert characters: no newline (which would end the heredoc early),
-# no metacharacters. Dots are allowed in node names because the suggested
-# name is derived from the hostname, which is typically dotted.
-_NODE_NAME_RE = re.compile(r"^[A-Za-z0-9._-]{1,64}$")
-_STORAGE_LOCATION_RE = re.compile(r"^/[A-Za-z0-9._/-]{0,511}$")
-
-
 # --- Provisioning request/response models ---
 
 # `node_name` and `storage_location` are interpolated into commands that run on
@@ -59,7 +50,11 @@ _STORAGE_LOCATION_RE = re.compile(r"^/[A-Za-z0-9._/-]{0,511}$")
 # here, in the model, is what makes that unreachable rather than escaped-so-far:
 # every path out of this request is covered at once, and a new call site cannot
 # forget to quote.
-_NODE_NAME_RE = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
+# Dots are allowed because the suggested name is derived from the hostname
+# ({platform.node()}-node), which on most machines is dotted -- rejecting the
+# UI's own default would be a worse bug than the one being closed. A dot
+# cannot terminate a heredoc, so permitting it costs nothing here.
+_NODE_NAME_RE = re.compile(r"^[A-Za-z0-9._-]{1,64}$")
 # An absolute path of ordinary path segments. Deliberately no shell
 # metacharacters, no whitespace, no "..", and no trailing slash -- this is a
 # storage directory being named, not an arbitrary string.
@@ -106,7 +101,7 @@ class ProvisionRequest(BaseModel):
         if not _NODE_NAME_RE.match(v):
             raise ValueError(
                 "node_name must be 1-64 characters of letters, digits, "
-                "underscore or hyphen"
+                "dot, underscore or hyphen"
             )
         return v
 
@@ -127,29 +122,6 @@ class ProvisionRequest(BaseModel):
             raise ValueError("Either password or private_key must be provided")
         if self.password and self.private_key:
             raise ValueError("Provide exactly one of password or private_key, not both")
-        return self
-
-    @model_validator(mode="after")
-    def _check_shell_safe(self) -> "ProvisionRequest":
-        # node_name and storage_location are interpolated raw into a quoted
-        # heredoc that is executed over SSH on the remote node. The quoted
-        # delimiter stops $-expansion but not delimiter injection: a value
-        # containing a newline followed by the delimiter (HERMESEOF) ends the
-        # heredoc early and everything after it runs as shell on the remote
-        # machine. An allowlist of shell-inert characters is the fix -- it
-        # cannot be widened by accident the way a blocklist of metacharacters
-        # can. Dots are allowed in node_name because the suggested name is
-        # derived from the hostname ({platform.node()}-node), which on most
-        # machines is dotted; a dot cannot terminate a heredoc.
-        if not _NODE_NAME_RE.fullmatch(self.node_name):
-            raise ValueError(
-                "node_name may contain only letters, digits, '-', '_', or '.'"
-            )
-        if not _STORAGE_LOCATION_RE.fullmatch(self.storage_location):
-            raise ValueError(
-                "storage_location must be an absolute path without special"
-                " characters"
-            )
         return self
 
 

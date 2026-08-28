@@ -245,7 +245,7 @@ export function SettingsNodes() {
 // server refuses anything outside these shapes; matching here is only so the user
 // gets a sentence naming the field instead of a raw 422. The server remains the
 // authority -- this is a courtesy, not the check.
-const NODE_NAME_RE = /^[A-Za-z0-9_-]{1,64}$/;
+const NODE_NAME_RE = /^[A-Za-z0-9._-]{1,64}$/;
 const STORAGE_LOCATION_RE = /^(\/[A-Za-z0-9._-]+)+$/;
 
 type AuthTab = "password" | "key";
@@ -312,7 +312,7 @@ function ProvisionForm({
     }
     if (!NODE_NAME_RE.test(fields.nodeName.trim())) {
       setError(
-        "Node name may use only letters, digits, underscore and hyphen (max 64 characters).",
+        "Node name may use only letters, digits, dot, underscore and hyphen (max 64 characters).",
       );
       return;
     }
