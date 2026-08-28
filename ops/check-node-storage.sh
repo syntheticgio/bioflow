@@ -160,13 +160,32 @@ if not_shared:
     for n in not_shared:
         print(f"  {n['node_id']}: mount the primary's BIOINFO_HOME at {n['storage_location']}")
 
+cannot_check = [
+    n for n in nodes if n["outcome"] in ("unreachable", "not_probeable")
+]
+
 if not needs_path and not not_shared:
     print()
-    print("Every node that could be probed reads the primary's storage.")
+    if checked:
+        print("Every node that could be probed reads the primary's storage.")
+    else:
+        # Never let "nothing was checked" read as an all-clear. Zero probed
+        # and zero problems found is a vacuous pass, and reporting it as
+        # success is the false reassurance this whole feature exists to
+        # remove.
+        print("No node could be checked, so nothing was established.")
+    if cannot_check:
+        print(
+            f"{len(cannot_check)} node(s) could not be checked at all and are "
+            "still unverified."
+        )
 
 # 0 only when the fleet is fully established. A run that still has questions
 # outstanding exits non-zero so a caller in a script can tell.
-sys.exit(0 if not needs_path and not not_shared else 4)
+# 0 only when every node was actually probed and every answer was good. A
+# node nobody could reach leaves a real question open, so it is not a clean
+# exit even though there is nothing the operator can do about it from here.
+sys.exit(0 if not needs_path and not not_shared and not cannot_check else 4)
 PY
 STATUS=$?
 set -e

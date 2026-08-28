@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 
-import { nodeStatusBadge, storageStatus, updateAffordance } from "./nodeStaleness";
+import {
+  nodeStatusBadge,
+  storageStatus,
+  sweepOutcome,
+  updateAffordance,
+} from "./nodeStaleness";
 
 const base = { imageDigest: "sha256:a", updatable: true, primaryDigest: "sha256:a" };
 
@@ -162,5 +167,36 @@ describe("nodeStatusBadge", () => {
     expect(
       nodeStatusBadge({ ...node, enrollment: "unknown", workers: 1 }).label,
     ).toBe("Online");
+  });
+});
+
+describe("sweepOutcome", () => {
+  it("offers a path input only for the node that needs one", () => {
+    expect(sweepOutcome("no_recorded_path").needsPath).toBe(true);
+    for (const outcome of ["shared", "not_shared", "unreachable", "not_probeable"]) {
+      expect(sweepOutcome(outcome).needsPath).toBe(false);
+    }
+  });
+
+  it("never presents a node it could not check as a finding", () => {
+    // The whole point of the tri-state: "we could not ask" must not read as
+    // "we asked and the answer was no". Both of these leave the node's
+    // recorded status untouched, so the label must not claim otherwise.
+    for (const outcome of ["unreachable", "not_probeable"]) {
+      expect(sweepOutcome(outcome).label).toBe("Cannot check");
+      expect(sweepOutcome(outcome).kind).not.toBe("not-shared");
+    }
+  });
+
+  it("treats an outcome it does not recognise as unknown, not as negative", () => {
+    // A sixth outcome added server-side must not render as "Not shared" here
+    // -- an unrecognised value is the one case where guessing is worst.
+    expect(sweepOutcome("something_new").kind).toBe("unknown");
+    expect(sweepOutcome("something_new").needsPath).toBe(false);
+  });
+
+  it("distinguishes the two real answers", () => {
+    expect(sweepOutcome("shared").kind).toBe("shared");
+    expect(sweepOutcome("not_shared").kind).toBe("not-shared");
   });
 });

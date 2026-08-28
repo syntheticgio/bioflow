@@ -252,6 +252,29 @@ async def test_self_enrolled_node_is_not_probeable_and_untouched():
 
 
 @asyncio_module_loop
+async def test_undecryptable_key_is_reported_as_its_own_problem():
+    """A key that will not decrypt is not the same as having no key.
+
+    `crypto.decrypt` returns None for both a missing Fernet key file and a
+    corrupt token, and collapsing that into the self-enrolled case sends the
+    operator to inspect a node when the actual fault is on the primary. Found
+    while exercising this against a seeded deployment.
+    """
+    node = await _node(storage_shared=True)
+
+    with _patched() as (connect, _):
+        with patch.object(svc.crypto, "decrypt", MagicMock(return_value=None)):
+            outcomes = await svc.sweep_node_storage()
+
+    connect.assert_not_called()
+    assert [o.outcome for o in outcomes] == [svc.NOT_PROBEABLE]
+    assert "decrypt" in outcomes[0].detail
+    # Still not a finding, so still nothing written.
+    reloaded = await Node.find_one(Node.node_id == node.node_id)
+    assert reloaded.storage_shared is True
+
+
+@asyncio_module_loop
 async def test_unreachable_node_is_untouched():
     """R5. An offline machine is not a verified negative."""
     checked = datetime(2026, 8, 1, tzinfo=UTC)
