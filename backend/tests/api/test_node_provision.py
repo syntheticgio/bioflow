@@ -422,6 +422,113 @@ def test_provision_request_accepts_key_only():
     assert req.password is None
 
 
+# ---- node_name / storage_location shell-safety (#870) ----
+#
+# Both fields are interpolated raw into a quoted heredoc (`cat > .env <<
+# 'HERMESEOF' ... HERMESEOF`) that is executed over SSH on the remote node.
+# A value carrying a newline followed by `HERMESEOF` terminates the heredoc
+# early and everything after it runs as shell. These tests pin the allowlist
+# so a regression to raw interpolation fails at the model boundary, not at
+# the remote shell.
+
+def _valid_provision_overrides(storage_location="/data/scratch"):
+    """Base fields for a valid ProvisionRequest, except node_name -- every
+    test supplies its own node_name explicitly so the allowlist is always
+    exercised."""
+    return dict(host="1.2.3.4", username="ops", password="pw")
+
+
+def test_provision_request_rejects_newline_in_node_name():
+    from app.api.v1.nodes import ProvisionRequest
+
+    with pytest.raises(ValueError, match="node_name"):
+        ProvisionRequest(
+            **_valid_provision_overrides(),
+            node_name="node\nHERMESEOF\necho pwned",
+        )
+
+
+def test_provision_request_rejects_metacharacters_in_node_name():
+    from app.api.v1.nodes import ProvisionRequest
+
+    for bad in ("node;rm -rf /", "node|curl evil", "$(cmd)", "`cmd`", "node with space"):
+        with pytest.raises(ValueError, match="node_name"):
+            ProvisionRequest(
+                **_valid_provision_overrides(), node_name=bad
+            )
+
+
+def test_provision_request_accepts_dotted_host_style_node_name():
+    """The suggested name is {platform.node()}-node; on most machines the
+    hostname is dotted, so a bare [A-Za-z0-9_-] allowlist would reject the
+    UI's own default."""
+    from app.api.v1.nodes import ProvisionRequest
+
+    req = ProvisionRequest(
+        **_valid_provision_overrides(), node_name="MacStudio.local-node"
+    )
+    assert req.node_name == "MacStudio.local-node"
+
+
+def test_provision_request_rejects_newline_in_storage_location():
+    from app.api.v1.nodes import ProvisionRequest
+
+    with pytest.raises(ValueError, match="storage_location"):
+        ProvisionRequest(
+            **_valid_provision_overrides(),
+            node_name="child-node",
+            storage_location="/data/scratch\nHERMESEOF\nwhoami",
+        )
+
+
+def test_provision_request_rejects_non_absolute_storage_location():
+    from app.api.v1.nodes import ProvisionRequest
+
+    for bad in ("data/scratch", "./scratch", "../data", "", "relative"):
+        with pytest.raises(ValueError, match="storage_location"):
+            ProvisionRequest(
+                **_valid_provision_overrides(),
+                node_name="child-node",
+                storage_location=bad,
+            )
+
+
+def test_provision_request_rejects_metacharacters_in_storage_location():
+    from app.api.v1.nodes import ProvisionRequest
+
+    for bad in ("/data;rm -rf /", "/data/scr atch", "/data/$(cmd)"):
+        with pytest.raises(ValueError, match="storage_location"):
+            ProvisionRequest(
+                **_valid_provision_overrides(),
+                node_name="child-node",
+                storage_location=bad,
+            )
+
+
+def test_provision_request_accepts_nested_storage_location():
+    from app.api.v1.nodes import ProvisionRequest
+
+    req = ProvisionRequest(
+        **_valid_provision_overrides(),
+        node_name="child-node",
+        storage_location="/mnt/55e2/scratch",
+    )
+    assert req.storage_location == "/mnt/55e2/scratch"
+
+
+@asyncio_module_loop
+async def test_provision_rejects_injection_node_name_with_422(client):
+    """The endpoint (not just the model) must reject the injection before any
+    background task is scheduled."""
+    with patch("app.api.v1.nodes._provision_node", new_callable=lambda: AsyncMock()) as mock_prov:
+        res = await client.post("/nodes/provision", json={
+            "host": "1.2.3.4", "username": "ops", "password": "pw",
+            "node_name": "node\nHERMESEOF\necho pwned",
+        })
+    assert res.status_code == 422
+    mock_prov.assert_not_awaited()
+
+
 # ---- orphan cleanup ----
 
 @asyncio_module_loop

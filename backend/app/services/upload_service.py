@@ -389,6 +389,16 @@ async def abort_session(session_id: PydanticObjectId, *, owner: str) -> None:
     the thing to remove is a real DataObject, not an upload.
     """
     session = await get_session(session_id, owner=owner)
+    if session.state is UploadState.ASSEMBLING:
+        # Assembly is a live job reading the chunks out of staging. Deleting them
+        # now would corrupt the object being built and strand the DataObject
+        # complete_session already created, so a user asking to abort an
+        # in-progress upload gets a clear refusal instead of a half-deleted one.
+        raise ConflictError(
+            "Upload session is assembling; aborting would delete chunks the "
+            "assembly job is reading",
+            details={"state": session.state.value},
+        )
 
     if session.state in _UNABORTABLE:
         raise ConflictError(

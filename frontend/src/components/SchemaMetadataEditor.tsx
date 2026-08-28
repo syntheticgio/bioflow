@@ -30,6 +30,23 @@ interface Props {
 type Custom = { key: string; value: string };
 
 /**
+ * React key for the editor instance, owned by the parent (DetailPanel) but
+ * defined here because the resync guard that makes this key necessary lives
+ * here: the effect below bails while dirty, so without the id in the key a
+ * second file of the same role would keep showing the first file's unsaved
+ * edits and save would write file A's values onto file B. The role stays in
+ * the key so a conversion of the same file still remounts -- its schema
+ * changes underneath, and in-progress edits belong to the previous role's
+ * fields.
+ */
+export function metadataEditorKey(
+  objectId: string,
+  role: ObjectRole | null,
+): string {
+  return `${objectId}:${role ?? "none"}`;
+}
+
+/**
  * Metadata editor driven by the format's schema.
  *
  * Suggested fields get proper inputs (select, number with unit, date); anything

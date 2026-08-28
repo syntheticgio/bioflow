@@ -34,7 +34,6 @@ router = APIRouter(prefix="/nodes", tags=["nodes"])
 # A worker whose last heartbeat is older than this is considered offline.
 _OFFLINE_THRESHOLD_SECONDS = 60
 
-
 # --- Provisioning request/response models ---
 
 # `node_name` and `storage_location` are interpolated into commands that run on
@@ -51,7 +50,11 @@ _OFFLINE_THRESHOLD_SECONDS = 60
 # here, in the model, is what makes that unreachable rather than escaped-so-far:
 # every path out of this request is covered at once, and a new call site cannot
 # forget to quote.
-_NODE_NAME_RE = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
+# Dots are allowed because the suggested name is derived from the hostname
+# ({platform.node()}-node), which on most machines is dotted -- rejecting the
+# UI's own default would be a worse bug than the one being closed. A dot
+# cannot terminate a heredoc, so permitting it costs nothing here.
+_NODE_NAME_RE = re.compile(r"^[A-Za-z0-9._-]{1,64}$")
 # An absolute path of ordinary path segments. Deliberately no shell
 # metacharacters, no whitespace, no "..", and no trailing slash -- this is a
 # storage directory being named, not an arbitrary string.
@@ -98,7 +101,7 @@ class ProvisionRequest(BaseModel):
         if not _NODE_NAME_RE.match(v):
             raise ValueError(
                 "node_name must be 1-64 characters of letters, digits, "
-                "underscore or hyphen"
+                "dot, underscore or hyphen"
             )
         return v
 
