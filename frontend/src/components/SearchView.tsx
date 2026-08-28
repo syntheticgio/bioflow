@@ -1,8 +1,10 @@
-import { useQuery } from "@tanstack/react-query";
+import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { api } from "../api/client";
 import { formatBytes, formatKindLabel } from "../lib/format";
+import { clickableRow } from "../lib/clickableRow";
+import { useDebounced } from "../lib/useDebounced";
 import { BulkEditBar } from "./BulkEditBar";
 
 /**
@@ -19,6 +21,11 @@ export function SearchView() {
   const [lastClicked, setLastClicked] = useState<string | null>(null);
 
   const q = params.get("q") ?? "";
+  // The URL stays the source of truth -- that is what makes a search
+  // shareable and survive reload -- but the *fetch* is debounced, so typing
+  // no longer fires one request per keystroke (#889). The input still renders
+  // `q` directly, so it stays responsive.
+  const debouncedQ = useDebounced(q, 250);
   const kinds = params.getAll("kind");
   const tags = params.getAll("tag");
   const metas = params.getAll("meta");
@@ -27,10 +34,32 @@ export function SearchView() {
   // results and the facet counts so the filters reflect what is actually there.
   const projectId = params.get("project_id") ?? undefined;
 
-  const { data, isLoading } = useQuery({
-    queryKey: ["search", q, kinds, tags, metas, projectId],
-    queryFn: () =>
-      api.searchObjects({ q, kind: kinds, tag: tags, meta: metas, projectId }),
+  // Infinite rather than a single page: the footer reported the true total
+  // while the list stopped at 100, so anything past that was unreachable with
+  // nothing but a parenthetical saying so. `next_cursor` was already in the
+  // response type and simply never consumed (#889).
+  const {
+    data,
+    isLoading,
+    fetchNextPage,
+    hasNextPage,
+    isFetchingNextPage,
+  } = useInfiniteQuery({
+    queryKey: ["search", debouncedQ, kinds, tags, metas, projectId],
+    queryFn: ({ pageParam }) =>
+      api.searchObjects({
+        q: debouncedQ,
+        kind: kinds,
+        tag: tags,
+        meta: metas,
+        projectId,
+        cursor: pageParam,
+      }),
+    initialPageParam: undefined as string | undefined,
+    // `has_more` rather than a non-null cursor alone: the server sets both, and
+    // treating a stray cursor on a final page as "more" would loop.
+    getNextPageParam: (last) =>
+      last.has_more ? (last.next_cursor ?? undefined) : undefined,
   });
 
   const { data: project } = useQuery({
@@ -61,7 +90,16 @@ export function SearchView() {
       for (const v of next) p.append(key, v);
     });
 
-  const objects = data?.objects ?? [];
+  const objects = data?.pages.flatMap((p) => p.objects) ?? [];
+  // Every page reports the same total, so the first is as good as any.
+  const total = data?.pages[0]?.total ?? 0;
+
+  /** What an unmodified click (or an Enter/Space) does: select just this row. */
+  const selectOnly = (id: string) => {
+    setSelected(new Set());
+    setLastClicked(id);
+    update((p) => p.set("sel", `object:${id}`));
+  };
 
   const clickRow = (id: string, e: React.MouseEvent) => {
     // Shift-click extends the selection, matching every file browser.
@@ -82,9 +120,7 @@ export function SearchView() {
       setLastClicked(id);
       return;
     }
-    setSelected(new Set());
-    setLastClicked(id);
-    update((p) => p.set("sel", `object:${id}`));
+    selectOnly(id);
   };
 
   return (
@@ -172,8 +208,8 @@ export function SearchView() {
           }}
         >
           <span>
-            {isLoading ? "Searching…" : `${data?.total ?? 0} result(s)`}
-            {data?.has_more && " (showing first 100)"}
+            {isLoading ? "Searching…" : `${total} result(s)`}
+            {!isLoading && objects.length < total && ` (showing ${objects.length})`}
           </span>
           {objects.length > 0 && (
             <button
@@ -209,6 +245,11 @@ export function SearchView() {
                 : undefined
             }
             onClick={(e) => clickRow(o.id, e)}
+            // Keyboard activation is the plain select: shift- and meta-click
+            // extend or toggle the selection and have no keyboard equivalent
+            // here, so Enter/Space does what an unmodified click does (#895).
+            {...clickableRow(() => selectOnly(o.id))}
+            aria-pressed={sel === `object:${o.id}`}
           >
             <input
               type="checkbox"
@@ -236,6 +277,26 @@ export function SearchView() {
             </div>
           </div>
         ))}
+
+        {hasNextPage && (
+          <button
+            type="button"
+            className="btn-text"
+            style={{
+              display: "block",
+              width: "100%",
+              padding: "8px 12px",
+              fontSize: 12,
+              color: "var(--accent)",
+            }}
+            onClick={() => void fetchNextPage()}
+            disabled={isFetchingNextPage}
+          >
+            {isFetchingNextPage
+              ? "Loading…"
+              : `Load more (${total - objects.length} remaining)`}
+          </button>
+        )}
       </div>
     </div>
   );

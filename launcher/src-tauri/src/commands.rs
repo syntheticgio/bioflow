@@ -19,6 +19,7 @@ use crate::setup::{self, InstallError, InstallInputs, PortValidation, SetupDefau
 use crate::setup::node::{self as node_setup, NodeInstallError, NodeInstallInputs};
 use crate::remote::{self, SshCreds, SshResult};
 use crate::state::{self, InstallInfo, LauncherState};
+use crate::release_notes::{self, GitHubReleasesClient, Release};
 use crate::update_check::{self, DockerImageInspector, GhcrClient, VersionOptions};
 
 /// The two images the design spec's "Changes required in this repository"
@@ -1048,6 +1049,60 @@ pub async fn list_version_options() -> VersionOptions {
     })
     .await
     .unwrap_or_else(|_| update_check::VersionOptions::offline())
+}
+
+/// What the Release notes dialog renders: every published BioFlow release,
+/// newest first, plus which of them corresponds to the stack the user is
+/// actually running (the entry the dialog opens on).
+///
+/// `selected_tag` is resolved here rather than in the UI so the
+/// tag -> release mapping lives in exactly one place. It is `None` when the
+/// running version has no published release -- a stage image can reach GHCR
+/// before its GitHub release exists -- and the UI opens on the newest entry
+/// instead.
+///
+/// Fails silently, like `list_version_options`: an unreachable API yields an
+/// empty list, and the dialog renders a link to GitHub rather than an error.
+///
+/// async/spawn_blocking because the fetch is a real HTTP call and must not
+/// stall the IPC/UI thread.
+#[tauri::command]
+pub async fn list_release_notes(app: State<'_, LauncherApp>) -> Result<ReleaseNotesDto, ()> {
+    // Read the running stack's version from `.env`, the same source of truth
+    // current_settings reads, so the dialog agrees with the Settings dropdown
+    // even if the UI's copy were somehow stale.
+    let env_contents = install_dir_str(&app)
+        .map(|dir| std::fs::read_to_string(Path::new(&dir).join(".env")).unwrap_or_default())
+        .unwrap_or_default();
+    let bioflow_tag =
+        parse_bioflow_tag(&env_contents).unwrap_or_else(|| DEFAULT_BIOFLOW_TAG.to_string());
+    let developer_repo = parse_developer_repo(&env_contents);
+
+    let releases = tauri::async_runtime::spawn_blocking(|| {
+        release_notes::list_release_notes(&GitHubReleasesClient::default())
+    })
+    .await
+    .unwrap_or_default();
+
+    let selected_tag =
+        release_notes::release_for_stack(&releases, &bioflow_tag, developer_repo.as_deref())
+            .map(|r| r.tag.clone());
+
+    Ok(ReleaseNotesDto {
+        releases,
+        selected_tag,
+    })
+}
+
+/// Mirrors types.ts `ReleaseNotes`.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReleaseNotesDto {
+    /// Newest first, the launcher's own releases already filtered out.
+    pub releases: Vec<Release>,
+    /// The tag of the release matching the running stack, or `None` when it
+    /// has no published release.
+    pub selected_tag: Option<String>,
 }
 
 /// Rebuilds the locally-built `:local` images and restarts the stack against

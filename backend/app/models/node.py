@@ -46,6 +46,32 @@ class Node(Document):
     # before this field existed -- the next connection captures it.
     host_key: str | None = None
 
+    # Whether this node reads the primary's BIOINFO_HOME, established by the
+    # round-trip probe in services/node_storage_probe.py -- never inferred
+    # from a matching path, a mount table, or the fact that the node's jobs
+    # have been working.
+    #
+    # `storage_shared` is deliberately tri-state, and `None` is load-bearing:
+    # it means *never probed*, distinct from `False`, *probed and not shared*.
+    # Do not "simplify" it to `bool = False`. Every node enrolled before this
+    # field existed reads as None, and both real answers would be wrong for
+    # them -- True blesses a node nobody checked, False silently withdraws
+    # work from nodes that have been running it correctly against
+    # hand-configured storage. #845 treats None as not-shared when deciding
+    # what to run (the safe direction under uncertainty); #846 exists to find
+    # these nodes and probe them into a real answer, which it can only do
+    # while "nobody asked yet" is still recorded.
+    #
+    # `storage_location` is the node's own BIOINFO_HOME as the node sees it.
+    # The user types it at provisioning; before this it was rendered into the
+    # node's .env and then forgotten, so the primary had no record of where
+    # any node's storage lived and nothing to re-probe against.
+    storage_location: str | None = None
+    storage_shared: bool | None = None
+    # Null if and only if `storage_shared` is None: the three are written
+    # together or not at all.
+    storage_checked_at: datetime | None = None
+
     # What this node is running, from the worker heartbeat. Persisted here
     # rather than only in Redis because Redis entries expire with the worker,
     # and an offline node's last-known version is exactly what someone

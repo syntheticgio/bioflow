@@ -15,7 +15,7 @@ class _Response:
     def __init__(self, payload: dict):
         self._payload = payload
 
-    def read(self):
+    def read(self, amount=None):
         return json.dumps(self._payload).encode()
 
     def __enter__(self):
@@ -38,7 +38,7 @@ def capture(monkeypatch):
         seen["body"] = json.loads(request.data)
         return _Response(seen.get("_respond_with", {"choices": [{"message": {"content": "hi"}}]}))
 
-    monkeypatch.setattr(adapters.urllib.request, "urlopen", _capture)
+    monkeypatch.setattr(adapters, "_urlopen", _capture)
     return seen
 
 
@@ -94,7 +94,7 @@ class TestParsingToolCalls:
             ]
         }
         monkeypatch.setattr(
-            adapters.urllib.request, "urlopen", lambda *a, **k: _Response(payload)
+            adapters, "_urlopen", lambda *a, **k: _Response(payload)
         )
         result = adapter.complete(
             system="s", user="u", model="m", max_tokens=100, tools=[SEARCH_TOOL]
@@ -129,7 +129,7 @@ class TestParsingToolCalls:
             ]
         }
         monkeypatch.setattr(
-            adapters.urllib.request, "urlopen", lambda *a, **k: _Response(payload)
+            adapters, "_urlopen", lambda *a, **k: _Response(payload)
         )
         result = adapter.complete(
             system="s", user="u", model="m", max_tokens=100, tools=[SEARCH_TOOL]
@@ -157,7 +157,7 @@ class TestParsingToolCalls:
             ]
         }
         monkeypatch.setattr(
-            adapters.urllib.request, "urlopen", lambda *a, **k: _Response(payload)
+            adapters, "_urlopen", lambda *a, **k: _Response(payload)
         )
         result = adapter.complete(
             system="s", user="u", model="m", max_tokens=100, tools=[SEARCH_TOOL]
@@ -170,7 +170,7 @@ class TestParsingToolCalls:
     ):
         payload = {"choices": [{"message": {"content": "there are 3 files"}}]}
         monkeypatch.setattr(
-            adapters.urllib.request, "urlopen", lambda *a, **k: _Response(payload)
+            adapters, "_urlopen", lambda *a, **k: _Response(payload)
         )
         result = adapter.complete(
             system="s", user="u", model="m", max_tokens=100, tools=[SEARCH_TOOL]
@@ -182,7 +182,7 @@ class TestParsingToolCalls:
         """A response can carry `tool_calls: []` rather than omitting the key."""
         payload = {"choices": [{"message": {"content": "an answer", "tool_calls": []}}]}
         monkeypatch.setattr(
-            adapters.urllib.request, "urlopen", lambda *a, **k: _Response(payload)
+            adapters, "_urlopen", lambda *a, **k: _Response(payload)
         )
         result = adapter.complete(
             system="s", user="u", model="m", max_tokens=100, tools=[SEARCH_TOOL]

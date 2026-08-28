@@ -14,7 +14,7 @@ class _Response:
     def __init__(self, payload):
         self._payload = payload
 
-    def read(self):
+    def read(self, amount=None):
         return json.dumps(self._payload).encode()
 
     def __enter__(self):
@@ -34,7 +34,7 @@ class TestOpenAiCompat:
             ]
         }
         monkeypatch.setattr(
-            adapters.urllib.request, "urlopen", lambda *a, **k: _Response(payload)
+            adapters, "_urlopen", lambda *a, **k: _Response(payload)
         )
 
         result = adapter.list_models_with_context()
@@ -49,7 +49,7 @@ class TestOpenAiCompat:
 
             raise urllib.error.HTTPError("http://x", 500, "err", {}, None)
 
-        monkeypatch.setattr(adapters.urllib.request, "urlopen", raise_it)
+        monkeypatch.setattr(adapters, "_urlopen", raise_it)
 
         result = adapter.list_models_with_context()
 
@@ -58,7 +58,7 @@ class TestOpenAiCompat:
     def test_empty_data_is_an_empty_dict_not_a_failure(self, monkeypatch):
         adapter = OpenAICompatAdapter(base_url="http://x", api_key=None)
         monkeypatch.setattr(
-            adapters.urllib.request, "urlopen", lambda *a, **k: _Response({"data": []})
+            adapters, "_urlopen", lambda *a, **k: _Response({"data": []})
         )
 
         assert adapter.list_models_with_context() == {}
@@ -71,7 +71,7 @@ class TestAnthropic:
         adapter = AnthropicAdapter(base_url="https://api.anthropic.com", api_key="k")
         payload = {"data": [{"id": "claude-x"}, {"id": "claude-y"}]}
         monkeypatch.setattr(
-            adapters.urllib.request, "urlopen", lambda *a, **k: _Response(payload)
+            adapters, "_urlopen", lambda *a, **k: _Response(payload)
         )
 
         result = adapter.list_models_with_context()
@@ -86,7 +86,7 @@ class TestAnthropic:
 
             raise urllib.error.HTTPError("http://x", 401, "err", {}, None)
 
-        monkeypatch.setattr(adapters.urllib.request, "urlopen", raise_it)
+        monkeypatch.setattr(adapters, "_urlopen", raise_it)
 
         result = adapter.list_models_with_context()
 

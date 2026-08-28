@@ -8,7 +8,12 @@ import type {
   NodeProvisionStatus,
   NodeUpdateStatus,
 } from "../api/types";
-import { updateAffordance, versionLabel } from "../lib/nodeStaleness";
+import {
+  nodeStatusBadge,
+  storageStatus,
+  updateAffordance,
+  versionLabel,
+} from "../lib/nodeStaleness";
 import { SettingsNav } from "./SettingsNav";
 
 export function SettingsNodes() {
@@ -67,6 +72,21 @@ export function SettingsNodes() {
     onSuccess: (data) => {
       setUpdateTaskId(data.task_id);
       setPendingUpdate(null);
+    },
+  });
+
+  /* ── Revoke control (same singleton-dialog shape as the update above) ── */
+
+  const [pendingRevoke, setPendingRevoke] = useState<NodeInfo | null>(null);
+
+  const revoke = useMutation({
+    mutationFn: (nodeId: string) => api.revokeNode(nodeId),
+    onSuccess: () => {
+      setPendingRevoke(null);
+      // The badge is derived from the server's `enrollment`, so a refetch is
+      // what makes the revocation visible -- here and equally for a node
+      // revoked from somewhere else.
+      nodes.refetch();
     },
   });
 
@@ -143,6 +163,7 @@ export function SettingsNodes() {
               <tr>
                 <th>Node</th>
                 <th>Status</th>
+                <th>Storage</th>
                 <th>Version</th>
                 <th>Workers</th>
                 <th>Running</th>
@@ -161,6 +182,10 @@ export function SettingsNodes() {
                   onUpdateClick={(n) => {
                     setUpdateTaskId(null);
                     setPendingUpdate(n);
+                  }}
+                  onRevokeClick={(n) => {
+                    revoke.reset();
+                    setPendingRevoke(n);
                   }}
                 />
               ))}
@@ -186,6 +211,22 @@ export function SettingsNodes() {
           />
         )}
 
+        {pendingRevoke && (
+          <RevokeConfirmDialog
+            node={pendingRevoke}
+            submitting={revoke.isPending}
+            error={
+              revoke.isError
+                ? revoke.error instanceof ApiRequestError
+                  ? revoke.error.message
+                  : "Could not revoke the node."
+                : null
+            }
+            onConfirm={() => revoke.mutate(pendingRevoke.node_id)}
+            onCancel={() => setPendingRevoke(null)}
+          />
+        )}
+
         {updateTaskId && updateStatus.data && (
           <UpdateProgress
             status={updateStatus.data}
@@ -198,6 +239,14 @@ export function SettingsNodes() {
 }
 
 /* ── Provision form ── */
+
+// Mirrors the server's ProvisionRequest validators (backend/app/api/v1/nodes.py).
+// Both values are interpolated into commands that run on the remote node, so the
+// server refuses anything outside these shapes; matching here is only so the user
+// gets a sentence naming the field instead of a raw 422. The server remains the
+// authority -- this is a courtesy, not the check.
+const NODE_NAME_RE = /^[A-Za-z0-9_-]{1,64}$/;
+const STORAGE_LOCATION_RE = /^(\/[A-Za-z0-9._-]+)+$/;
 
 type AuthTab = "password" | "key";
 
@@ -259,6 +308,21 @@ function ProvisionForm({
     }
     if (!fields.nodeName.trim()) {
       setError("Node name is required.");
+      return;
+    }
+    if (!NODE_NAME_RE.test(fields.nodeName.trim())) {
+      setError(
+        "Node name may use only letters, digits, underscore and hyphen (max 64 characters).",
+      );
+      return;
+    }
+    if (
+      !STORAGE_LOCATION_RE.test(fields.storage.trim()) ||
+      fields.storage.trim().split("/").includes("..")
+    ) {
+      setError(
+        "Storage location must be an absolute path using letters, digits, dot, underscore and hyphen — no spaces or trailing slash.",
+      );
       return;
     }
 
@@ -491,10 +555,12 @@ function NodeRow({
   node,
   primaryDigest,
   onUpdateClick,
+  onRevokeClick,
 }: {
   node: NodeInfo;
   primaryDigest: string | null;
   onUpdateClick: (node: NodeInfo) => void;
+  onRevokeClick: (node: NodeInfo) => void;
 }) {
   const memMb = node.reserved.mem_mb;
   const memLabel =
@@ -502,28 +568,40 @@ function NodeRow({
       ? `${(memMb / 1024).toFixed(1)} GB`
       : `${memMb} MB`;
 
+  const storage = storageStatus({
+    storageShared: node.storage_shared,
+    storageLocation: node.storage_location,
+  });
+
   const affordance = updateAffordance({
     imageDigest: node.image_digest,
     updatable: node.updatable,
     primaryDigest,
+    enrollment: node.enrollment,
   });
+  const badge = nodeStatusBadge({
+    enrollment: node.enrollment,
+    online: node.online,
+    workers: node.workers,
+    nodeId: node.node_id,
+  });
+  const revoked = node.enrollment === "revoked";
 
   return (
-    <tr className={node.online ? "" : "offline"}>
+    <tr className={node.online && !revoked ? "" : "offline"}>
       <td className="nodes-name">{node.node_id}</td>
       <td>
-        {node.enrollment === "unknown" && node.workers === 0 ? (
-          <span
-            className="nodes-status unknown"
-            title={`Jobs are queued for "${node.node_id}", but no node with that name has ever enrolled. Check the target node name used at launch.`}
-          >
-            Unknown
-          </span>
-        ) : (
-          <span className={`nodes-status ${node.online ? "online" : ""}`}>
-            {node.online ? "Online" : "Offline"}
-          </span>
-        )}
+        <span className={`nodes-status ${badge.modifier}`} title={badge.title}>
+          {badge.label}
+        </span>
+      </td>
+      <td>
+        <span
+          className={`nodes-storage ${storage.kind}`}
+          title={storage.title}
+        >
+          {storage.label}
+        </span>
       </td>
       <td>{versionLabel(node.version)}</td>
       <td>{node.online_workers}/{node.workers}</td>
@@ -551,8 +629,71 @@ function NodeRow({
             Update
           </button>
         )}
+        {!revoked && (
+          <button
+            type="button"
+            className="btn btn-secondary nodes-revoke"
+            onClick={() => onRevokeClick(node)}
+            title={`Stop "${node.node_id}" claiming jobs. Does not uninstall anything.`}
+          >
+            Revoke
+          </button>
+        )}
       </td>
     </tr>
+  );
+}
+
+/* ── Revoke confirmation dialog ── */
+
+function RevokeConfirmDialog({
+  node,
+  submitting,
+  error,
+  onConfirm,
+  onCancel,
+}: {
+  node: NodeInfo;
+  submitting: boolean;
+  error: string | null;
+  onConfirm: () => void;
+  onCancel: () => void;
+}) {
+  return (
+    <div className="provision-form">
+      <div className="provision-form-title">Revoke {node.node_id}</div>
+      {error && <div className="provision-error">{error}</div>}
+      <p className="provision-form-desc">
+        {node.node_id} will stop claiming new jobs once its workers next check
+        in. Nothing is uninstalled: the containers keep running and BioFlow
+        stays on the machine.
+      </p>
+      {node.running_jobs > 0 && (
+        <p className="settings-hint settings-hint-warn">
+          {node.running_jobs} job{node.running_jobs === 1 ? " is" : "s are"}{" "}
+          running on this node. Revoking does not stop{" "}
+          {node.running_jobs === 1 ? "it" : "them"}.
+        </p>
+      )}
+      <div className="provision-form-actions">
+        <button
+          type="button"
+          className="btn btn-primary"
+          disabled={submitting}
+          onClick={onConfirm}
+        >
+          {submitting ? "Revoking…" : "Revoke"}
+        </button>
+        <button
+          type="button"
+          className="btn btn-secondary"
+          disabled={submitting}
+          onClick={onCancel}
+        >
+          Cancel
+        </button>
+      </div>
+    </div>
   );
 }
 

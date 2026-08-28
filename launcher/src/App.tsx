@@ -4,6 +4,7 @@ import { LAUNCHER_VERSION_LABEL } from "./version";
 import { checkForUpdate, currentSettings, listVersionOptions, openBioFlow, otherStacks, runStack, status, stopStack, updateStack, updateToStage } from "./commands";
 import { MigrateStorage } from "./MigrateStorage";
 import { PrefetchStep } from "./PrefetchStep";
+import { ReleaseNotes } from "./ReleaseNotes";
 import { Settings } from "./Settings";
 import { SetupWizard } from "./SetupWizard";
 import { NodeScreen } from "./NodeScreen";
@@ -85,6 +86,7 @@ export function App() {
   const [busy, setBusy] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [showMigrateStorage, setShowMigrateStorage] = useState(false);
+  const [showReleaseNotes, setShowReleaseNotes] = useState(false);
   const [updateAvailable, setUpdateAvailable] = useState(false);
   const [versionOptions, setVersionOptions] = useState<VersionOptions | null>(null);
   // Worktree stacks running alongside this one (#320). Empty on an ordinary
@@ -345,6 +347,20 @@ export function App() {
               Migrate storage location…
             </a>
           )}
+          {/* Unlike Settings, this is offered in every state including
+              DockerUnavailable: reading what changed in a version needs no
+              working stack, and is exactly what a user whose Docker is
+              broken may be trying to find out. */}
+          <a
+            href="#release-notes"
+            className="masthead-settings-link"
+            onClick={(e) => {
+              e.preventDefault();
+              setShowReleaseNotes(true);
+            }}
+          >
+            Release notes
+          </a>
         </div>
         <div className="masthead-rule-thick" />
 
@@ -539,6 +555,8 @@ export function App() {
           if you want to stop it.
         </div>
       )}
+
+      {showReleaseNotes && <ReleaseNotes onClose={() => setShowReleaseNotes(false)} />}
 
       {showSettings && (
         <Settings

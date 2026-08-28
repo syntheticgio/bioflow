@@ -382,6 +382,16 @@ textarea:focus {
   background: var(--bg-hover);
 }
 
+/* Rows are keyboard-activatable (see lib/clickableRow.ts), so focus has to be
+   visible -- otherwise tabbing through the list moves an invisible cursor.
+   Inset like .tool-row's, since a row sits flush against the panel edge and an
+   outward outline would be clipped. */
+.row:focus-visible,
+.protein-row:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
 .row.selected {
   background: var(--bg-elevated);
   box-shadow: inset 4px 0 0 var(--accent);
@@ -5704,6 +5714,41 @@ table.software-matrix thead th.software-matrix-corner {
 .nodes-status.unknown {
   background: color-mix(in srgb, var(--warn) 15%, transparent);
   color: var(--warn);
+}
+
+/* Storage status. Three states, deliberately: "unchecked" is dim rather than
+   coloured because it is an absence of information, not a fault -- colouring
+   it like "not shared" would report a finding nobody made. */
+.nodes-storage {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 10px;
+  font-size: 11px;
+  font-weight: 600;
+  background: var(--bg-panel);
+  color: var(--text-dim);
+  cursor: help;
+}
+
+.nodes-storage.shared {
+  background: color-mix(in srgb, var(--success) 15%, transparent);
+  color: var(--success);
+}
+
+.nodes-storage.not-shared {
+  background: color-mix(in srgb, var(--warn) 15%, transparent);
+  color: var(--warn);
+}
+
+/* Revoked reads as a state the user chose, not a fault -- but it has to beat
+   Online at a glance, because a revoked node can still be heartbeating. */
+.nodes-status.revoked {
+  background: color-mix(in srgb, var(--error) 15%, transparent);
+  color: var(--error);
+}
+
+.nodes-revoke {
+  margin-left: 6px;
 }
 
 /* --- Node provisioning form --- */

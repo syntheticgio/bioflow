@@ -31,6 +31,12 @@
 # the time those commits reach main they are published history.
 name: Commit check
 
+# Release-stage branches included for the same reason build-check.yml lists
+# them (#818): an alpha- or beta-stage fix goes in by PR into alpha/X.Y.Z or
+# beta/X.Y.Z, and its subject reaches CHANGELOG.md exactly like one landing on
+# main. Gated on `main` alone, a mistyped subject on a release branch was
+# unvalidated at the one moment it could still be reworded -- on the branch
+# whose notes are about to be published.
 on:
   pull_request:
     branches: [main, "alpha/**", "beta/**", "release/**"]
@@ -41,8 +47,8 @@ jobs:
     name: Commit subjects are Conventional Commits
     runs-on: ubuntu-latest
     steps:
-      # The full PR range is needed, not just the tip: every commit that lands
-      # on main is a commit git-cliff will read.
+      # The full PR range is needed, not just the tip: every commit the PR
+      # lands is a commit git-cliff will read.
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0

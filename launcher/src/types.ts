@@ -46,3 +46,29 @@ export interface VersionOptions {
   alpha: string | null;
   beta: string | null;
 }
+
+/** One published BioFlow release, as the Release notes dialog needs it.
+ *  Mirrors release_notes.rs Release. */
+export interface Release {
+  /** The git tag, `v`-prefixed as GitHub reports it: "v0.6.0-beta". */
+  tag: string;
+  /** The release's display title: "BioFlow 0.6.0-beta". */
+  name: string;
+  /** ISO-8601 as GitHub returns it; formatPublished renders it. */
+  publishedAt: string;
+  /** The release body, GitHub-flavoured markdown. */
+  body: string;
+  prerelease: boolean;
+}
+
+/** What the Release notes dialog loads on open. Mirrors commands.rs
+ *  ReleaseNotesDto. An empty `releases` means the API could not be
+ *  reached -- the dialog links out to GitHub rather than showing an error. */
+export interface ReleaseNotes {
+  /** Newest first, the launcher's own releases already filtered out. */
+  releases: Release[];
+  /** The tag matching the running stack, resolved by the backend from
+   *  `BIOFLOW_TAG`. Null when the running version has no published
+   *  release. */
+  selectedTag: string | null;
+}

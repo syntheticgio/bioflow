@@ -10,19 +10,61 @@
 
 name: bioflow-child
 
+# Same reasoning as docker-compose.yml's anchor: the json-file driver grows
+# without bound, and a child node is exactly the machine nobody is watching.
+x-logging: &default-logging
+  driver: "json-file"
+  options:
+    max-size: "10m"
+    max-file: "5"
+
 services:
   worker:
     image: ghcr.io/syntheticgio/bioflow-backend:${BIOFLOW_TAG:-latest}
+    logging: *default-logging
     # The image's PATH puts Medaka's venv first (it must stay there: the
     # polish jobs call `medaka` by bare name), so a bare `python` is Medaka's
     # interpreter and has none of the app's dependencies -- the worker died
     # on `import pydantic` before it could claim a job. Name the interpreter
     # explicitly, exactly as the primary stack does.
     command: ["/usr/local/bin/python3.12", "-m", "app.worker_main"]
+    # Kept in step with docker-compose.yml's x-backend-env anchor by hand: this
+    # file is a *separate stack* (`name: bioflow-child`) and is copied to the
+    # child machine on its own, so it cannot reference that anchor. Every
+    # variable the worker reads therefore has to be repeated here, and one
+    # left out fails at the point of use rather than at startup -- which is
+    # exactly how the missing BIOINFO_HOME_HOST and NCBI_SETTINGS were found
+    # (#880). When adding a variable to that anchor, add it here too.
     environment:
       MONGO_URL: ${MONGO_URL}
       REDIS_URL: ${REDIS_URL}
       BIOINFO_HOME: /data
+      BIOINFO_REGISTER_ROOTS: ${BIOINFO_REGISTER_ROOTS:-/data}
+      # Must match the primary's: this is the lease the worker renews and the
+      # reaper measures against, so a child on a different value drifts in and
+      # out of being considered stalled.
+      LEASE_TTL_SECONDS: ${LEASE_TTL_SECONDS:-30}
+      SRA_ENRICHMENT_ENABLED: ${SRA_ENRICHMENT_ENABLED:-true}
+      # The SRA Toolkit writes its configuration and cache here rather than
+      # under $HOME, which in a container is often unwritable -- and its
+      # failure message ("cannot open configuration") does not point at the
+      # cause. Must agree with Settings.ncbi_settings_path, which derives the
+      # same path from BIOINFO_HOME.
+      NCBI_SETTINGS: /data/tmp/ncbi/user-settings.mkfg
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      # The *host* path behind /data, for the sibling containers the socket
+      # below exists to start. A sibling gets its mounts from the host, so it
+      # needs the host path under a name that cannot be confused with the
+      # container path this process already has. Without it every on-demand
+      # tool launch (DeepVariant and any future one) dies in variant_runner.
+      #
+      # Same expression as the volume below, so the two cannot disagree about
+      # which host directory /data is. Provisioning always writes an absolute
+      # BIOINFO_HOME into the node's .env, so the ./data fallback is only
+      # reached by a hand-rolled install -- where a relative path would give a
+      # sibling container an unusable mount, which is why a real deployment
+      # must set it.
+      BIOINFO_HOME_HOST: ${BIOINFO_HOME:-./data}
       WORKER_MAX_CONCURRENT: ${WORKER_MAX_CONCURRENT:-4}
       WORKER_NODE_ID: ${WORKER_NODE_ID:?WORKER_NODE_ID must be set}
     volumes:
@@ -30,6 +72,14 @@ services:
       # Docker socket so the worker can start sibling containers for tools
       # too large to vendor into the image (e.g. DeepVariant).
       - /var/run/docker.sock:/var/run/docker.sock
+    healthcheck:
+      # Same probe the primary's worker uses; see the comment there and
+      # app/queue/liveness.py.
+      test: ["CMD", "/usr/local/bin/python3.12", "-m", "app.queue.liveness"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 60s
     extra_hosts:
       - "host.docker.internal:host-gateway"
     mem_limit: ${BIOFLOW_HARD_MEM_LIMIT:-0}

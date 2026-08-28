@@ -1,5 +1,20 @@
 name: biopipe
 
+# Docker's json-file driver grows without bound by default, and nothing here
+# set a logging key -- so a long-running install filled the Docker VM's disk
+# with its own logs. That failure is both reachable and hard to read: this
+# project's own incident notes record disk exhaustion presenting as a
+# crash-looping Mongo, with nothing naming the real cause (#877).
+#
+# 10MB x 5 is ~50MB per service, ample for the debugging this project does.
+# Rotation discards old logs, so anything wanted for forensics has to be
+# copied out before it rolls.
+x-logging: &default-logging
+  driver: "json-file"
+  options:
+    max-size: "10m"
+    max-file: "5"
+
 x-backend-env: &backend-env
   MONGO_URL: ${MONGO_URL:-mongodb://mongo:27017/biopipe?replicaSet=rs0&directConnection=true}
   REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
@@ -25,6 +40,7 @@ x-backend-env: &backend-env
 services:
   mongo:
     image: mongo:7
+    logging: *default-logging
     command: ["--replSet", "rs0", "--bind_ip_all"]
     ports:
       # The host-side publish honours BIND_ADDRESS like api and web do: a
@@ -64,6 +80,7 @@ services:
 
   redis:
     image: redis:7-alpine
+    logging: *default-logging
     command: ["redis-server", "/usr/local/etc/redis/redis.conf"]
     ports:
       # Same reasoning as the mongo publish above: a loopback install must
@@ -85,6 +102,7 @@ services:
     # context, one published image, referenced twice. Building them separately
     # would push ~8GB of identical layers twice.
     image: ghcr.io/syntheticgio/bioflow-backend:${BIOFLOW_TAG:-latest}
+    logging: *default-logging
     command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
     environment:
       <<: *backend-env
@@ -109,6 +127,12 @@ services:
       # reported success (#803). Unset is safe -- provisioning refuses to
       # enroll a node rather than guessing.
       PRIMARY_HOSTNAME: ${PRIMARY_HOSTNAME:-}
+      # Extra Host header values the API will answer to, comma-separated.
+      # Local and LAN names are accepted without any configuration; this is
+      # only for a deliberate public or reverse-proxied name, which the host
+      # guard would otherwise refuse as a possible DNS-rebinding attempt.
+      # See backend/app/middleware/host_guard.py.
+      BIOFLOW_ALLOWED_HOSTS: ${BIOFLOW_ALLOWED_HOSTS:-}
     volumes:
       - ${BIOINFO_HOME:-/Volumes/FastDataExtension/BioinfoHelper}:/data
       # The api never *runs* a sibling container -- the worker does -- but it
@@ -158,6 +182,7 @@ services:
 
   worker:
     image: ghcr.io/syntheticgio/bioflow-backend:${BIOFLOW_TAG:-latest}
+    logging: *default-logging
     # The image's PATH puts Medaka's venv first (it must stay there: the
     # polish jobs call `medaka` by bare name), so a bare `python` is Medaka's
     # interpreter and has none of the app's dependencies -- the worker died
@@ -205,12 +230,29 @@ services:
     mem_limit: ${BIOFLOW_HARD_MEM_LIMIT:-0}
     deploy:
       replicas: ${WORKER_REPLICAS:-2}
+    healthcheck:
+      # The service that actually runs jobs was the one with no healthcheck, so
+      # a wedged worker reported "Up" and nothing noticed -- including the
+      # launcher's health panel, which reads compose healthchecks (#878).
+      #
+      # Reads the file _heartbeat_loop touches each beat. See
+      # app/queue/liveness.py for why a file rather than a port or a Redis key,
+      # and why the staleness threshold is a multiple of the heartbeat interval
+      # rather than a fixed number of seconds. The heartbeat is independent of
+      # job execution, so a worker part-way through a multi-hour job stays
+      # healthy; start_period covers the gap before the first beat.
+      test: ["CMD", "/usr/local/bin/python3.12", "-m", "app.queue.liveness"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 60s
     # The default 10s would SIGKILL mid-drain, stranding leases. Drain is 60s.
     stop_grace_period: 90s
     restart: unless-stopped
 
   web:
     image: ghcr.io/syntheticgio/bioflow-web:${BIOFLOW_TAG:-latest}
+    logging: *default-logging
     ports:
       - "${BIND_ADDRESS:-0.0.0.0}:${WEB_PORT:-5173}:80"
     depends_on:

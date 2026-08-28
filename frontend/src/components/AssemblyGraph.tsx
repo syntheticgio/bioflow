@@ -21,6 +21,17 @@ interface Props {
   segments: [string, number][];
   /** `[from, fromOrient, to, toOrient]`, from `gfa_links`. */
   links: [string, string, string, string][];
+  /**
+   * The object these segments came from. Salts the rebuild signature so two
+   * different assemblies with equal segment and link counts cannot be mistaken
+   * for the same graph (#894).
+   *
+   * Optional because the only caller also passes `key={obj.id}`, which remounts
+   * and makes this redundant there. It exists so the guard is correct on its
+   * own terms: a future call site without that key would otherwise leave the
+   * previous assembly on screen with nothing indicating it.
+   */
+  objectId?: string;
 }
 
 /** Node diameter in px, scaled by segment length against the largest one. */
@@ -31,7 +42,7 @@ function radiusFor(length: number, max: number): number {
   return 8 + Math.sqrt(length / max) * 34;
 }
 
-export function AssemblyGraph({ segments, links }: Props) {
+export function AssemblyGraph({ segments, links, objectId }: Props) {
   const box = useRef<HTMLDivElement>(null);
 
   // A caller that builds `segments`/`links` inline (e.g. mapping over
@@ -40,9 +51,13 @@ export function AssemblyGraph({ segments, links }: Props) {
   // the graph changed, and rebuilding cytoscape -- including the
   // 400-iteration cose layout -- is expensive, so the effect below keys off
   // this cheap length-based signature instead of the arrays themselves.
+  // Salted with the object id: the counts alone made two different assemblies
+  // with equal segment and link counts indistinguishable, so switching between
+  // them left the first graph on screen (#894). The counts stay -- comparing
+  // the arrays themselves is what this guard exists to avoid.
   const signature = useMemo(
-    () => `${segments.length}:${links.length}`,
-    [segments, links],
+    () => `${objectId ?? ""}:${segments.length}:${links.length}`,
+    [objectId, segments, links],
   );
 
   useEffect(() => {

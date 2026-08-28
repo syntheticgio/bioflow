@@ -213,10 +213,15 @@ def host_path_for(
     host_root = host_root if host_root is not None else settings.bioinfo_home_host
 
     if not host_root:
+        # Names the file for *this* machine's role. A child node runs from
+        # docker-compose.child-node.yml and has no override file, so the old
+        # advice sent the one person who could hit this to a file that does not
+        # exist there (#880).
         raise PermanentError(
             "BIOINFO_HOME_HOST is not set, so the host path for "
-            f"{path} cannot be determined. Set it in docker-compose.override.yml "
-            "to the same host directory BIOINFO_HOME is mounted from.",
+            f"{path} cannot be determined. Set it to the same host directory "
+            "BIOINFO_HOME is mounted from -- in docker-compose.override.yml on "
+            "the primary, or in this node's .env if this is a compute node.",
             details={"path": str(path)},
         )
 

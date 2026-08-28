@@ -5,6 +5,7 @@ its failure silently destroys a credential.
 import pytest
 import pytest_asyncio
 
+from app.errors import ValidationError
 from app.models.ai import AiProvider, AiRouting, FailureReason, ProviderKind, TaskSlot
 from app.services.ai import crypto, provider_service
 
@@ -94,6 +95,121 @@ class TestUpdate:
         from bson import ObjectId
 
         assert await provider_service.update(str(ObjectId()), {"model": "m"}) is None
+
+
+class TestBaseUrlChangeInvalidatesTheKey:
+    """A key is a credential for a host, so it must not follow the host (#870/#872).
+
+    The API is unauthenticated, so without this anyone who could reach it --
+    including a DNS-rebinding page -- could repoint an existing provider at a
+    host they control and have the stored key delivered there in an
+    Authorization header on the next completion.
+    """
+
+    async def test_changing_the_base_url_drops_the_stored_key(self):
+        p = await provider_service.create(
+            name="A", kind=ProviderKind.ANTHROPIC, base_url="https://api.anthropic.com",
+            model="m", api_key="sk-ant-original123",
+        )
+        updated = await provider_service.update(
+            str(p.id), {"base_url": "http://attacker.example:8080"}
+        )
+        assert updated.api_key_enc is None
+        assert updated.key_hint is None
+        # The move itself still happened -- this invalidates the credential, it
+        # does not refuse the edit.
+        assert updated.base_url == "http://attacker.example:8080"
+
+    async def test_a_key_re_entered_in_the_same_request_is_kept(self):
+        """The ordinary "move it and re-key it in one submit" edit. A key typed
+        in this request was typed for the *new* host, so dropping it would make
+        the fix unusable rather than safe."""
+        p = await provider_service.create(
+            name="A", kind=ProviderKind.OPENAI_COMPAT, base_url="http://old:1",
+            model="m", api_key="sk-old-000000000",
+        )
+        updated = await provider_service.update(
+            str(p.id), {"base_url": "http://new:2", "api_key": "sk-new-111111111"}
+        )
+        assert crypto.decrypt(updated.api_key_enc) == "sk-new-111111111"
+        assert updated.base_url == "http://new:2"
+
+    async def test_resubmitting_the_same_base_url_preserves_the_key(self):
+        """The form submits every field, so an unrelated edit resends base_url
+        unchanged. Treating that as a move would wipe the credential on every
+        rename -- the exact regression test_omitted_key_preserves_the_stored_one
+        exists to prevent, arriving by a different door."""
+        p = await provider_service.create(
+            name="A", kind=ProviderKind.ANTHROPIC, base_url="https://x",
+            model="m", api_key="sk-ant-original123",
+        )
+        updated = await provider_service.update(
+            str(p.id), {"base_url": "https://x", "name": "Renamed"}
+        )
+        assert crypto.decrypt(updated.api_key_enc) == "sk-ant-original123"
+        assert updated.name == "Renamed"
+
+    async def test_a_keyless_provider_moves_without_incident(self):
+        """A local Ollama has no key; the drop branch must be a no-op there."""
+        p = await provider_service.create(
+            name="Local", kind=ProviderKind.OPENAI_COMPAT,
+            base_url="http://host.docker.internal:11434", model="m", api_key=None,
+        )
+        updated = await provider_service.update(
+            str(p.id), {"base_url": "http://host.docker.internal:8080"}
+        )
+        assert updated.api_key_enc is None
+        assert updated.base_url == "http://host.docker.internal:8080"
+
+
+class TestBaseUrlValidation:
+    """Only the scheme is constrained. Pointing a provider at your own local
+    model server is the intended feature, so a host allowlist would break the
+    thing the setting is for."""
+
+    @pytest.mark.parametrize(
+        "base_url",
+        [
+            "http://localhost:11434",
+            "http://127.0.0.1:11434",
+            "http://host.docker.internal:11434",
+            "https://api.anthropic.com",
+            "http://192.168.1.5:8080",
+        ],
+    )
+    async def test_ordinary_and_local_urls_are_accepted(self, base_url):
+        p = await provider_service.create(
+            name="A", kind=ProviderKind.OPENAI_COMPAT, base_url=base_url,
+            model="m", api_key=None,
+        )
+        assert p.base_url == base_url
+
+    @pytest.mark.parametrize(
+        "base_url",
+        [
+            "file:///etc/passwd",  # urllib would read the container's filesystem
+            "gopher://evil:70/_x",  # classic SSRF protocol smuggling
+            "ftp://evil/x",
+            "http://",  # scheme but no host
+            "not-a-url",
+            "",
+        ],
+    )
+    async def test_bad_urls_are_refused_on_create(self, base_url):
+        with pytest.raises(ValidationError):
+            await provider_service.create(
+                name="A", kind=ProviderKind.OPENAI_COMPAT, base_url=base_url,
+                model="m", api_key=None,
+            )
+
+    async def test_bad_urls_are_refused_on_update(self):
+        """Both doors, not just create -- update is the one the report is about."""
+        p = await provider_service.create(
+            name="A", kind=ProviderKind.OPENAI_COMPAT, base_url="http://ok:1",
+            model="m", api_key=None,
+        )
+        with pytest.raises(ValidationError):
+            await provider_service.update(str(p.id), {"base_url": "file:///etc/passwd"})
 
 
 class TestDelete:

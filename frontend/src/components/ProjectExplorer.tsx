@@ -1,8 +1,9 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { api } from "../api/client";
 import { formatBytes, formatKindLabel } from "../lib/format";
+import { clickableRow } from "../lib/clickableRow";
 import { readQuality } from "../lib/readQuality";
 import { recordProjectVisit } from "../lib/recentProjects";
 import { notify } from "../stores/messageStore";
@@ -316,13 +317,31 @@ function ProjectView({ projectId }: { projectId: string }) {
     },
   });
 
-  const filteredObjects = objects?.filter((o) => {
-    const q = filter.trim().toLowerCase();
-    if (!q) return true;
-    return (
-      o.name.toLowerCase().includes(q) || o.tags.some((t) => t.toLowerCase().includes(q))
-    );
-  });
+  const filteredObjects = useMemo(
+    () =>
+      objects?.filter((o) => {
+        const q = filter.trim().toLowerCase();
+        if (!q) return true;
+        return (
+          o.name.toLowerCase().includes(q) ||
+          o.tags.some((t) => t.toLowerCase().includes(q))
+        );
+      }),
+    [objects, filter],
+  );
+
+  // Bucketed once per render, not once per category. `categorizeObjects` was
+  // called inside CATEGORIES.map, so it re-bucketed the whole file list nine
+  // times -- and repeated all nine every 1.5s while ingest polling was active,
+  // making it the dominant cost of every render of the app's main view (#897).
+  //
+  // `filteredObjects` is memoized above for this to be worth anything: it is
+  // rebuilt from `objects` on every render, so a new array identity each time
+  // would invalidate this memo unconditionally.
+  const categorized = useMemo(
+    () => categorizeObjects(filteredObjects),
+    [filteredObjects],
+  );
 
   const toggleCategory = (category: FileCategory) => {
     const next = new Set(expandedCategories);
@@ -526,7 +545,7 @@ function ProjectView({ projectId }: { projectId: string }) {
 
         {filteredObjects && filteredObjects.length > 0 &&
           CATEGORIES.map((category) => {
-            const categoryFiles = categorizeObjects(filteredObjects)[category.key];
+            const categoryFiles = categorized[category.key];
             if (categoryFiles.length === 0) return null;
 
             const isExpanded = expandedCategories.has(category.key);
@@ -645,6 +664,10 @@ function FileRow({
     <div
       className={`row ${selected ? "selected" : ""}${inPair ? " row-in-pair" : ""}`}
       onClick={onSelect}
+      // The app's most-used control, and it was mouse-only: no way to reach or
+      // activate it from the keyboard, and no role for a screen reader (#895).
+      {...clickableRow(onSelect)}
+      aria-pressed={selected}
     >
       {/* The grade rides the icon's corner; the word stays in the metadata
           line below, so the tier never depends on reading the mark alone. */}

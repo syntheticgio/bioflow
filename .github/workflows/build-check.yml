@@ -11,6 +11,7 @@
 #
 # The `changes` job needs no adjustment for this: dorny/paths-filter diffs
 # against the PR's own merge base, so it is base-branch agnostic.
+# release-stage branch (alpha/**, beta/**, release/**).
 #
 # Five jobs:
 #   changes            — detects whether the PR touches anything besides
@@ -35,6 +36,12 @@
 
 name: Build check
 
+# Release-stage branches are included deliberately (#818). Fixes found during
+# alpha go in by PR *into* alpha/X.Y.Z, and beta takes bug fixes the same way
+# (see the release methodology in CLAUDE.md) -- so those PRs land on the branch
+# that is about to be tagged and shipped. Gated on `main` alone they ran only
+# cla-check: no build, no tests, no commit validation, on the code closest to
+# release. The branch names are the ones ops/release.sh creates.
 on:
   pull_request:
     branches: [main, "alpha/**", "beta/**", "release/**"]
@@ -76,7 +83,7 @@ jobs:
       docs_only: ${{ steps.filter.outputs.code == 'false' }}
     steps:
       - uses: actions/checkout@v7
-      - uses: dorny/paths-filter@v3
+      - uses: dorny/paths-filter@v4
         id: filter
         with:
           filters: |

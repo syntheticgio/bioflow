@@ -12,7 +12,7 @@ from uuid import uuid4
 
 import asyncssh
 from fastapi import APIRouter, HTTPException, Request
-from pydantic import BaseModel, model_validator
+from pydantic import BaseModel, field_validator, model_validator
 
 from app.config import settings
 from app.errors import ConflictError, NotFoundError, ValidationError
@@ -23,7 +23,7 @@ from app.models.node_update import NodeUpdateTask
 from app.queue import node_stats as node_stats_mod
 from app.queue import worker_registry
 from app.queue.worker import _own_image_digest
-from app.services import node_ssh, node_update_service
+from app.services import node_ssh, node_storage_probe, node_update_service
 from app.services.ai import crypto
 from app.version import __version__
 
@@ -45,6 +45,38 @@ _STORAGE_LOCATION_RE = re.compile(r"^/[A-Za-z0-9._/-]{0,511}$")
 
 # --- Provisioning request/response models ---
 
+# `node_name` and `storage_location` are interpolated into commands that run on
+# the remote node -- most consequentially into the body of a quoted heredoc
+# (`_render_node_env`, written at the write_env step). The quoted delimiter
+# stops `$`-expansion but not *delimiter* injection: a value carrying a newline
+# followed by the delimiter ends the heredoc early and everything after it runs
+# as shell on the remote machine. `node_name` also becomes the comment on a
+# generated SSH key that is appended to the node's authorized_keys, where a
+# newline forges an extra key line.
+#
+# The endpoint is unauthenticated, so with a rebound hostname (#871) a web page
+# could drive this against a host the victim has credentials for. Validating
+# here, in the model, is what makes that unreachable rather than escaped-so-far:
+# every path out of this request is covered at once, and a new call site cannot
+# forget to quote.
+_NODE_NAME_RE = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
+# An absolute path of ordinary path segments. Deliberately no shell
+# metacharacters, no whitespace, no "..", and no trailing slash -- this is a
+# storage directory being named, not an arbitrary string.
+_STORAGE_LOCATION_RE = re.compile(r"^(/[A-Za-z0-9._-]+)+$")
+
+
+def _sanitize_node_name(raw: str) -> str:
+    """Coerce a hostname-derived string into something `_NODE_NAME_RE` accepts.
+
+    Only for values *this* code suggests, never for user input -- a request
+    that fails validation must be refused, not quietly rewritten into a
+    different node than the caller asked for.
+    """
+    cleaned = re.sub(r"[^A-Za-z0-9_-]", "-", raw).strip("-")[:64]
+    return cleaned or "compute-node"
+
+
 class ProvisionRequest(BaseModel):
     host: str
     port: int = 22
@@ -54,6 +86,40 @@ class ProvisionRequest(BaseModel):
     node_name: str
     storage_location: str = "/data/scratch"
     worker_replicas: int = 2
+    # Enrol a node even though it cannot read the primary's BIOINFO_HOME.
+    #
+    # Default False is the decision, not a formality: an unshared node
+    # provisions cleanly, heartbeats green, claims a bucket of a chunked
+    # alignment, and fails on a missing input file hours later -- naming the
+    # file rather than the cause. Refusing at provisioning is the treatment
+    # #803 already gives an unroutable primary address.
+    #
+    # An opt-in rather than a hard refusal because an unshared node is not a
+    # broken node: it can still run work that fetches its own inputs (SRA
+    # downloads, NCBI assembly fetches), and #845 withholds only the work it
+    # cannot do. Setting this says "I know, enrol it anyway."
+    allow_unshared_storage: bool = False
+
+    @field_validator("node_name")
+    @classmethod
+    def _check_node_name(cls, v: str) -> str:
+        if not _NODE_NAME_RE.match(v):
+            raise ValueError(
+                "node_name must be 1-64 characters of letters, digits, "
+                "underscore or hyphen"
+            )
+        return v
+
+    @field_validator("storage_location")
+    @classmethod
+    def _check_storage_location(cls, v: str) -> str:
+        if not _STORAGE_LOCATION_RE.match(v) or ".." in v.split("/"):
+            raise ValueError(
+                "storage_location must be an absolute path made of letters, "
+                "digits, dot, underscore or hyphen -- no whitespace, shell "
+                "metacharacters, or '..' segments"
+            )
+        return v
 
     @model_validator(mode="after")
     def _check_credential(self) -> "ProvisionRequest":
@@ -134,6 +200,14 @@ async def enumerate_nodes() -> dict[str, dict]:
                 "image_digest": doc.image_digest,
                 "version": doc.version,
                 "updatable": doc.ssh_key_enc is not None,
+                # Tri-state, and it stays tri-state out to the UI: None means
+                # never probed, which the user needs to be able to tell from a
+                # node that was probed and cannot see the storage.
+                "storage_shared": doc.storage_shared,
+                "storage_location": doc.storage_location,
+                "storage_checked_at": (
+                    doc.storage_checked_at.isoformat() if doc.storage_checked_at else None
+                ),
             }
     except Exception:
         # Any error here -- including an AttributeError from a Node field this
@@ -194,6 +268,12 @@ async def enumerate_nodes() -> dict[str, dict]:
         entry["image_digest"] = mongo_info.get("image_digest")
         entry["version"] = mongo_info.get("version")
         entry["updatable"] = mongo_info.get("updatable", False)
+        # Defaults to None, not False: a node heartbeating without a Mongo
+        # record has not been probed either, and saying "not shared" about it
+        # would be a claim nobody made.
+        entry["storage_shared"] = mongo_info.get("storage_shared")
+        entry["storage_location"] = mongo_info.get("storage_location")
+        entry["storage_checked_at"] = mongo_info.get("storage_checked_at")
 
     return by_node
 
@@ -270,12 +350,16 @@ async def connection_details(request: Request) -> dict:
     mongo = _rewrite_host(settings.mongo_url, host)
     redis = _rewrite_host(settings.redis_url, host)
 
-    # Suggest a node name from the primary's hostname.
+    # Suggest a node name from the primary's hostname, sanitized to what
+    # ProvisionRequest will actually accept. platform.node() routinely returns
+    # a dotted mDNS name ("Johns-MacBook-Pro.local"), and offering the user a
+    # default their own form then rejects is a worse bug than the one the
+    # validation closes.
     try:
         primary_hostname = platform.node() or "primary"
     except Exception:
         primary_hostname = "primary"
-    suggested = f"{primary_hostname}-node"
+    suggested = _sanitize_node_name(f"{primary_hostname}-node")
 
     return {
         "mongo_url": mongo,
@@ -697,6 +781,30 @@ async def _check_worker_not_restarting(conn, install_dir: str, host: str) -> str
     )
 
 
+def _unshared_storage_message(req: ProvisionRequest, detail: str) -> str:
+    """Why an unshared node was refused, and what to do about it.
+
+    Shaped like the #803 refusal: what was found, why it is wrong, the remedy,
+    then "provision the node again."
+    """
+    return (
+        f"{req.host} cannot read the primary's storage. BioFlow wrote a file "
+        f"into {settings.bioinfo_home} on this machine and could not read it "
+        f"back at {req.storage_location} on {req.host} ({detail}).\n\n"
+        "That matters because work is handed out on the assumption that every "
+        "node reads the same files. A chunked alignment fans out one job per "
+        "reference bucket with no node targeting, so this node would claim a "
+        "bucket and fail on a missing input -- hours in, with an error naming "
+        "the file rather than the cause.\n\n"
+        f"To fix it, make {req.storage_location} on {req.host} the same "
+        f"storage as {settings.bioinfo_home} here -- a network share mounted "
+        "there -- and provision the node again.\n\n"
+        "Or set allow_unshared_storage to enrol it anyway. It will still run "
+        "jobs that fetch their own inputs, such as SRA downloads, and will be "
+        "kept away from work that reads the primary's files."
+    )
+
+
 # --- Provisioning executor ---
 
 async def _provision_node(task_id: str, req: ProvisionRequest) -> None:
@@ -842,13 +950,41 @@ async def _provision_node(task_id: str, req: ProvisionRequest) -> None:
                 task.phase = e.step.phase
                 return await _fail(e.reason)
 
-            # Phase 5: install_key
+            # Phase 5: check_storage
             #
-            # Before the image is pulled, so a node that cannot take the key
-            # costs nothing. Failing here leaves the node unprovisioned rather
-            # than provisioned-but-not-updatable: a fallback to storing the
-            # user's own credential would make the security property depend on
-            # a condition nobody observed.
+            # Prove by round trip that this node reads the primary's
+            # BIOINFO_HOME, rather than inferring it from a matching path.
+            # Runs after write_env because it needs the storage_location the
+            # node was configured with, and before pull_image because a node
+            # that cannot see the data should cost nothing to find out about.
+            #
+            # A probe that cannot be carried out is not a `False`: it raises,
+            # and provisioning fails rather than recording a verified negative
+            # for what is really an infrastructure fault. That is why
+            # StorageProbeError is caught separately below and is not subject
+            # to allow_unshared_storage -- the user cannot wave through an
+            # answer nobody obtained.
+            await _update("check_storage", f"Checking shared storage on {req.host}…")
+            try:
+                probe = await node_storage_probe.probe_shared_storage(
+                    conn, req.storage_location
+                )
+            except node_storage_probe.StorageProbeError as e:
+                task.phase = "check_storage"
+                return await _fail(str(e))
+            if not probe.shared and not req.allow_unshared_storage:
+                task.phase = "check_storage"
+                return await _fail(_unshared_storage_message(req, probe.detail))
+
+            # Phase 6: install_key
+            #
+            # Together with check_storage above, this is the pre-pull_image
+            # gate: both run before the image is pulled, so a node that cannot
+            # see the storage or cannot take the key costs nothing to reject.
+            # Failing here leaves the node unprovisioned rather than
+            # provisioned-but-not-updatable: a fallback to storing the user's
+            # own credential would make the security property depend on a
+            # condition nobody observed.
             await _update("install_key", "Installing the BioFlow update key…")
             private_pem, public_line = node_ssh.generate_keypair(req.node_name)
             await node_ssh.install_public_key(conn, public_line)
@@ -867,6 +1003,14 @@ async def _provision_node(task_id: str, req: ProvisionRequest) -> None:
             node_doc.ssh_key_enc = crypto.encrypt(private_pem)
             node_doc.ssh_key_installed_at = datetime.now(UTC)
             node_doc.host_key = host_key
+            # The three storage fields are written together or not at all --
+            # `storage_checked_at` is null if and only if `storage_shared` is
+            # None, and that invariant is what lets #846 find the never-probed
+            # nodes. Recorded here rather than at `enrolled` because this is
+            # the only place the document is saved.
+            node_doc.storage_location = req.storage_location
+            node_doc.storage_shared = probe.shared
+            node_doc.storage_checked_at = datetime.now(UTC)
             await node_doc.save()
 
             # Phases 6-7: pull_image, start_worker.
@@ -1074,6 +1218,94 @@ async def update_status(task_id: str) -> dict:
         "started_at": task.started_at.isoformat() if task.started_at else None,
         "finished_at": task.finished_at.isoformat() if task.finished_at else None,
         "error": task.error,
+    }
+
+
+@router.post("/{node_id}/check-storage")
+async def check_node_storage(node_id: str) -> dict:
+    """Re-run the shared-storage probe against an already-enrolled node.
+
+    R14: a node's storage status must be checkable without re-provisioning it.
+    A share can be unmounted, a node's disk can be swapped, and every node
+    enrolled before this field existed reads as unknown until something asks.
+    #846's migration is this endpoint applied across the fleet.
+
+    Synchronous, unlike provisioning: this is one connect and one `cat`, and a
+    caller that has to poll a task document for that is carrying the cost of
+    provisioning's structure without its reason.
+
+    Grouped with the other per-node SSH operations rather than with the
+    provisioning endpoints, because that is what it is.
+    """
+    node = await Node.find_one(Node.node_id == node_id)
+    if node is None:
+        raise NotFoundError(f"Node {node_id!r} not found")
+
+    # R15. Refuse rather than guess. A self-enrolled node has no managed key,
+    # so there is no way to reach it -- and recording `false` for a node we
+    # simply cannot ask would be the same lie the tri-state exists to avoid.
+    private_pem = crypto.decrypt(node.ssh_key_enc) if node.ssh_key_enc else None
+    if not private_pem or not node.ssh_host or not node.ssh_username:
+        raise ValidationError(
+            f"Node {node_id!r} has no stored SSH credentials, so BioFlow cannot "
+            "reach it to check its storage. This node enrolled itself rather "
+            "than being provisioned from here; provision it to make it "
+            "checkable."
+        )
+
+    if not node.storage_location:
+        raise ValidationError(
+            f"Node {node_id!r} has no recorded storage location, so there is no "
+            "path to probe. It was enrolled before BioFlow recorded one. "
+            "Provision it again, or supply the path it uses."
+        )
+
+    conn = None
+    try:
+        conn, _ = await node_ssh.connect_with_tofu(
+            node.ssh_host,
+            node.ssh_port,
+            node.ssh_username,
+            private_pem,
+            stored_host_key=node.host_key,
+            timeout_seconds=20,
+        )
+    except (TimeoutError, asyncssh.Error, ValueError) as e:
+        # Unreachable is not an answer. Leave what is recorded alone.
+        raise ValidationError(
+            f"Could not reach {node.ssh_host}: {e}. The machine may be off, or "
+            "the update key may have been removed. Its storage status is "
+            "unchanged."
+        ) from e
+
+    try:
+        probe = await node_storage_probe.probe_shared_storage(
+            conn, node.storage_location
+        )
+    except node_storage_probe.StorageProbeError as e:
+        raise ValidationError(
+            f"{e} Its storage status is unchanged."
+        ) from e
+    finally:
+        conn.close()
+
+    # The three fields move together, so `storage_checked_at` is null if and
+    # only if `storage_shared` is None.
+    node.storage_shared = probe.shared
+    node.storage_checked_at = datetime.now(UTC)
+    await node.save()
+
+    log.info(
+        "node_storage_probed",
+        node_id=node_id,
+        storage_shared=probe.shared,
+    )
+    return {
+        "node_id": node_id,
+        "storage_shared": probe.shared,
+        "storage_location": node.storage_location,
+        "storage_checked_at": node.storage_checked_at.isoformat(),
+        "detail": probe.detail,
     }
 
 

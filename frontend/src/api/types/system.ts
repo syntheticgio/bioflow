@@ -96,6 +96,13 @@ export interface NodeInfo {
   image_digest: string | null;
   version: string | null;
   updatable: boolean;
+  /** Whether this node reads the primary's storage, proven by round-trip probe.
+   *  Tri-state: `null` means never probed, which is not the same as `false`,
+   *  probed and not shared. A node that has never been asked can be probed;
+   *  one that answered no needs its storage fixed. */
+  storage_shared: boolean | null;
+  storage_location: string | null;
+  storage_checked_at: string | null;
 }
 
 export interface NodeUpdateStatus {

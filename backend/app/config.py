@@ -60,6 +60,10 @@ class Settings(BaseSettings):
     # provisioning. Empty = auto-discover via UDP socket heuristic.
     primary_hostname: str = ""
     primary_api_url: str = ""  # where child nodes reach the primary's API (empty = primary)
+    # Extra Host header values to accept, comma-separated. Local and LAN names
+    # are accepted without configuration; this is for a deliberate public or
+    # reverse-proxied name. See middleware/host_guard.py.
+    bioflow_allowed_hosts: str = ""
     # "primary" (default) or "compute" — controls blob-transfer behaviour.
     node_type: str = "primary"
     # Symmetric secret shared between primary and compute nodes for

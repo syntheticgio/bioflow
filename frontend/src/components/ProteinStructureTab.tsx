@@ -7,6 +7,7 @@ import type {
   ProteinRecordRow,
   ProteinStructureState,
 } from "../api/types";
+import { clickableRow } from "../lib/clickableRow";
 import { useDebounced } from "../lib/useDebounced";
 import { Icn3dFrame } from "./Icn3dFrame";
 
@@ -17,17 +18,95 @@ function uniprotUrl(accession: string): string {
   return `https://www.uniprot.org/uniprotkb/${encodeURIComponent(accession)}`;
 }
 
-/** Confidence key rendered below predicted structures. */
+/** The AlphaFold pLDDT bands, in the viewer's own colours.
+ *
+ * These are fixed by the structure viewer -- it colours the model by them --
+ * so they cannot be swapped for theme tokens. What can change is where they
+ * are applied: as *text* colours, #ffff00 was invisible on the light theme's
+ * background and #0055ff nearly unreadable on the dark one, and since the app
+ * follows the system theme one of the two was always broken (#896).
+ */
+const PLDDT_BANDS: { color: string; label: string }[] = [
+  { color: "#0055ff", label: "Very high (90+)" },
+  { color: "#66ccff", label: "Confident (70-90)" },
+  { color: "#ffff00", label: "Low (50-70)" },
+  { color: "#ff6600", label: "Very low (<50)" },
+];
+
+/** Confidence key rendered below predicted structures.
+ *
+ * The band colour is a swatch and the text is `var(--text)`, so legibility no
+ * longer depends on the swatch's contrast against the page. The swatch carries
+ * a thin border for the same reason: a pale band on a pale background would
+ * otherwise have no edge.
+ */
 function PlddtLegend() {
   return (
-    <div style={{ fontSize: 11, color: "var(--text-faint)", marginTop: 4 }}>
-      Confidence:{" "}
-      <span style={{ color: "#0055ff" }}>██ Very high (90+)</span>{" "}
-      <span style={{ color: "#66ccff" }}>██ Confident (70-90)</span>{" "}
-      <span style={{ color: "#ffff00" }}>██ Low (50-70)</span>{" "}
-      <span style={{ color: "#ff6600" }}>██ Very low ({'<'}50)</span>
+    <div
+      style={{
+        fontSize: 11,
+        color: "var(--text)",
+        marginTop: 4,
+        display: "flex",
+        flexWrap: "wrap",
+        alignItems: "center",
+        gap: 10,
+      }}
+    >
+      <span style={{ color: "var(--text-faint)" }}>Confidence:</span>
+      {PLDDT_BANDS.map((band) => (
+        <span
+          key={band.label}
+          style={{ display: "inline-flex", alignItems: "center", gap: 4 }}
+        >
+          <span
+            aria-hidden="true"
+            style={{
+              display: "inline-block",
+              width: 12,
+              height: 12,
+              borderRadius: 2,
+              background: band.color,
+              border: "1px solid var(--border)",
+            }}
+          />
+          {band.label}
+        </span>
+      ))}
     </div>
   );
+}
+
+/**
+ * What clicking the Predict button should do, given the state it is showing.
+ *
+ * Extracted because the bug it exists to prevent was precisely a divergence
+ * between the *label* and the *action*: the label switched to "View prediction"
+ * on completion while the handler went on calling startProteinPrediction
+ * unconditionally, so the button that said "view" re-queued the expensive job
+ * (#884). Deriving both from one function is what keeps them in step, and makes
+ * the rule testable without a DOM.
+ */
+export function predictButtonAction(
+  state: PredictionState | "loading",
+): "start" | "show" | "none" {
+  if (state === "completed") return "show";
+  if (state === "running" || state === "loading") return "none";
+  return "start";
+}
+
+/** The label for a given state. Paired with `predictButtonAction` above. */
+export function predictButtonLabel(
+  state: PredictionState | "loading",
+  progress: { pct: number } | null,
+): string {
+  if (state === "loading") return "Checking…";
+  if (state === "running") {
+    return progress ? `Predicting… (${Math.round(progress.pct)}%)` : "Predicting…";
+  }
+  if (state === "failed") return "Retry prediction";
+  if (state === "completed") return "View prediction";
+  return "Predict structure";
 }
 
 /**
@@ -48,6 +127,16 @@ function PredictButton({
   const [isStarting, setIsStarting] = useState(false);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const mountedRef = useRef(true);
+  // The completed status, kept so "View prediction" has something to hand back
+  // to the panel. Without it the button had no result to show and the click
+  // fell through to starting another (expensive) prediction.
+  const completedRef = useRef<ProteinPredictionStatus | null>(null);
+
+  // Held in a ref so it is not a dependency of the status-check effect below.
+  // Callers pass an inline arrow, which is a new function on every render, so
+  // depending on it directly re-ran the check on every parent render.
+  const onCompleteRef = useRef(onPredictionComplete);
+  onCompleteRef.current = onPredictionComplete;
 
   // Check prediction status on mount
   useEffect(() => {
@@ -59,7 +148,8 @@ function PredictButton({
         setPredictionState(status.state);
         setProgress(status.progress);
         if (status.state === "completed" && status.prediction) {
-          onPredictionComplete(status);
+          completedRef.current = status;
+          onCompleteRef.current(status);
         }
       })
       .catch(() => {
@@ -72,7 +162,7 @@ function PredictButton({
       mountedRef.current = false;
       if (pollRef.current) clearInterval(pollRef.current);
     };
-  }, [objectId, record.ordinal, onPredictionComplete]);
+  }, [objectId, record.ordinal]);
 
   const startPolling = () => {
     if (pollRef.current) clearInterval(pollRef.current);
@@ -83,7 +173,10 @@ function PredictButton({
         setPredictionState(status.state);
         setProgress(status.progress);
         if (status.state === "completed") {
-          if (status.prediction) onPredictionComplete(status);
+          if (status.prediction) {
+            completedRef.current = status;
+            onCompleteRef.current(status);
+          }
           if (pollRef.current) clearInterval(pollRef.current);
           pollRef.current = null;
         }
@@ -99,6 +192,33 @@ function PredictButton({
   };
 
   const handleClick = async () => {
+    const action = predictButtonAction(predictionState);
+    if (action === "none") return;
+
+    // "View prediction" must show the result that already exists, not queue
+    // another one. The label changed on completion but the handler did not,
+    // so clicking it re-ran the expensive job (#884).
+    if (action === "show") {
+      if (completedRef.current) {
+        onCompleteRef.current(completedRef.current);
+        return;
+      }
+      // Completed but nothing cached -- the status arrived without a
+      // prediction body. Re-fetch rather than silently doing nothing, and
+      // still never start a new job from this branch.
+      try {
+        const status = await api.proteinRecordPrediction(objectId, record.ordinal);
+        if (!mountedRef.current) return;
+        if (status.prediction) {
+          completedRef.current = status;
+          onCompleteRef.current(status);
+        }
+      } catch {
+        if (mountedRef.current) setPredictionState("failed");
+      }
+      return;
+    }
+
     setIsStarting(true);
     try {
       await api.startProteinPrediction(objectId, record.ordinal);
@@ -115,12 +235,7 @@ function PredictButton({
   const isRunning = predictionState === "running";
   const isDisabled = isRunning || isStarting || predictionState === "loading";
 
-  let buttonText = "Predict structure";
-  if (predictionState === "loading") buttonText = "Checking…";
-  if (isRunning && progress) buttonText = `Predicting… (${Math.round(progress.pct)}%)`;
-  if (isRunning && !progress) buttonText = "Predicting…";
-  if (predictionState === "failed") buttonText = "Retry prediction";
-  if (predictionState === "completed") buttonText = "View prediction";
+  const buttonText = predictButtonLabel(predictionState, progress);
 
   return (
     <div>
@@ -299,6 +414,13 @@ export function ProteinStructureTab({ objectId }: { objectId: string }) {
   const [selected, setSelected] = useState<ProteinRecordRow | null>(null);
   const [selectedPredictionStatus, setSelectedPredictionStatus] = useState<ProteinPredictionStatus | null>(null);
 
+  /** Selecting a row clears the previous record's prediction, so the panel
+   *  never shows one protein's structure under another's name. */
+  const selectRow = (row: ProteinRecordRow) => {
+    setSelected(row);
+    setSelectedPredictionStatus(null);
+  };
+
   const search = useDebounced(searchInput, 300);
 
   useEffect(() => {
@@ -366,10 +488,12 @@ export function ProteinStructureTab({ objectId }: { objectId: string }) {
                 {rows.map((row) => (
                   <tr
                     key={row.ordinal}
-                    onClick={() => {
-                      setSelected(row);
-                      setSelectedPredictionStatus(null);
-                    }}
+                    className="protein-row"
+                    onClick={() => selectRow(row)}
+                    // Selecting a protein is how this whole tab is driven, and
+                    // it was mouse-only (#895).
+                    {...clickableRow(() => selectRow(row))}
+                    aria-selected={selected?.ordinal === row.ordinal}
                     style={{
                       cursor: "pointer",
                       background:
@@ -445,25 +569,12 @@ export function ProteinStructureTab({ objectId }: { objectId: string }) {
             onPredictionStatusChange={setSelectedPredictionStatus}
           />
         ) : (
-          <div>
-            <div className="chrom-note">
-              Select a protein on the left to look up its structure.
-            </div>
-            <div style={{ marginTop: 8 }}>
-              <PredictButton
-                objectId={objectId}
-                record={
-                  {
-                    ordinal: 0,
-                    identifier: "",
-                    description: "",
-                    length: 0,
-                    has_reference: false,
-                  } as ProteinRecordRow
-                }
-                onPredictionComplete={() => {}}
-              />
-            </div>
+          /* No Predict button here: with nothing selected there is no record
+             to predict. It used to render one against a fabricated
+             {ordinal: 0} record, so clicking it launched a prediction for the
+             file's *first* protein and threw the result away (#884). */
+          <div className="chrom-note">
+            Select a protein on the left to look up its structure.
           </div>
         )}
       </div>

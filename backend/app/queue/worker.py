@@ -20,6 +20,7 @@ from app.models import Job, JobClass, JobState
 from app.pipelines import tool_cache
 from app.queue import governor, keys, queue
 from app.queue.executor import JobExecutor
+from app.queue.liveness import touch_liveness
 from app.queue.registry import JobContext, get_handler, load_handlers
 from app.services import resource_limit_service, run_service
 from app.version import __version__
@@ -566,6 +567,12 @@ class Worker:
     async def _heartbeat_loop(self) -> None:
         interval = max(settings.lease_ttl_seconds / 3, 2)
         while not self.shutdown.is_set() or self._running:
+            # Touched first, and outside the try below, so it records "this
+            # loop is running" rather than "Redis answered". A worker that has
+            # lost Redis is still alive and will recover; one whose loop has
+            # stopped is the wedge the healthcheck exists to catch. See
+            # touch_liveness for why this is a file.
+            touch_liveness()
             try:
                 if self._running:
                     ids = list(self._running)
