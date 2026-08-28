@@ -259,8 +259,40 @@ def test_unreachable_and_self_enrolled_both_say_cannot_check(stub_bin, api):
     result = _run(env={"_STUB_BIN": str(stub_bin), "BIOFLOW_API_URL": base})
     assert result.stdout.count("CANNOT CHECK") == 2
     assert "not shared" not in result.stdout.lower()
-    # Nothing outstanding to *do* here, so this is not a failure exit.
-    assert result.returncode == 0
+    # Nothing was established, so this must not read as an all-clear -- and
+    # the exit code must not say so either. A sweep that probed nothing and
+    # found no problems is a vacuous pass.
+    assert "nothing was established" in result.stdout
+    assert result.returncode == 4
+
+
+def test_zero_probed_never_reads_as_an_all_clear(stub_bin, api):
+    """The failure mode this whole feature exists to remove, in miniature.
+
+    Found running the script against a live stack: every node unreachable
+    printed "Every node that could be probed reads the primary's storage",
+    which is true and useless -- nothing was probed. A report nobody can
+    distinguish from success is worse than no report.
+    """
+    base, _ = api(
+        {
+            "nodes": [
+                {
+                    "node_id": "off",
+                    "outcome": "unreachable",
+                    "storage_shared": None,
+                    "storage_location": "/data/scratch",
+                    "detail": "Cannot check -- did not answer.",
+                }
+            ],
+            "checked": 0,
+            "total": 1,
+        }
+    )
+    result = _run(env={"_STUB_BIN": str(stub_bin), "BIOFLOW_API_URL": base})
+    assert "reads the primary's storage" not in result.stdout
+    assert "still unverified" in result.stdout
+    assert result.returncode == 4
 
 
 def test_api_error_is_reported_not_swallowed(stub_bin, api):

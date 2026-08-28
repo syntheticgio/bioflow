@@ -5894,6 +5894,104 @@ table.software-matrix thead th.software-matrix-corner {
   color: var(--warn);
 }
 
+/* --- Fleet-wide storage sweep --- */
+
+.storage-sweep {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px 16px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-panel);
+}
+
+.storage-sweep-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.storage-sweep-header h2 {
+  margin: 0 0 4px;
+  font-size: 15px;
+}
+
+.storage-sweep-header p {
+  margin: 0;
+  max-width: 62ch;
+}
+
+.storage-sweep-results {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.storage-sweep-row {
+  display: grid;
+  grid-template-columns: max-content max-content 1fr;
+  align-items: baseline;
+  gap: 4px 10px;
+}
+
+.storage-sweep-node {
+  font-weight: 600;
+}
+
+.storage-sweep-detail {
+  font-size: 12px;
+}
+
+/* Its own row beneath the verdict, spanning the full width: the path is an
+   answer to the line above it, not another column of it. */
+.storage-sweep-path {
+  grid-column: 1 / -1;
+  max-width: 32ch;
+  padding: 4px 8px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-mono, monospace);
+  font-size: 12px;
+}
+
+/* Same three-state reasoning as the Storage column: "cannot check" is dim
+   rather than coloured, because nothing was found -- colouring it like a
+   negative would report a finding nobody made. */
+.sweep-outcome {
+  display: inline-block;
+  min-width: 92px;
+  padding: 2px 8px;
+  border-radius: 10px;
+  font-size: 11px;
+  font-weight: 600;
+  text-align: center;
+  background: var(--bg);
+  color: var(--text-dim);
+}
+
+.sweep-outcome.shared {
+  background: color-mix(in srgb, var(--success) 15%, transparent);
+  color: var(--success);
+}
+
+.sweep-outcome.not-shared {
+  background: color-mix(in srgb, var(--warn) 15%, transparent);
+  color: var(--warn);
+}
+
+/* An ask, not a fault: this node simply has a fact nobody recorded. */
+.sweep-outcome.needs-path {
+  background: color-mix(in srgb, var(--accent, var(--warn)) 12%, transparent);
+  color: var(--text);
+}
+
 /* Revoked reads as a state the user chose, not a fault -- but it has to beat
    Online at a glance, because a revoked node can still be heartbeating. */
 .nodes-status.revoked {

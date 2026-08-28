@@ -59,6 +59,7 @@ import type {
   NodeInfo,
   NodeProvisionRequest,
   NodeProvisionStatus,
+  NodeStorageSweep,
   NodeUpdateStatus,
   ObjectComputations,
   ObjectDetail,
@@ -622,6 +623,18 @@ export const api = {
       storage_checked_at: string;
       detail: string;
     }>(`/nodes/${encodeURIComponent(nodeId)}/check-storage`, { method: "POST" }),
+
+  /** Probe every enrolled node's storage in one pass (#846's migration).
+   *
+   *  `storageLocations` supplies a path for nodes that have none recorded --
+   *  the common case on a deployment enrolled before BioFlow kept one. The
+   *  first sweep reports those nodes; the second, carrying their paths, is
+   *  the one that migrates them. */
+  sweepNodeStorage: (storageLocations: Record<string, string> = {}) =>
+    request<NodeStorageSweep>("/nodes/storage-check", {
+      method: "POST",
+      body: JSON.stringify({ storage_locations: storageLocations }),
+    }),
   /** Revoke a node's enrollment so it can no longer claim jobs. Its workers
    *  discover this on their next status poll. Does not uninstall anything. */
   revokeNode: (nodeId: string) =>

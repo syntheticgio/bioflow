@@ -105,6 +105,32 @@ export interface NodeInfo {
   storage_checked_at: string | null;
 }
 
+/** One node's result within a fleet-wide storage sweep.
+ *
+ *  Five outcomes, and only `shared` and `not_shared` mean the probe actually
+ *  ran. The other three are reasons it could not, so they leave the node's
+ *  recorded status untouched -- a node that was merely powered off is not a
+ *  verified negative. */
+export interface NodeStorageOutcome {
+  node_id: string;
+  outcome:
+    | "shared"
+    | "not_shared"
+    | "unreachable"
+    | "not_probeable"
+    | "no_recorded_path";
+  storage_shared: boolean | null;
+  storage_location: string | null;
+  detail: string;
+}
+
+export interface NodeStorageSweep {
+  nodes: NodeStorageOutcome[];
+  /** How many nodes the probe actually ran against. */
+  checked: number;
+  total: number;
+}
+
 export interface NodeUpdateStatus {
   task_id: string;
   status: "updating" | "success" | "failed";

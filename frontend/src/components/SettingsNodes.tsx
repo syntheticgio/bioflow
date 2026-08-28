@@ -6,11 +6,14 @@ import type {
   NodeInfo,
   NodeProvisionRequest,
   NodeProvisionStatus,
+  NodeStorageOutcome,
+  NodeStorageSweep,
   NodeUpdateStatus,
 } from "../api/types";
 import {
   nodeStatusBadge,
   storageStatus,
+  sweepOutcome,
   updateAffordance,
   versionLabel,
 } from "../lib/nodeStaleness";
@@ -76,6 +79,24 @@ export function SettingsNodes() {
   });
 
   /* ── Revoke control (same singleton-dialog shape as the update above) ── */
+
+  /* ── Fleet-wide storage sweep (#846) ── */
+
+  // Paths the user supplies for nodes that have none recorded. The sweep
+  // cannot infer them -- probing a guessed directory answers "not shared"
+  // confidently and wrongly -- so the first sweep asks and the second, with
+  // these filled in, is the one that migrates.
+  const [storagePaths, setStoragePaths] = useState<Record<string, string>>({});
+
+  const sweepStorage = useMutation({
+    mutationFn: (paths: Record<string, string>) => api.sweepNodeStorage(paths),
+    onSuccess: () => {
+      // The Storage badges are derived from the server's record, which the
+      // sweep just rewrote -- a refetch is what makes that visible, the same
+      // way revocation's does below.
+      nodes.refetch();
+    },
+  });
 
   const [pendingRevoke, setPendingRevoke] = useState<NodeInfo | null>(null);
 
@@ -149,6 +170,21 @@ export function SettingsNodes() {
             status={status}
             onRetry={handleRetry}
             onClose={() => setTaskId(null)}
+          />
+        )}
+
+        {/* Storage sweep (#846). Above the table because what it changes
+            is the table's Storage column. */}
+        {list.length > 0 && (
+          <StorageSweepPanel
+            result={sweepStorage.data}
+            error={sweepStorage.error}
+            running={sweepStorage.isPending}
+            paths={storagePaths}
+            onPathChange={(nodeId, path) =>
+              setStoragePaths((prev) => ({ ...prev, [nodeId]: path }))
+            }
+            onRun={() => sweepStorage.mutate(storagePaths)}
           />
         )}
 
@@ -546,6 +582,137 @@ function ProvisionResult({
         </button>
       </div>
     </div>
+  );
+}
+
+/* ── Storage sweep panel ── */
+
+/** Probe every node's storage, and show what each one turned out to be.
+ *
+ * The button is deliberately always available rather than hidden once the
+ * fleet is established: a share can be unmounted after enrollment, so the
+ * answer decays, and re-running is safe by construction (the sweep holds no
+ * state and re-probes everything).
+ *
+ * The first run on a deployment enrolled before storage was recorded will
+ * report every node as needing a path and migrate nothing. That is why this
+ * panel renders inputs rather than only verdicts -- the second run, carrying
+ * the paths, is the one that does the work.
+ */
+function StorageSweepPanel({
+  result,
+  error,
+  running,
+  paths,
+  onPathChange,
+  onRun,
+}: {
+  result: NodeStorageSweep | undefined;
+  error: unknown;
+  running: boolean;
+  paths: Record<string, string>;
+  onPathChange: (nodeId: string, path: string) => void;
+  onRun: () => void;
+}) {
+  const needsPath = (result?.nodes ?? []).filter(
+    (n) => n.outcome === "no_recorded_path",
+  );
+
+  return (
+    <section className="storage-sweep">
+      <div className="storage-sweep-header">
+        <div>
+          <h2>Shared storage</h2>
+          <p className="muted">
+            Checks which nodes can read this machine's storage. Nodes that
+            cannot are limited to work that fetches its own inputs. Safe to
+            re-run at any time.
+          </p>
+        </div>
+        <button
+          type="button"
+          className="btn btn-secondary"
+          onClick={onRun}
+          disabled={running}
+        >
+          {running ? "Checking…" : "Check all nodes"}
+        </button>
+      </div>
+
+      {running && (
+        <p className="muted">
+          Probing each node in turn. A node that is switched off takes about
+          20 seconds before the check moves on.
+        </p>
+      )}
+
+      {error != null && (
+        <p className="error">
+          {error instanceof ApiRequestError
+            ? error.message
+            : "The check could not be run."}
+        </p>
+      )}
+
+      {result && (
+        <>
+          <ul className="storage-sweep-results">
+            {result.nodes.map((node) => (
+              <SweepResultRow
+                key={node.node_id}
+                node={node}
+                path={paths[node.node_id] ?? ""}
+                onPathChange={(p) => onPathChange(node.node_id, p)}
+              />
+            ))}
+          </ul>
+
+          {needsPath.length > 0 ? (
+            <p className="muted">
+              BioFlow has no record of where these nodes' storage is — it was
+              never saved when they were enrolled, and guessing it would
+              produce a confident wrong answer. Enter the path each one uses
+              above and check again.
+            </p>
+          ) : (
+            <p className="muted">
+              Probed {result.checked} of {result.total}{" "}
+              {result.total === 1 ? "node" : "nodes"}.
+            </p>
+          )}
+        </>
+      )}
+    </section>
+  );
+}
+
+function SweepResultRow({
+  node,
+  path,
+  onPathChange,
+}: {
+  node: NodeStorageOutcome;
+  path: string;
+  onPathChange: (path: string) => void;
+}) {
+  const display = sweepOutcome(node.outcome);
+
+  return (
+    <li className="storage-sweep-row">
+      <span className={`sweep-outcome ${display.kind}`}>{display.label}</span>
+      <span className="storage-sweep-node">{node.node_id}</span>
+      <span className="storage-sweep-detail muted">{node.detail}</span>
+      {display.needsPath && (
+        <input
+          type="text"
+          className="storage-sweep-path"
+          value={path}
+          placeholder="/data/scratch"
+          aria-label={`Storage path for ${node.node_id}`}
+          onChange={(e) => onPathChange(e.target.value)}
+        />
+      )}
+    </li>
   );
 }
 

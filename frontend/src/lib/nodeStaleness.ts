@@ -111,6 +111,46 @@ export function storageStatus({
   };
 }
 
+/** How one node's sweep result is presented, and whether it wants an action.
+ *
+ * `needsPath` is what makes the second sweep possible: the primary never
+ * recorded where a pre-existing node's storage lives, and it cannot be
+ * guessed -- probing the wrong directory would answer "not shared"
+ * confidently and wrongly. So that outcome renders an input rather than a
+ * verdict.
+ *
+ * `unreachable` and `not_probeable` are both "cannot check" and neither is a
+ * finding, but they are kept apart because the remedies differ: an offline
+ * machine needs powering on, a self-enrolled one can never be probed this way
+ * and needs provisioning.
+ */
+export interface SweepOutcomeDisplay {
+  /** Appended to "sweep-outcome". */
+  kind: string;
+  label: string;
+  /** True when this row should offer a storage-path input. */
+  needsPath: boolean;
+}
+
+export function sweepOutcome(outcome: string): SweepOutcomeDisplay {
+  switch (outcome) {
+    case "shared":
+      return { kind: "shared", label: "Shared", needsPath: false };
+    case "not_shared":
+      return { kind: "not-shared", label: "Not shared", needsPath: false };
+    case "no_recorded_path":
+      return { kind: "needs-path", label: "Needs a path", needsPath: true };
+    case "not_probeable":
+      return { kind: "unknown", label: "Cannot check", needsPath: false };
+    case "unreachable":
+      return { kind: "unknown", label: "Cannot check", needsPath: false };
+    default:
+      // An outcome this UI does not know about is still not a finding, and
+      // must never render as one.
+      return { kind: "unknown", label: "Cannot check", needsPath: false };
+  }
+}
+
 /** The Status cell's badge: its text, its modifier class, and its tooltip. */
 export interface NodeStatusBadge {
   label: string;

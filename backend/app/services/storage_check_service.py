@@ -107,8 +107,7 @@ async def check_node_storage(
     # raises 409 for each because a single-node caller asked about a specific
     # node and deserves to be told why; a sweep needs to keep going and
     # report them alongside the answers.
-    private_pem = crypto.decrypt(node.ssh_key_enc) if node.ssh_key_enc else None
-    if not private_pem or not node.ssh_host or not node.ssh_username:
+    if not node.ssh_key_enc or not node.ssh_host or not node.ssh_username:
         # `enumerate_nodes` already calls this `updatable` (`nodes.py:174`).
         # Same fact, and it must stay distinguishable from merely-offline:
         # the remedies differ. An offline node needs powering on; this one
@@ -122,6 +121,26 @@ async def check_node_storage(
                 "Cannot check -- this node enrolled itself and BioFlow holds "
                 "no SSH key for it. Provision it from here to make it "
                 "checkable."
+            ),
+        )
+
+    private_pem = crypto.decrypt(node.ssh_key_enc)
+    if not private_pem:
+        # A key that is present but will not decrypt is a *different* problem
+        # from having no key, and the remedy differs: the encryption key file
+        # was replaced or lost, so re-provisioning the node is what restores
+        # it. Reporting this as "the node enrolled itself" -- which is what
+        # collapsing the two cases does -- sends the operator looking at the
+        # wrong machine entirely.
+        return NodeStorageOutcome(
+            node_id=node.node_id,
+            outcome=NOT_PROBEABLE,
+            storage_shared=node.storage_shared,
+            storage_location=node.storage_location,
+            detail=(
+                "Cannot check -- BioFlow holds an SSH key for this node but "
+                "cannot decrypt it, so the encryption key it was stored under "
+                "is gone. Provision the node again to store a new one."
             ),
         )
 
