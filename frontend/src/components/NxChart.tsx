@@ -10,6 +10,7 @@
  * several orders of magnitude, which is exactly what the reader needs to see.
  */
 
+import { plotGeometry } from "../lib/chartScaffold";
 import { InfoMarker } from "./InfoMarker";
 
 /** A second assembly's Nx curve, overlaid for comparison. */
@@ -55,12 +56,18 @@ interface Props {
 
 const W = 320;
 const H = 180;
-const PAD_L = 46;
-const PAD_R = 10;
-const PAD_T = 12;
-const PAD_B = 30;
-const PLOT_W = W - PAD_L - PAD_R;
-const PLOT_H = H - PAD_T - PAD_B;
+// The individual PAD_* / PLOT_* names stay: they read better than
+// `geometry.pad.left` at the 29 call sites below, all of which are terse SVG
+// coordinate arithmetic. What goes is the hand-rolled plot-size subtraction.
+const { pad: NX_PAD, plotW: PLOT_W, plotH: PLOT_H } = plotGeometry(W, H, {
+  top: 12,
+  right: 10,
+  bottom: 30,
+  left: 46,
+});
+// Only these two are referenced directly; the right and bottom insets are
+// now expressed only through PLOT_W / PLOT_H.
+const { top: PAD_T, left: PAD_L } = NX_PAD;
 
 const NX_COLOR = "#2e7d32";
 const NGX_COLOR = "#f9a825";

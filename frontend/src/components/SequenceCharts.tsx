@@ -1,10 +1,5 @@
 import { useState } from "react";
-import {
-  type ChartPadding,
-  lineThroughGaps,
-  plotGeometry,
-  pointerFraction,
-} from "../lib/chartScaffold";
+import { lineThroughGaps, useChartScaffold } from "../lib/chartScaffold";
 
 /**
  * Base-composition pie and per-position quality curve.
@@ -30,28 +25,6 @@ interface QualityPoint {
   position: number;
   mean: number;
   count: number;
-}
-
-function useChartScaffold<T>(
-  width: number,
-  height: number,
-  pad: ChartPadding,
-  resolveHover: (fraction: number) => T,
-) {
-  const [hover, setHover] = useState<T | null>(null);
-  const geometry = plotGeometry(width, height, pad);
-
-  const onMouseMove = (event: React.MouseEvent<SVGRectElement>) => {
-    const box = event.currentTarget.getBoundingClientRect();
-    setHover(resolveHover(pointerFraction(event.clientX, box.left, box.width)));
-  };
-
-  return {
-    ...geometry,
-    hover,
-    onMouseMove,
-    clearHover: () => setHover(null),
-  };
 }
 
 export interface LengthBucket {
