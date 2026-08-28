@@ -1,4 +1,6 @@
 import { useState } from "react";
+
+import { plotGeometry } from "../lib/chartScaffold";
 import { InfoMarker } from "./InfoMarker";
 import {
   densityOpacity,
@@ -57,9 +59,12 @@ export function LengthBasesHistogram({
   const bins = histogram.bins;
   if (!bins?.length) return null;
 
-  const pad = { top: 10, right: 14, bottom: 26, left: 44 };
-  const plotW = W - pad.left - pad.right;
-  const plotH = H - pad.top - pad.bottom;
+  const { pad, plotW, plotH } = plotGeometry(W, H, {
+    top: 10,
+    right: 14,
+    bottom: 26,
+    left: 44,
+  });
 
   const axis = lengthAxis(
     bins[0].length_bin,
@@ -206,9 +211,12 @@ export function LengthQualityDensityChart({
   const cells = density.cells;
   if (!cells?.length) return null;
 
-  const pad = { top: 10, right: 14, bottom: 26, left: 30 };
-  const plotW = W - pad.left - pad.right;
-  const plotH = H - pad.top - pad.bottom;
+  const { pad, plotW, plotH } = plotGeometry(W, H, {
+    top: 10,
+    right: 14,
+    bottom: 26,
+    left: 30,
+  });
 
   const lengthStarts = [...new Set(cells.map((c) => c[0]))].sort((a, b) => a - b);
   // Bin width in log space is fixed by the backend's bins-per-decade, so the

@@ -1,5 +1,9 @@
 import { useState } from "react";
-import { lineThroughGaps, useChartScaffold } from "../lib/chartScaffold";
+import {
+  lineThroughGaps,
+  plotGeometry,
+  useChartScaffold,
+} from "../lib/chartScaffold";
 
 /**
  * Base-composition pie and per-position quality curve.
@@ -543,11 +547,13 @@ export function LengthDistributionChart({
   const [hover, setHover] = useState<LengthBucket | null>(null);
   if (!buckets?.length) return null;
 
-  const w = 460;
-  const h = 210;
-  const pad = { top: 10, right: 14, bottom: 26, left: 34 };
-  const plotW = w - pad.left - pad.right;
-  const plotH = h - pad.top - pad.bottom;
+  const {
+    width: w,
+    height: h,
+    pad,
+    plotW,
+    plotH,
+  } = plotGeometry(460, 210, { top: 10, right: 14, bottom: 26, left: 34 });
 
   const minLen = buckets[0].length_bin;
   const maxLen = buckets[buckets.length - 1].length_bin;

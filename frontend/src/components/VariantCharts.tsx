@@ -5,6 +5,8 @@
  * charting library would outweigh the rest of the bundle.
  */
 
+import { plotGeometry } from "../lib/chartScaffold";
+
 export function VariantDensityChart({
   bins,
   boundaries,
@@ -16,9 +18,12 @@ export function VariantDensityChart({
 
   const w = 720;
   const h = 140;
-  const pad = { top: 10, right: 12, bottom: 20, left: 12 };
-  const plotW = w - pad.left - pad.right;
-  const plotH = h - pad.top - pad.bottom;
+  const { pad, plotW, plotH } = plotGeometry(w, h, {
+    top: 10,
+    right: 12,
+    bottom: 20,
+    left: 12,
+  });
 
   const maxVal = Math.max(...bins, 1);
   const barW = plotW / bins.length;
@@ -107,9 +112,12 @@ export function DistributionChart({
 
   const w = 320;
   const h = 120;
-  const pad = { top: 6, right: 6, bottom: 18, left: 6 };
-  const plotW = w - pad.left - pad.right;
-  const plotH = h - pad.top - pad.bottom;
+  const { pad, plotW, plotH } = plotGeometry(w, h, {
+    top: 6,
+    right: 6,
+    bottom: 18,
+    left: 6,
+  });
 
   const maxCount = Math.max(...buckets.map((b) => b.count), 1);
   const barW = plotW / buckets.length;
@@ -174,9 +182,12 @@ export function IndelLengthChart({
 
   const w = 320;
   const h = 120;
-  const pad = { top: 6, right: 6, bottom: 18, left: 6 };
-  const plotW = w - pad.left - pad.right;
-  const plotH = h - pad.top - pad.bottom;
+  const { pad, plotW, plotH } = plotGeometry(w, h, {
+    top: 6,
+    right: 6,
+    bottom: 18,
+    left: 6,
+  });
 
   // Separate into deletions (negative) and insertions (positive), sorted by
   // length so bars are drawn in order from the zero line outward.

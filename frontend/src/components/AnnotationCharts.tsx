@@ -1,5 +1,6 @@
 import { useState } from "react";
 import type { AnnotationContigStat, AnnotationLengthBin } from "../api/types";
+import { plotGeometry } from "../lib/chartScaffold";
 
 /**
  * Charts for the annotation-file (GFF/GTF) Results view. Hand-rolled SVG,
@@ -146,9 +147,12 @@ function PerContigBarChart({
 
   const w = 720;
   const h = 160;
-  const pad = { top: 10, right: 12, bottom: 20, left: 40 };
-  const plotW = w - pad.left - pad.right;
-  const plotH = h - pad.top - pad.bottom;
+  const { pad, plotW, plotH } = plotGeometry(w, h, {
+    top: 10,
+    right: 12,
+    bottom: 20,
+    left: 40,
+  });
 
   const maxVal = Math.max(...shown.map((d) => d.value), 1);
   const barW = plotW / shown.length;
@@ -269,9 +273,12 @@ export function LengthHistogram({ bins }: { bins: AnnotationLengthBin[] }) {
 
   const w = 720;
   const h = 140;
-  const pad = { top: 10, right: 12, bottom: 24, left: 12 };
-  const plotW = w - pad.left - pad.right;
-  const plotH = h - pad.top - pad.bottom;
+  const { pad, plotW, plotH } = plotGeometry(w, h, {
+    top: 10,
+    right: 12,
+    bottom: 24,
+    left: 12,
+  });
 
   const maxCount = Math.max(...bins.map((b) => b.count), 1);
   const barW = plotW / bins.length;

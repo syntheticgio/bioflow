@@ -1,6 +1,6 @@
 import { useState } from "react";
 
-import { useChartScaffold } from "../lib/chartScaffold";
+import { plotGeometry, useChartScaffold } from "../lib/chartScaffold";
 
 /**
  * Adapter content and duplication levels.
@@ -198,11 +198,13 @@ export function DuplicationLevelsChart({
   const [hover, setHover] = useState<number | null>(null);
   if (!labels?.length || !percentages?.length) return null;
 
-  const w = 460;
-  const h = 210;
-  const pad = { top: 10, right: 12, bottom: 34, left: 34 };
-  const plotW = w - pad.left - pad.right;
-  const plotH = h - pad.top - pad.bottom;
+  const {
+    width: w,
+    height: h,
+    pad,
+    plotW,
+    plotH,
+  } = plotGeometry(460, 210, { top: 10, right: 12, bottom: 34, left: 34 });
 
   const yMax = Math.max(Math.ceil(Math.max(...percentages)), 1);
   const barW = plotW / labels.length;
