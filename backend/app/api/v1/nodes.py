@@ -23,7 +23,12 @@ from app.models.node_update import NodeUpdateTask
 from app.queue import node_stats as node_stats_mod
 from app.queue import worker_registry
 from app.queue.worker import _own_image_digest
-from app.services import node_ssh, node_storage_probe, node_update_service
+from app.services import (
+    node_ssh,
+    node_storage_probe,
+    node_update_service,
+    storage_check_service,
+)
 from app.services.ai import crypto
 from app.version import __version__
 
@@ -129,6 +134,22 @@ class UpdateRequest(BaseModel):
     """Whether to let running jobs finish before swapping the image."""
 
     drain: bool = True
+
+
+class StorageCheckRequest(BaseModel):
+    """Paths the operator supplies for nodes that have none recorded.
+
+    Maps node id to that node's BIOINFO_HOME as the node sees it. Optional,
+    and expected to be empty on the first run: #844 writes
+    `Node.storage_location` only at provision time, so a pre-#844 deployment's
+    first sweep reports every node as needing one. The second run carries them.
+
+    Deliberately not defaulted to `ProvisionRequest`'s "/data/scratch" -- see
+    `storage_check_service`. A form default is not a record of what a node was
+    given, and probing the wrong directory answers `false` confidently.
+    """
+
+    storage_locations: dict[str, str] = {}
 
 
 class ProvisionStatusOut(BaseModel):
@@ -1278,6 +1299,56 @@ async def check_node_storage(node_id: str) -> dict:
         "storage_location": node.storage_location,
         "storage_checked_at": node.storage_checked_at.isoformat(),
         "detail": probe.detail,
+    }
+
+
+@router.post("/storage-check")
+async def sweep_storage_check(req: StorageCheckRequest | None = None) -> dict:
+    """Probe every enrolled node's shared storage in one pass.
+
+    #846: the migration for a deployment whose nodes were enrolled before
+    `storage_shared` existed. Those nodes read `None`, #845 treats `None` as
+    not-shared, and the deployment would lose capacity it has been using
+    correctly -- so the fleet gets probed into real answers before #845
+    lands and starts trusting them.
+
+    Not "migrate the nodes that are unrecorded": it re-probes everything,
+    every run. That is what makes it safe to re-run after a share is
+    unmounted, and what lets the same endpoint serve periodic
+    re-verification later rather than needing a second one.
+
+    Synchronous, like #844's per-node probe and unlike provisioning. This is
+    N connects at single-digit N, which fits an ordinary request; copying
+    provisioning's task-and-poll machinery would be machinery with nothing
+    to do.
+
+    Named `/nodes/storage-check` rather than `/nodes/check-storage` so it is
+    one segment where the per-node probe is two (`/nodes/{id}/check-storage`)
+    -- the fleet operation and the per-node one cannot shadow each other.
+    """
+    outcomes = await storage_check_service.sweep_node_storage(
+        req.storage_locations if req else None
+    )
+    return {
+        "nodes": [
+            {
+                "node_id": o.node_id,
+                "outcome": o.outcome,
+                "storage_shared": o.storage_shared,
+                "storage_location": o.storage_location,
+                "detail": o.detail,
+            }
+            for o in outcomes
+        ],
+        # A caller wanting "did this migrate anything?" should not have to
+        # re-derive it from the list.
+        "checked": sum(
+            1
+            for o in outcomes
+            if o.outcome
+            in (storage_check_service.SHARED, storage_check_service.NOT_SHARED)
+        ),
+        "total": len(outcomes),
     }
 
 
