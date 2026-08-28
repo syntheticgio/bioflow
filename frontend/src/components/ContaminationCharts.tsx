@@ -1,5 +1,7 @@
 import { useState } from "react";
 
+import { useChartScaffold } from "../lib/chartScaffold";
+
 /**
  * Adapter content and duplication levels.
  *
@@ -28,6 +30,9 @@ const SERIES_COLORS = [
   "var(--base-n, #8b949e)",
 ];
 
+// Wide on the right: the legend sits in that gutter, outside the plot area.
+const ADAPTER_PAD = { top: 10, right: 96, bottom: 26, left: 34 };
+
 export function AdapterContentChart({
   positions,
   series,
@@ -35,7 +40,21 @@ export function AdapterContentChart({
   positions: number[];
   series: AdapterSeries[];
 }) {
-  const [hover, setHover] = useState<number | null>(null);
+  const {
+    width: w,
+    height: h,
+    pad,
+    plotW,
+    plotH,
+    hover,
+    onMouseMove,
+    clearHover,
+  } = useChartScaffold(460, 210, ADAPTER_PAD, (fraction, { plotFraction }) => {
+    // Against the plot area, not the whole SVG: the 96px right margin holding
+    // the legend would otherwise shift every hover several positions left.
+    const idx = Math.round(plotFraction(fraction) * (positions.length - 1));
+    return idx >= 0 && idx < positions.length ? idx : null;
+  });
   if (!positions?.length || !series?.length) return null;
 
   // A probe that never matched is not a finding, and six flat lines along the
@@ -50,12 +69,6 @@ export function AdapterContentChart({
       </div>
     );
   }
-
-  const w = 460;
-  const h = 210;
-  const pad = { top: 10, right: 96, bottom: 26, left: 34 };
-  const plotW = w - pad.left - pad.right;
-  const plotH = h - pad.top - pad.bottom;
 
   // Scaled to what was observed, not to 100%. A 4% adapter curve flattened
   // against a full-height axis communicates nothing, and 4% is worth seeing.
@@ -74,14 +87,8 @@ export function AdapterContentChart({
         width="100%"
         viewBox={`0 0 ${w} ${h}`}
         style={{ maxWidth: w, display: "block" }}
-        onMouseLeave={() => setHover(null)}
-        onMouseMove={(e) => {
-          const box = e.currentTarget.getBoundingClientRect();
-          const px = ((e.clientX - box.left) / box.width) * w;
-          const frac = (px - pad.left) / plotW;
-          const idx = Math.round(frac * (positions.length - 1));
-          setHover(idx >= 0 && idx < positions.length ? idx : null);
-        }}
+        onMouseLeave={clearHover}
+        onMouseMove={onMouseMove}
       >
         {ticks.map((t) => (
           <g key={t}>
