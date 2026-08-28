@@ -4,6 +4,7 @@ import { api } from "../api/client";
 import { BioIcon } from "../icons/BioIcon";
 import { useMessageStore } from "../stores/messageStore";
 import { AgentPanel } from "./AgentPanel";
+import { MessagesPanel } from "./MessagesPanel";
 import { QueuePanel } from "./QueuePanel";
 
 export function Footer({
@@ -14,8 +15,16 @@ export function Footer({
   projectId?: string;
 }) {
   const latest = useMessageStore((s) => s.latest);
+  const pinnedError = useMessageStore((s) => s.error);
+  const dismissError = useMessageStore((s) => s.dismissError);
+  const messageCount = useMessageStore((s) => s.messages.length);
   const [queueOpen, setQueueOpen] = useState(false);
   const [agentOpen, setAgentOpen] = useState(false);
+  const [messagesOpen, setMessagesOpen] = useState(false);
+
+  // A pinned error wins over `latest` so a background info/success notice
+  // cannot overwrite the only on-screen report of a failure (#890).
+  const shown = pinnedError ?? latest;
 
   const { data, isError } = useQuery({
     queryKey: ["system", "stats"],
@@ -33,10 +42,28 @@ export function Footer({
       {agentOpen && projectId && (
         <AgentPanel projectId={projectId} onClose={() => setAgentOpen(false)} />
       )}
+      {messagesOpen && <MessagesPanel onClose={() => setMessagesOpen(false)} />}
     <footer className="footer">
-      <span className={`footer-message ${latest?.level ?? ""}`}>
-        {latest?.text ?? "Ready"}
-      </span>
+      <div className="footer-message-slot">
+        <div
+          className={`footer-message ${shown?.level ?? ""}`}
+          role={pinnedError ? "alert" : "status"}
+          aria-live={pinnedError ? "assertive" : "polite"}
+        >
+          {shown?.text ?? "Ready"}
+        </div>
+        {pinnedError && (
+          <button
+            type="button"
+            className="footer-message-dismiss"
+            onClick={dismissError}
+            title="Dismiss this error"
+            aria-label="Dismiss this error"
+          >
+            ×
+          </button>
+        )}
+      </div>
 
       {queue && (
         <button
@@ -46,6 +73,18 @@ export function Footer({
           onClick={() => setQueueOpen((o) => !o)}
         >
           {queue.ready + queue.delayed} queued · {queue.running} running
+        </button>
+      )}
+
+      {messageCount > 0 && (
+        <button
+          type="button"
+          className="footer-link"
+          title="Show the message log"
+          onClick={() => setMessagesOpen((o) => !o)}
+        >
+          <BioIcon name="activity" size={14} /> Messages
+          <span className="footer-message-count">{messageCount}</span>
         </button>
       )}
 
