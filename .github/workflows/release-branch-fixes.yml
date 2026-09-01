@@ -39,7 +39,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Label each issue the PR closes
-        uses: actions/github-script@v8
+        uses: actions/github-script@v9
         env:
           PR_BODY: ${{ github.event.pull_request.body }}
         with:
@@ -120,7 +120,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Remove the label if present
-        uses: actions/github-script@v8
+        uses: actions/github-script@v9
         with:
           script: |
             const LABEL = 'status:fixed-in-release-branch'
